@@ -13,15 +13,17 @@ from bounding_box import BoundingBox
 import pandas as pd
 from wilds import get_dataset
 from tqdm import tqdm
+from geopy.distance import geodesic
+from geopy.point import Point
 
 tqdm.pandas()
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
+DEST_DIR = DATA_DIR / "fmow_landsat"
 METADATA_DIR = DATA_DIR / "groundtruth"
 
-
-if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR) and os.path.exists(METADATA_DIR)):
+if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR) and os.path.exists(METADATA_DIR) and os.path.exists(DEST_DIR)):
     raise NotADirectoryError()
 
 
@@ -56,17 +58,36 @@ def build_fmow_metadata_path(wilds_metadata_sample: pd.core.series.Series) -> st
     return METADATA_DIR / split / category / f"{category}_{unique_sample_idx}" / f"{img_filename_base}.json"
 
 
+def compute_img_span_km(img_center_lon: float, img_center_lat: float, img_span_lat: float) -> float:
+    """Compute the distance in kilometer of the image span in latitude direction.
+
+    Args:
+        img_center_lon (float): Longitude of the image center.
+        img_center_lat (float): Latitude of the image center. 
+        img_span_lat (float): Span of the image (north to south) in degrees latitude.  
+
+    Returns:
+        float: Span of the image in kilometer. 
+    """
+    # Offset is half the image span. Turn offset negative on the southern hemisphere
+    lat_offset = (img_span_lat / 2) if img_center_lat > 0 else - \
+        (img_span_lat / 2)
+    img_nothern = Point(img_center_lat + lat_offset, img_center_lon)
+    img_southern = Point(img_center_lat - lat_offset, img_center_lon)
+    return geodesic(img_nothern, img_southern).km
+
+
 def compute_center_coordinates_and_span(fmow_metadata_sample: pd.core.series.Series) -> tuple[tuple[float, float], float]:
-    """Compute the coordinates of the image center and the image span in degrees.
+    """Compute the coordinates of the image center and the image span in kilometer.
 
     The coordinates of the bounding box are extracted together with the image width and height.
-    Both are used to interpolate the image center coordinates as well as the image span in degrees.
+    Both are used to interpolate the image center coordinates as well as the image span in kilometer.
 
     Args:
         fmow_metadata_sample (pd.core.series.Series): Metadata of the original fmow dataset. 
 
     Returns:
-        list: Center coordinates and image span in degree. 
+        list: Center coordinates and image span in kilometer. 
     """
     box_info = fmow_metadata_sample.get('bounding_boxes')[0]
     box = box_info.get('box')
@@ -88,15 +109,18 @@ def compute_center_coordinates_and_span(fmow_metadata_sample: pd.core.series.Ser
         top_left_to_center_fraction[1] * bbox.get_height_deg()
 
     if img_width > img_height:
-        img_span_deg = img_height / box_height * bbox.get_height_deg()
+        img_span_lat = img_height / box_height * bbox.get_height_deg()
     else:
-        img_span_deg = img_width / box_width * bbox.get_width_deg()
+        img_span_lat = img_width / box_height * bbox.get_height_deg()
 
-    if img_span_deg > 0.1:
+    if img_span_lat > 0.1:
         warnings.warn(
-            f"Very large image span of {img_span_deg} found. Probably miscalculation at {fmow_metadata_sample.get('img_filename')}!"
+            f"Very large image span of {img_span_lat} found. Probably miscalculation at {fmow_metadata_sample.get('img_filename')}!"
         )
-    return (center_lon, center_lat), img_span_deg
+
+    img_span_km = compute_img_span_km(center_lon, center_lat, img_span_lat)
+
+    return (center_lon, center_lat), img_span_km
 
 
 def extract_center_coords_and_img_span(wilds_metadata_sample):
@@ -105,19 +129,19 @@ def extract_center_coords_and_img_span(wilds_metadata_sample):
         return pd.Series(
             {"img_center_lon": None,
              "img_center_lat": None,
-             "img_span_deg": None}
+             "img_span_km": None}
         )
 
     with open(build_fmow_metadata_path(wilds_metadata_sample), 'r') as file:
         fmow_metadata_sample = json.load(file)
 
-    (center_lon, center_lat), img_span_deg = compute_center_coordinates_and_span(
+    (center_lon, center_lat), img_span_km = compute_center_coordinates_and_span(
         fmow_metadata_sample)
 
     return pd.Series(
         {"img_center_lon": center_lon,
          "img_center_lat": center_lat,
-         "img_span_deg": img_span_deg}
+         "img_span_km": img_span_km}
     )
 
 
@@ -127,7 +151,8 @@ def main():
     coords_and_span = metadata.progress_apply(
         extract_center_coords_and_img_span, axis=1)
     metadata_extended = pd.concat([metadata, coords_and_span], axis=1)
-    metadata_extended.to_csv(DATA_DIR / "rgb_metadata_wilds_extended.csv")
+    metadata_extended.to_csv(
+        DEST_DIR / "rgb_metadata_extended.csv", index=False)
 
 
 if __name__ == "__main__":
