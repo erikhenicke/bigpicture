@@ -25,7 +25,8 @@ tqdm.pandas()
 pandarallel.initialize()
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
+DATA_DIR = PROJECT_ROOT.parent.parent.parent / \
+    "datasets4" / "FMoW_LandSat" / "fmow_landsat"
 IMAGES_DIR = DATA_DIR / "images"
 EE_PROJECT_NAME = 'seeing-the-big-picture'
 EXTENSION_FACTOR = 6.0

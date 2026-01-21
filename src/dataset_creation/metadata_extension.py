@@ -20,7 +20,7 @@ tqdm.pandas()
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
-DEST_DIR = DATA_DIR / "fmow_landsat"
+DEST_DIR = PROJECT_ROOT.parent.parent.parent / "datasets4" / "FMoW_LandSat" / "fmow_landsat"
 METADATA_DIR = DATA_DIR / "groundtruth"
 
 if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR) and os.path.exists(METADATA_DIR) and os.path.exists(DEST_DIR)):
