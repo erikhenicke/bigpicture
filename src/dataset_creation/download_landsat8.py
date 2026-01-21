@@ -153,31 +153,49 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
         dim (int): Image pixel dimension to download.
     """
 
-    print("Get request")
     image_request, region, is_single_image_request = get_requests(
         sample_metadata, l8, span_km
     )
-    print("Got request")
-    print(type(is_single_image_request))
-    # print(is_single_image_request.getInfo())
 
     sample_idx = sample_metadata.name
     download_path = IMAGES_DIR / f"image_{sample_idx}.png"
-    image_dimensions = f"{dim}x{dim}"
+    # image_dimensions = f"{dim}x{dim}"
 
-    url = image_request.getThumbURL({
+    # task = ee.batch.Export.image.toDrive(image=image_request,
+    #                                      description=f"image_{sample_idx}",
+    #                                      folder=IMAGES_DIR.as_posix(),
+    #                                      region=region,
+    #                                      scale=30,
+    #                                      maxPixels=1e9,
+    #                                      fileFormat='GeoTIFF')
+
+    # task.start()
+
+    print(f"Start download of {sample_idx}")
+    url = image_request.getDownloadUrl({
+        'bands': ['SR_B4', 'SR_B3', 'SR_B2'],
         'region': region,
-        'dimensions': image_dimensions,
-        'format': 'png'})
+        'scale': 30,
+        'format': 'GeoTIFF'
+    })
     print(url)
+    response = requests.get(url)
+    with open(download_path, 'wb') as fd:
+        fd.write(response.content)
 
-    # Handle downloading the actual pixels.
-    r = requests.get(url, stream=True)
-    if r.status_code != 200:
-        raise r.raise_for_status()
+    # url = image_request.getThumbURL({
+    #     'region': region,
+    #     'dimensions': image_dimensions,
+    #     'format': 'png'})
+    # print(url)
 
-    with open(download_path, 'wb') as out_file:
-        shutil.copyfileobj(r.raw, out_file)
+    # # Handle downloading the actual pixels.
+    # r = requests.get(url, stream=True)
+    # if r.status_code != 200:
+    #     raise r.raise_for_status()
+
+    # with open(download_path, 'wb') as out_file:
+    #     shutil.copyfileobj(r.raw, out_file)
     print("Done: ", sample_idx)
 
 
@@ -204,7 +222,7 @@ def main():
         print("Please authenticate Earth Engine: earthengine authenticate")
         raise e
 
-     l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+    l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
           .map(scale_l8))
 
     metadata = pd.read_csv(
@@ -218,13 +236,15 @@ def main():
 
     max_span = metadata_selected["img_span_km"].max()
     print(max_span)
-    download_span = max_span * EXTENSION_FACTOR
+    download_span = max_span * EXTENSION_FACTOR / 60
+    print(download_span)
     sample = metadata_selected.loc[metadata_selected["img_span_km"] == max_span].squeeze(
     )
     region = extract_region_of_interest(
         sample, download_span)
     image_size = region.area().getInfo() / (SCALE ** 2)
     image_dimension = int(image_size ** (1/2))
+    print(image_dimension)
 
     test_subset = metadata_selected.sample(n=1)
 
