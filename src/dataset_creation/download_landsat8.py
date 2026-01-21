@@ -25,7 +25,7 @@ tqdm.pandas()
 pandarallel.initialize()
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
+DATA_DIR = PROJECT_ROOT.parent.parent.parent / "datasets4" / "FMoW_LandSat" / "fmow_landsat"
 IMAGES_DIR = DATA_DIR / "images"
 EE_PROJECT_NAME = 'seeing-the-big-picture'
 EXTENSION_FACTOR = 6.0
@@ -204,8 +204,7 @@ def main():
         print("Please authenticate Earth Engine: earthengine authenticate")
         raise e
 
-     l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
-          .map(scale_l8))
+    l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').map(scale_l8))
 
     metadata = pd.read_csv(
         DATA_DIR / "rgb_metadata_extended.csv")
