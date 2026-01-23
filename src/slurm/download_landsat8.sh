@@ -10,4 +10,4 @@
 source ~/.bashrc
 acti-conda
 conda activate wilds 
-python3 /home/henicke/git/bigpicture/src/dataset_creation/download_landsat8_subset.py
+python3 /home/henicke/git/bigpicture/src/dataset_creation/download_landsat8.py

@@ -164,8 +164,6 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
                 sample_metadata, l8, span_km
             )
         except Exception as e:           
-            # TODO: remove
-            raise e
             logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
             attempts_left -= 1
             time.sleep(1 + random.uniform(0, 1))
@@ -191,8 +189,6 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
                 shutil.copyfileobj(response.raw, out_file)
 
         except Exception as e:
-            # TODO: remove
-            raise e
             logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
             attempts_left -= 1
             time.sleep(1 + random.uniform(0, 1))
