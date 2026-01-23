@@ -3,35 +3,34 @@ download_landsat8.py
 
 This script downloads landsat8 satellite imagery for each fmow sample (WILDS version, [train, val, test]).
 """
-import json
 import os
-import warnings
 import pathlib
 from functools import partial
 import time
-import requests
 import shutil
+import random
+import logging
+import typing
 
+import requests
 import numpy as np
 import pandas as pd
 from pandarallel import pandarallel
-from wilds import get_dataset
-from tqdm import tqdm
 import ee
 from geopy.distance import geodesic
 from geopy.point import Point
 
-tqdm.pandas()
-pandarallel.initialize()
+pandarallel.initialize(nb_workers=16, progress_bar=True)
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT.parent.parent.parent / \
     "datasets4" / "FMoW_LandSat" / "fmow_landsat"
 IMAGES_DIR = DATA_DIR / "images"
 EE_PROJECT_NAME = 'seeing-the-big-picture'
-EXTENSION_FACTOR = 6.0
+EXTENSION_FACTOR = 3.0
 SCALE = 30.0
 MAX_PIXELS = 1e8
+LOG_FILE = 'download.log'
 
 
 def compute_img_span(img_center_lon: float, img_center_lat: float, img_span_km: float) -> tuple[float, float]:
@@ -76,31 +75,25 @@ def extract_region_of_interest(sample_metadata: pd.Series, span_km: float) -> ee
     return ee.Geometry.Rectangle(extended_bounds)
 
 
-def mask_l8_clouds(image: ee.Image) -> ee.Image:
-    """Updates an image mask, to filter out cloudy pixels.
+def mask_clouds_compute_validity(image: ee.Image, region_of_interest: ee.Geometry.Rectangle) -> ee.Image:
+    """Updates an image mask, to filter out cloudy pixels and compute the fraction of non-masked pixels in the ROI.
 
     For a detailed description of the 'QA_PIXEL' flags see:
         https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands
+
+    Args:
+        image (ee.Image): Image to filter clouds from.
+        region_of_interest (ee.Geometry.Rectangle): Region to compute the fraction of non-masked pixels of the image for.
+    Returns:
+        ee.Image: Image that also holds the fraction of pixels, which are not masked.
     """
     qa = image.select('QA_PIXEL')
     # Only pixels for which the first 5 bits equal zero are not masked away.
     cloud_mask = qa.bitwiseAnd(int('11111', 2)).eq(0)
-    return image.updateMask(cloud_mask)
+    masked_image = image.updateMask(cloud_mask)
 
-
-def compute_validity_fraction(image: ee.Image, region_of_interest: ee.Geometry.Rectangle) -> ee.Number:
-    """Computes the fraction of valid pixels of an image.
-
-    Valid pixels are those, which are not masked away, i.e. whose
-    mask value is equal to one.
-
-    Args:
-        image (ee.Image): Image to compute the validity for.
-    Returns:
-        ee.Number: Fraction of pixels, which are not masked.
-    """
-    return ee.Number(
-        image.select(['SR_B4', 'SR_B3', 'SR_B2'])
+    validity = ee.Number(
+        masked_image.select(['SR_B4', 'SR_B3', 'SR_B2'])
         .mask()
         .reduce(ee.Reducer.min())
         .reduceRegion(
@@ -110,16 +103,7 @@ def compute_validity_fraction(image: ee.Image, region_of_interest: ee.Geometry.R
             maxPixels=MAX_PIXELS)
         .get('min')
     )
-
-
-def add_validity(collection: ee.ImageCollection, region_of_interest: ee.Geometry.Rectangle) -> ee.ImageCollection:
-    """Stacks API call to compute the fraction of valid pixels for each image in l8."""
-    return collection.map(lambda img: img.set('validity', compute_validity_fraction(img, region_of_interest)))
-
-
-def get_least_cloudy_single_image(collection: ee.ImageCollection, region_of_interest: ee.Geometry.Rectangle) -> ee.Image:
-    """Return least cloudy image of the collection for the region."""
-    return add_validity(collection, region_of_interest).sort('validity', False).first()
+    return typing.cast(ee.Image, masked_image.set('validity', validity))
 
 
 def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float) -> tuple[ee.Image, ee.Geometry.Rectangle, ee.Number]:
@@ -136,22 +120,31 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
         tuple[ee.Image, ee.Geometry.Rectangle, ee.Number]: Request for least cloudy image, region, and bool that says if a composite will be returned.
     """
     region_of_interest = extract_region_of_interest(sample_metadata, span_km)
-    l8_cloud_masked = l8.map(mask_l8_clouds)
-    least_cloudy = get_least_cloudy_single_image(
-        l8_cloud_masked, region_of_interest)
+    l8_cloud_masked = (l8
+                       .filterBounds(region_of_interest)
+                       .filterMetadata('CLOUD_COVER', 'less_than', 50)
+                       .map(lambda img:
+                            mask_clouds_compute_validity(
+                                img, region_of_interest))
+                       )
+    least_cloudy = l8_cloud_masked.sort('validity', False).first()
     least_cloudy_is_ok = ee.Number(least_cloudy.get('validity')).gte(0.99)
     mosaic = l8_cloud_masked.mosaic()
-    return (ee.Image(ee.Algorithms.If(least_cloudy_is_ok, least_cloudy, mosaic)), region_of_interest, least_cloudy_is_ok)
+    optical_bands = ['SR_B4', 'SR_B3', 'SR_B2']
+    vis_params = {'bands': optical_bands, 'min': 0, 'max': 0.3}
+    final_image = ee.Image(ee.Algorithms.If(
+        least_cloudy_is_ok, least_cloudy, mosaic)).visualize(**vis_params)
+    return (final_image, region_of_interest, least_cloudy_is_ok)
 
 
-def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float, dim: int):
+def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float, logger: logging.Logger):
     """Downloads Landsat8 image from Google Earth Engine for the image coordinates of the given sample.
 
     Args:
         sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
         l8 (ee.ImageCollection): Landsat8 image collection to download image from.
         span_km (float): Image size in kilometer to download.
-        dim (int): Image pixel dimension to download.
+        logger (logging.Logger):
     """
 
     image_request, region, is_single_image_request = get_requests(
@@ -159,45 +152,32 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
     )
 
     sample_idx = sample_metadata.name
-    download_path = IMAGES_DIR / f"image_{sample_idx}.png"
-    # image_dimensions = f"{dim}x{dim}"
+    download_path = IMAGES_DIR / f"rgb_image_{sample_idx}.png"
 
-    # task = ee.batch.Export.image.toDrive(image=image_request,
-    #                                      description=f"image_{sample_idx}",
-    #                                      folder=IMAGES_DIR.as_posix(),
-    #                                      region=region,
-    #                                      scale=30,
-    #                                      maxPixels=1e9,
-    #                                      fileFormat='GeoTIFF')
+    attempts = 30
+    attempts_left = attempts
+    while attempts_left > 0:
+        try:
+            url = image_request.getDownloadUrl({
+                'region': region,
+                'scale': 30,
+                'format': 'PNG'
+            })
+            response = requests.get(url, stream=True)
 
-    # task.start()
+            if response.status_code != 200:
+                raise response.raise_for_status()
 
-    print(f"Start download of {sample_idx}")
-    url = image_request.getDownloadUrl({
-        'bands': ['SR_B4', 'SR_B3', 'SR_B2'],
-        'region': region,
-        'scale': 30,
-        'format': 'GeoTIFF'
-    })
-    print(url)
-    response = requests.get(url)
-    with open(download_path, 'wb') as fd:
-        fd.write(response.content)
+            with open(download_path, 'wb') as out_file:
+                shutil.copyfileobj(response.raw, out_file)
 
-    # url = image_request.getThumbURL({
-    #     'region': region,
-    #     'dimensions': image_dimensions,
-    #     'format': 'png'})
-    # print(url)
-
-    # # Handle downloading the actual pixels.
-    # r = requests.get(url, stream=True)
-    # if r.status_code != 200:
-    #     raise r.raise_for_status()
-
-    # with open(download_path, 'wb') as out_file:
-    #     shutil.copyfileobj(r.raw, out_file)
-    print("Done: ", sample_idx)
+        except Exception as e:
+            raise e
+            logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
+            attempts_left -= 1
+            time.sleep(1 + random.uniform(0, 1))
+        else:
+            break
 
 
 def scale_l8(image):
@@ -223,9 +203,23 @@ def main():
         print("Please authenticate Earth Engine: earthengine authenticate")
         raise e
 
+    # Initialize logging
+    logger = logging.getLogger('download')
+    logger.setLevel(logging.INFO)
+
+    file_handler = logging.FileHandler(LOG_FILE, mode='w')
+    file_handler.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+
+    # Setup Image collection
     l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
           .map(scale_l8))
 
+    # Read metadata
     metadata = pd.read_csv(
         DATA_DIR / "rgb_metadata_extended.csv")
 
@@ -236,26 +230,19 @@ def main():
     metadata_selected = metadata.loc[is_train_val_test]
 
     max_span = metadata_selected["img_span_km"].max()
-    print(max_span)
-    download_span = max_span * EXTENSION_FACTOR / 60
-    print(download_span)
-    sample = metadata_selected.loc[metadata_selected["img_span_km"] == max_span].squeeze(
-    )
-    region = extract_region_of_interest(
-        sample, download_span)
-    image_size = region.area().getInfo() / (SCALE ** 2)
-    image_dimension = int(image_size ** (1/2))
-    print(image_dimension)
+    download_span = max_span * EXTENSION_FACTOR
 
-    test_subset = metadata_selected.sample(n=1)
+    test_size = 100
+    test_subset = metadata_selected.sample(n=test_size)
 
     download_l8_image = partial(
-        download_image, l8=l8, span_km=download_span, dim=image_dimension)
+        download_image, l8=l8, span_km=download_span, logger=logger)
 
     start = time.time()
-    test_subset.apply(download_l8_image, axis=1)
+    test_subset.parallel_apply(download_l8_image, axis=1)
     end = time.time()
-    print(end - start)
+    logger.info("Download of %d images took %s seconds.",
+                test_size, f"{end - start:.2f}")
 
 
 if __name__ == '__main__':
