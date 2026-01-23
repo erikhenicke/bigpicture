@@ -20,7 +20,7 @@ import ee
 from geopy.distance import geodesic
 from geopy.point import Point
 
-pandarallel.initialize(nb_workers=20, progress_bar=True)
+pandarallel.initialize(nb_workers=20)
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT.parent.parent.parent / \
@@ -264,6 +264,7 @@ def main():
     end = time.time()
     logger.info("Download of %d images took %s seconds.",
                 size, f"{end - start:.2f}")
+    print(f"Download of {size} images took {end - start:.2f} seconds.")
 
     test_subset_downloaded = pd.concat([metadata_selected, download_metadata], axis=1)
     test_subset_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
