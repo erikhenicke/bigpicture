@@ -172,7 +172,6 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
         else:
             break
 
-
     sample_idx = sample_metadata.name
     download_path = IMAGES_DIR / f"rgb_image_{sample_idx}.png"
 
@@ -190,9 +189,6 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
 
             with open(download_path, 'wb') as out_file:
                 shutil.copyfileobj(response.raw, out_file)
-
-            if is_single_image:
-                date = image_request.date().getInfo()
 
         except Exception as e:
             # TODO: remove
@@ -254,23 +250,25 @@ def main():
 
     # Sample size of metadata_selected is 470,086
     metadata_selected = metadata.loc[is_train_val_test]
-    size = len(metadata_selected)
 
     max_span = metadata_selected["img_span_km"].max()
     download_span = max_span * EXTENSION_FACTOR
     logger.info("Download span of %f km was used (%d times the biggest sample span).", download_span, EXTENSION_FACTOR)
 
+    test_size = 1000 
+    test_subset = metadata_selected.sample(n=test_size)
+
     download_l8_image = partial(
         download_image, l8=l8, span_km=download_span, logger=logger)
 
     start = time.time()
-    download_metadata = metadata_selected.parallel_apply(download_l8_image, axis=1)
+    download_metadata = test_subset.parallel_apply(download_l8_image, axis=1)
     end = time.time()
     logger.info("Download of %d images took %s seconds.",
-                size, f"{end - start:.2f}")
+                test_size, f"{end - start:.2f}")
 
-    test_subset_downloaded = pd.concat([metadata_selected, download_metadata], axis=1)
-    test_subset_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
+    test_subset_downloaded = pd.concat([test_subset, download_metadata], axis=1)
+    test_subset_downloaded.to_csv(DATA_DIR / "test.csv")
 
 
 if __name__ == '__main__':
