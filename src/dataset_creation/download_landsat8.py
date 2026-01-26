@@ -7,6 +7,8 @@ import os
 import pathlib
 from functools import partial
 import time
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import shutil
 import random
 import logging
@@ -23,14 +25,17 @@ from geopy.point import Point
 pandarallel.initialize(nb_workers=20)
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-DATA_DIR = PROJECT_ROOT.parent.parent.parent / \
-    "datasets4" / "FMoW_LandSat" / "fmow_landsat"
+# TODO
+# DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
+DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
+            "datasets4" / "FMoW_LandSat" / "fmow_landsat")
 IMAGES_DIR = DATA_DIR / "images"
+LOG_FILE = PROJECT_ROOT / 'download.log'
 EE_PROJECT_NAME = 'seeing-the-big-picture'
 EXTENSION_FACTOR = 3.0
 SCALE = 30.0
 MAX_PIXELS = 1e8
-LOG_FILE = PROJECT_ROOT / 'download.log'
+MIN_COL_SIZE = 10
 
 
 def compute_img_span(img_center_lon: float, img_center_lat: float, img_span_km: float) -> tuple[float, float]:
@@ -113,7 +118,7 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
 
     Args:
         sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
-        l8 (ee.ImageCollection): Landsat8 image collection to request image from.
+        l8 (ee.ImageCollection): Landsat8 image collection.
         span_km (float): Image size in kilometer to download.
 
     Returns:
@@ -134,52 +139,125 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
                        )
     least_cloudy = l8_cloud_masked.sort('validity', False).first()
     validity = ee.Number(least_cloudy.get('validity')).getInfo()
-    is_least_cloudy_ok = validity >= 0.99 
+    is_least_cloudy_ok = validity >= 0.99
     if is_least_cloudy_ok:
         date = least_cloudy.date().format(None, 'GMT').getInfo()
     mosaic = l8_cloud_masked.mosaic()
     optical_bands = ['SR_B4', 'SR_B3', 'SR_B2']
     vis_params = {'bands': optical_bands, 'min': 0, 'max': 0.3}
-    final_image = least_cloudy.visualize(**vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
+    final_image = least_cloudy.visualize(
+        **vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
     return (final_image, region_of_interest, is_least_cloudy_ok, date)
 
 
-def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float, logger: logging.Logger):
+def get_date_range(sample_metadata, day_span=30):
+    sample_date = datetime.strptime(
+        sample_metadata["timestamp"], '%Y-%m-%dT%H:%M:%SZ')
+    start_date = sample_date - relativedelta(days=(day_span // 2))
+    end_date = sample_date + relativedelta(days=(day_span // 2))
+    return (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+
+
+def filter_dates_and_roi(col, date_range, roi, contains_roi=True):
+    fcol = col.filterDate(date_range[0], date_range[1]) \
+        .filterBounds(roi)
+    if contains_roi:
+        return fcol.filter(ee.Filter.contains('.geo', roi))
+    return fcol
+
+
+def month_add(date: str, months_to_add=1) -> str:
+    ''' date should be string in `'2020-02-01' format`
+
+    Usage
+        `day_add('2020-12-30',days_to_add = 2)`
+
+    '''
+    date_time_obj = datetime.strptime(date, '%Y-%m-%d')
+    new_date_time_obj = date_time_obj + relativedelta(months=+months_to_add)
+    new_date_str = new_date_time_obj.strftime('%Y-%m-%d')
+    return new_date_str
+
+
+def get_landsat_col(l7, l8, date_range: tuple, region_of_interest):
+    l7_contains_roi = filter_dates_and_roi(
+        l7, date_range, region_of_interest, contains_roi=True)
+    l8_contains_roi = filter_dates_and_roi(
+        l8, date_range, region_of_interest, contains_roi=True)
+
+    l7_size = l7_contains_roi.size().getInfo()
+    l8_size = l8_contains_roi.size().getInfo()
+    is_l7_ok = l7_size > MIN_COL_SIZE
+    is_l8_ok = l8_size > MIN_COL_SIZE
+
+    if is_l7_ok or is_l8_ok:
+        return (l8_contains_roi, date_range, 'L8', l8_size) if is_l8_ok else (l7_contains_roi, date_range, 'L7', l7_size)
+
+    l7_overlaps_roi = filter_dates_and_roi(
+        l7, date_range, region_of_interest, contains_roi=False)
+    l8_overlaps_roi = filter_dates_and_roi(
+        l8, date_range, region_of_interest, contains_roi=False)
+
+    l7_size = l7_overlaps_roi.size().getInfo()
+    l8_size = l8_overlaps_roi.size().getInfo()
+    is_l7_ok = l7_size > MIN_COL_SIZE
+    is_l8_ok = l8_size > MIN_COL_SIZE
+
+    if is_l7_ok or is_l8_ok:
+        return (l8_overlaps_roi, date_range, 'L8', l8_size) if is_l8_ok else (l7_overlaps_roi, date_range, 'L7', l7_size)
+
+    new_date_0 = month_add(date_range[0], -1)
+    new_date_1 = month_add(date_range[1], 1)
+    return get_landsat_col(l7, l8, (new_date_0, new_date_1), region_of_interest)
+
+
+def get_median_request(sample_metadata, l7, l8, span_km):
+    region_of_interest = extract_region_of_interest(sample_metadata, span_km)
+    col, date_range, col_str, col_size = get_landsat_col(
+        l7, l8, get_date_range(sample_metadata), region_of_interest)
+    median_img = col.median()
+    return (median_img, region_of_interest, date_range, col_str, col_size)
+
+
+def download_image(sample_metadata: pd.Series, l7: ee.ImageCollection, l7_bands, l8: ee.ImageCollection, l8_bands, span_km: float, logger: logging.Logger):
     """Downloads Landsat8 image from Google Earth Engine for the image coordinates of the given sample.
 
     Args:
         sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
-        l8 (ee.ImageCollection): Landsat8 image collection to download image from.
+        l7 (ee.ImageCollection): Landsat7 image collection.
+        l8 (ee.ImageCollection): Landsat8 image collection.
         span_km (float): Image size in kilometer to download.
         logger (logging.Logger):
     """
-    date = None
-    is_single_image = True 
-
     attempts = 30
     attempts_left = attempts
     while attempts_left > 0:
         try:
-            image_request, region, is_single_image, date = get_requests(
-                sample_metadata, l8, span_km
+            image_request, region, date_range, col_str, col_size = get_median_request(
+                sample_metadata, l7, l8, span_km
             )
-        except Exception as e:           
+        except Exception as e:
             logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
             attempts_left -= 1
             time.sleep(1 + random.uniform(0, 1))
         else:
             break
 
-
     sample_idx = sample_metadata.name
-    download_path = IMAGES_DIR / f"rgb_image_{sample_idx}.png"
+    download_path = IMAGES_DIR / f"rgb_image_{sample_idx}.tif"
+
+    if col_str == 'L7':
+        image_request_bands = image_request.select(l7_bands)
+    else:  # L8
+        image_request_bands = image_request.select(l8_bands)
 
     while attempts_left > 0:
         try:
-            url = image_request.getDownloadUrl({
+            url = image_request_bands.getDownloadUrl({
                 'region': region,
                 'scale': 30,
-                'format': 'PNG'
+                'format': 'GeoTIFF',
+                'filePerBand': False
             })
             response = requests.get(url, stream=True)
 
@@ -189,9 +267,6 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
             with open(download_path, 'wb') as out_file:
                 shutil.copyfileobj(response.raw, out_file)
 
-            if is_single_image:
-                date = image_request.date().getInfo()
-
         except Exception as e:
             logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
             attempts_left -= 1
@@ -199,15 +274,19 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
         else:
             break
 
-    return pd.Series({"is_composition": not is_single_image, "date": date})
+    return pd.Series({"date_range": date_range, "col_size": col_size, "col": col_str})
 
 
-def scale_l8(image):
+def scale_optical_bands(image, optical_bands):
+    """Scale factors taken from:
+        https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LE07_C02_T1_L2#bands
+        https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C02_T1_L2#bands
+    """
     scaled_optical_bands = (image
-                            .select(['SR_B4', 'SR_B3', 'SR_B2'])
+                            .select(optical_bands)
                             .multiply(0.0000275)
                             .add(-0.2))
-    return image.addBands(scaled_optical_bands, ['SR_B4', 'SR_B3', 'SR_B2'], True)
+    return image.addBands(scaled_optical_bands, optical_bands, True)
 
 
 def main():
@@ -237,9 +316,14 @@ def main():
 
     logger.addHandler(file_handler)
 
+    optical_bands_l7 = ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5']
+    optical_bands_l8 = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6']
+    scale_l7 = partial(scale_optical_bands, optical_bands=optical_bands_l7)
+    scale_l8 = partial(scale_optical_bands, optical_bands=optical_bands_l8)
+
     # Setup Image collection
-    l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
-          .map(scale_l8))
+    l7 = (ee.ImageCollection("LANDSAT/LE07/C02/T1_L2").map(scale_l7))
+    l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').map(scale_l8))
 
     # Read metadata
     metadata = pd.read_csv(
@@ -247,27 +331,42 @@ def main():
 
     selected_splits = {"train", "val", "test"}
     is_train_val_test = metadata["split"].isin(selected_splits)
+    is_first_sample = metadata["img_filename"].str.endswith("0_rgb.jpg")
 
     # Sample size of metadata_selected is 470,086
-    metadata_selected = metadata.loc[is_train_val_test]
+    metadata_selected = metadata.loc[is_train_val_test & is_first_sample]
     size = len(metadata_selected)
+    print(size)
+    exit()
 
     max_span = metadata_selected["img_span_km"].max()
     download_span = max_span * EXTENSION_FACTOR
-    logger.info("Download span of %f km was used (%d times the biggest sample span).", download_span, EXTENSION_FACTOR)
+    logger.info("Download span of %f km was used (%d times the biggest sample span).",
+                download_span, EXTENSION_FACTOR)
 
     download_l8_image = partial(
-        download_image, l8=l8, span_km=download_span, logger=logger)
+        download_image, l7=l7, l7_bands=optical_bands_l7, l8=l8, l8_bands=optical_bands_l8, span_km=download_span, logger=logger)
+
+    # TODO
+    test_size = 1000
+    test_subset = metadata_selected.sample(n=test_size)
 
     start = time.time()
-    download_metadata = metadata_selected.parallel_apply(download_l8_image, axis=1)
+    # download_metadata = metadata_selected.parallel_apply(
+    #     download_l8_image, axis=1)
+    download_metadata = test_subset.parallel_apply(download_l8_image, axis=1)
     end = time.time()
     logger.info("Download of %d images took %s seconds.",
                 size, f"{end - start:.2f}")
     print(f"Download of {size} images took {end - start:.2f} seconds.")
 
-    test_subset_downloaded = pd.concat([metadata_selected, download_metadata], axis=1)
-    test_subset_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
+    # metadata_downloaded = pd.concat(
+    #     [metadata_selected, download_metadata], axis=1)
+    # metadata_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
+
+    test_subset_downloaded = pd.concat(
+        [test_subset, download_metadata], axis=1)
+    test_subset_downloaded.to_csv(DATA_DIR / "test.csv")
 
 
 if __name__ == '__main__':
