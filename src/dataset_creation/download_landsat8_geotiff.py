@@ -27,10 +27,8 @@ from geopy.point import Point
 pandarallel.initialize(nb_workers=20)
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-# TODO
-DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
-# DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
-#             "datasets4" / "FMoW_LandSat" / "fmow_landsat")
+DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
+            "datasets4" / "FMoW_LandSat" / "fmow_landsat")
 IMAGES_DIR = DATA_DIR / "images"
 LOG_FILE = PROJECT_ROOT / 'download.log'
 EE_PROJECT_NAME = 'seeing-the-big-picture'
@@ -238,7 +236,7 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
 
     sample_idx = sample_metadata.name
     download_path = (
-        IMAGES_DIR / f"image_{sample_idx}_{col_name}_{col_size}.tif")
+        IMAGES_DIR / f"image_{sample_idx}.tif")
 
     while attempts_left > 0:
         try:
