@@ -14,6 +14,7 @@ import random
 import logging
 import typing
 import pytz
+import re
 
 
 import requests
@@ -34,10 +35,11 @@ DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
 IMAGES_DIR = DATA_DIR / "images"
 LOG_FILE = PROJECT_ROOT / 'download.log'
 EE_PROJECT_NAME = 'seeing-the-big-picture'
+APPEND_DOWNLOAD = True
 EXTENSION_FACTOR = 3.0
 SCALE = 30.0
 MAX_PIXELS = 1e8
-MIN_COL_SIZE = 100
+MIN_COL_SIZE = 50
 
 
 def compute_img_span(img_center_lon: float, img_center_lat: float, img_span_km: float) -> tuple[float, float]:
@@ -293,6 +295,36 @@ def get_fmow_wilds_mask(metadata):
     return (id_mask & train_mask) | (ood_val_mask & val_mask) | (ood_test_mask & test_mask) | (id_mask & val_mask) | (id_mask & test_mask)
 
 
+def get_missing_mask(metadata):
+    """
+    Reads all TIFF files in IMAGE_DIR, extracts indices from filenames ('image_<idx>.tif'),
+    and returns a mask for rows in metadata where the index is missing from the folder.
+
+    Parameters:
+    - metadata (pd.DataFrame): Pandas DataFrame with metadata, must have an 'index' column (or specify index_col).
+
+    Returns:
+    - np.ndarray: Boolean mask where True indicates missing files.
+    """
+    # Read all TIFF filenames
+    tiff_files = [f for f in os.listdir(IMAGES_DIR) if f.endswith('.tif')]
+
+    # Extract indices using regex: image_(\d+).tif -> \d+
+    downloaded_indices = set()
+    pattern = r'image_(\d+)\.tif'
+    for filename in tiff_files:
+        match = re.search(pattern, filename)
+        if match:
+            downloaded_indices.add(int(match.group(1)))
+
+    # Get indices from metadata
+    metadata_indices = metadata.index.astype(
+        int).values
+
+    missing_mask = ~np.isin(metadata_indices, list(downloaded_indices))
+    return missing_mask
+
+
 def main():
     if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR)):
         raise NotADirectoryError()
@@ -341,8 +373,13 @@ def main():
         DATA_DIR / "rgb_metadata_extended.csv")
 
     wilds_mask = get_fmow_wilds_mask(metadata)
-    metadata_selected = metadata.loc[wilds_mask]
+    missing_mask = get_missing_mask(metadata)
+    metadata_mask = (
+        wilds_mask & missing_mask) if APPEND_DOWNLOAD else wilds_mask
+    metadata_selected = metadata.loc[metadata_mask]
     size = len(metadata_selected)
+    print(size)
+    exit()
 
     max_span = metadata_selected["img_span_km"].max()
     download_span = max_span * EXTENSION_FACTOR
@@ -353,6 +390,8 @@ def main():
     download_l8_image = partial(
         download_image, cols=cols, cols_bands=cols_bands, span_km=download_span, pixel_dim=pixel_dim, logger=logger)
 
+    test_size = 100
+    metadata_selected = metadata_selected.sample(n=test_size)
     start = time.time()
     download_metadata = metadata_selected.parallel_apply(
         download_l8_image, axis=1)
