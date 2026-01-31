@@ -222,6 +222,7 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
         span_km (float): Image size in kilometer to download.
         logger (logging.Logger):
     """
+    date_range, col_size, col_name = None, None, None
     attempts = 30
     attempts_left = attempts
     while attempts_left > 0:
