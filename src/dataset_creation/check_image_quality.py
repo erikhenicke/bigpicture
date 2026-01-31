@@ -9,10 +9,8 @@ import rasterio
 
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-# TODO
-DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
-# DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
-#             "datasets4" / "FMoW_LandSat" / "fmow_landsat")
+DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
+            "datasets4" / "FMoW_LandSat" / "fmow_landsat")
 IMAGES_DIR = DATA_DIR / "images"
 LOG_FILE = PROJECT_ROOT / 'quality_check.log'
 
