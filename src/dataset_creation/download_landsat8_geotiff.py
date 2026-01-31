@@ -377,8 +377,6 @@ def main():
         wilds_mask & missing_mask) if APPEND_DOWNLOAD else wilds_mask
     metadata_selected = metadata.loc[metadata_mask]
     size = len(metadata_selected)
-    print(size)
-    exit()
 
     max_span = metadata_selected["img_span_km"].max()
     download_span = max_span * EXTENSION_FACTOR
@@ -389,8 +387,6 @@ def main():
     download_l8_image = partial(
         download_image, cols=cols, cols_bands=cols_bands, span_km=download_span, pixel_dim=pixel_dim, logger=logger)
 
-    test_size = 100
-    metadata_selected = metadata_selected.sample(n=test_size)
     start = time.time()
     download_metadata = metadata_selected.parallel_apply(
         download_l8_image, axis=1)
