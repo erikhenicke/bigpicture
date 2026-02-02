@@ -134,13 +134,14 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
                        )
     least_cloudy = l8_cloud_masked.sort('validity', False).first()
     validity = ee.Number(least_cloudy.get('validity')).getInfo()
-    is_least_cloudy_ok = validity >= 0.99 
+    is_least_cloudy_ok = validity >= 0.99
     if is_least_cloudy_ok:
         date = least_cloudy.date().format(None, 'GMT').getInfo()
     mosaic = l8_cloud_masked.mosaic()
     optical_bands = ['SR_B4', 'SR_B3', 'SR_B2']
     vis_params = {'bands': optical_bands, 'min': 0, 'max': 0.3}
-    final_image = least_cloudy.visualize(**vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
+    final_image = least_cloudy.visualize(
+        **vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
     return (final_image, region_of_interest, is_least_cloudy_ok, date)
 
 
@@ -154,7 +155,7 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
         logger (logging.Logger):
     """
     date = None
-    is_single_image = True 
+    is_single_image = True
 
     attempts = 30
     attempts_left = attempts
@@ -163,7 +164,7 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
             image_request, region, is_single_image, date = get_requests(
                 sample_metadata, l8, span_km
             )
-        except Exception as e:           
+        except Exception as e:
             logger.info(f"Attempt {attempts + 1 - attempts_left} - " + str(e))
             attempts_left -= 1
             time.sleep(1 + random.uniform(0, 1))
@@ -249,9 +250,10 @@ def main():
 
     max_span = metadata_selected["img_span_km"].max()
     download_span = max_span * EXTENSION_FACTOR
-    logger.info("Download span of %f km was used (%d times the biggest sample span).", download_span, EXTENSION_FACTOR)
+    logger.info("Download span of %f km was used (%d times the biggest sample span).",
+                download_span, EXTENSION_FACTOR)
 
-    test_size = 1000 
+    test_size = 1000
     test_subset = metadata_selected.sample(n=test_size)
 
     download_l8_image = partial(
@@ -264,7 +266,8 @@ def main():
                 test_size, f"{end - start:.2f}")
     print(f"Download of {test_size} images took {end - start:.2f} seconds.")
 
-    test_subset_downloaded = pd.concat([test_subset, download_metadata], axis=1)
+    test_subset_downloaded = pd.concat(
+        [test_subset, download_metadata], axis=1)
     test_subset_downloaded.to_csv(DATA_DIR / "test.csv")
 
 
