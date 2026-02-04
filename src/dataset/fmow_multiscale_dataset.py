@@ -18,17 +18,19 @@ class FMoWMultiScaleDataset(WILDSDataset):
     Inherits from WILDSDataset to maintain compatibility with WILDS package.
     """
 
-    _dataset_name = 'fmow_multiscale'
+    _dataset_name = "fmow_multiscale"
 
-    def __init__(self,
-                 fmow_dir='data',
-                 landsat_dir='data',
-                 metadata_csv='rgb_metadata.csv',
-                 split_scheme='official',
-                 use_ood_val=True,
-                 seed=111,
-                 transform_rgb=None,
-                 transform_landsat=None):
+    def __init__(
+        self,
+        fmow_dir="data",
+        landsat_dir="data",
+        metadata_csv="rgb_metadata.csv",
+        split_scheme="official",
+        use_ood_val=True,
+        seed=111,
+        transform_rgb=None,
+        transform_landsat=None,
+    ):
         """
         Args:
             root_dir: Root directory containing the dataset
@@ -46,20 +48,17 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         # Initialize base FMoW dataset to get splits and metadata
         self.base_dataset = get_dataset(
-            dataset='fmow',
-            root_dir=fmow_dir,
-            download=False,
-            split_scheme=split_scheme
+            dataset="fmow", root_dir=fmow_dir, download=False, split_scheme=split_scheme
         )
 
         # Store directories
-        self.root_fmow = Path(fmow_dir) / f'fmow_v{self.base_dataset.version}'
-        self.fmow_images = self.root_fmow / 'images'
-        self.root_landsat = Path(landsat_dir) / 'fmow_landsat'
-        self.landsat_images = self.root_landsat / 'images'
+        self.root_fmow = Path(fmow_dir) / f"fmow_v{self.base_dataset.version}"
+        self.fmow_images = self.root_fmow / "images"
+        self.root_landsat = Path(landsat_dir) / "fmow_landsat"
+        self.landsat_images = self.root_landsat / "images"
 
         # Inherit all necessary attributes from base dataset
-        self._dataset_name = 'fmow_multiscale'
+        self._dataset_name = "fmow_multiscale"
         self._data_dir = str(self.root_fmow)
         self._split_scheme = self.base_dataset._split_scheme
         self._split_dict = self.base_dataset._split_dict
@@ -80,18 +79,22 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         # Transforms
         self.transform_rgb = transform_rgb or self.get_default_transform_rgb()
-        self.transform_landsat = transform_landsat or self.get_default_transform_landsat()
+        self.transform_landsat = (
+            transform_landsat or self.get_default_transform_landsat()
+        )
 
     def get_default_transform_rgb(self):
         """Default transform for RGB images (ImageNet normalization)"""
-        return transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
-        ])
+        return transforms.Compose(
+            [
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                # transforms.Normalize(
+                #     mean=[0.485, 0.456, 0.406],
+                #     std=[0.229, 0.224, 0.225]
+                # )
+            ]
+        )
 
     def get_default_transform_landsat(self):
         """
@@ -122,17 +125,14 @@ class FMoWMultiScaleDataset(WILDSDataset):
         metadata = self._metadata_array[idx]
 
         # Combine into dict for x
-        x = {
-            'rgb': rgb_img,
-            'landsat': landsat_img
-        }
+        x = {"rgb": rgb_img, "landsat": landsat_img}
 
         return x, y, metadata
 
     def get_rgb_input(self, idx):
         """Load RGB FMoW image"""
-        img_path = self.fmow_images / f'rgb_img_{idx}.png'
-        img = Image.open(img_path).convert('RGB')
+        img_path = self.fmow_images / f"rgb_img_{idx}.png"
+        img = Image.open(img_path).convert("RGB")
 
         if self.transform_rgb is not None:
             img = self.transform_rgb(img)
@@ -144,7 +144,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Load Landsat GeoTIFF image with all 6 bands.
         Returns tensor of shape (6, 224, 224).
         """
-        tif_path = self.landsat_images / f'image_{idx}.tif'
+        tif_path = self.landsat_images / f"image_{idx}.tif"
 
         with rasterio.open(tif_path) as src:
             # Read all 6 bands
@@ -153,10 +153,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
         # Convert to float32
         data = data.astype(np.float32)
 
+        # TODO
         # Normalize (adjust based on your Landsat data range)
         # Typical Landsat 8 surface reflectance ranges from 0-10000
         # Adjust this normalization based on your specific data
-        data = np.clip(data / 10000.0, 0, 1)
+        # data = np.clip(data / 10000.0, 0, 1)
 
         # Resize to 224x224 if needed
         if data.shape[1] != 224 or data.shape[2] != 224:
@@ -185,8 +186,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
         """
         file_idx = self.full_idxs[idx]
         return {
-            'rgb': self.get_rgb_input(file_idx),
-            'landsat': self.get_landsat_input(file_idx)
+            "rgb": self.get_rgb_input(file_idx),
+            "landsat": self.get_landsat_input(file_idx),
         }
 
     def eval(self, y_pred, y_true, metadata, prediction_fn=None):
@@ -212,22 +213,36 @@ def collate_multiscale(batch):
     metadata_list = []
 
     for x, y, metadata in batch:
-        rgb_list.append(x['rgb'])
-        landsat_list.append(x['landsat'])
+        rgb_list.append(x["rgb"])
+        landsat_list.append(x["landsat"])
         y_list.append(y)
         metadata_list.append(metadata)
 
-    return {
-        'rgb': torch.stack(rgb_list, dim=0),
-        'landsat': torch.stack(landsat_list, dim=0)
-    }, torch.stack(y_list, dim=0), torch.stack(metadata_list, dim=0)
+    return (
+        {
+            "rgb": torch.stack(rgb_list, dim=0),
+            "landsat": torch.stack(landsat_list, dim=0),
+        },
+        torch.stack(y_list, dim=0),
+        torch.stack(metadata_list, dim=0),
+    )
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     dataset = FMoWMultiScaleDataset(
-        fmow_dir='/home/henicke/git/bigpicture/data', landsat_dir='/home/datasets4/FMoW_LandSat/')
+        fmow_dir="/home/erik/git/bigpicture/data",
+        landsat_dir="/home/erik/git/bigpicture/data",
+    )
 
-    sample = dataset[0]
-    print("HR shape:", sample['rgb'].shape)
-    print("LR shape:", sample['landsat'].shape)
+    sample, y, metadata = dataset[269149]
+    print("HR shape:", sample["rgb"].shape)
+    print("LR shape:", sample["landsat"].shape)
+
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(sample["rgb"][[2, 1, 0], :, :].permute(1, 2, 0))
+    axes[0].set_title("FMoW High-Res")
+    axes[1].imshow(sample["landsat"][[2, 1, 0], :, :].permute(1, 2, 0))
+    axes[1].set_title("Landsat Broad-Scale")
+    plt.show()
