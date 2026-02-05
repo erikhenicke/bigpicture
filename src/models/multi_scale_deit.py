@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import ViTForImageClassification, AutoFeatureExtractor
+from transformers import ViTForImageClassification, AutoImageProcessor 
 
 
 class MultiResolutionDeiT(nn.Module):
@@ -8,7 +8,7 @@ class MultiResolutionDeiT(nn.Module):
         super().__init__()
 
         # Load feature extractor
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(
+        self.feature_extractor = AutoImageProcessor.from_pretrained(
             'facebook/deit-tiny-patch16-224'
         )
 

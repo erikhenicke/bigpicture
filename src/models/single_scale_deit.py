@@ -1,12 +1,12 @@
 import torch.nn as nn
-from transformers import ViTForImageClassification, AutoFeatureExtractor
+from transformers import ViTForImageClassification, AutoImageProcessor 
 
 class SingleScaleDeiT(nn.Module):
     def __init__(self, num_labels=62):
         super().__init__()
 
         # Load feature extractor
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(
+        self.feature_extractor = AutoImageProcessor.from_pretrained(
             'facebook/deit-tiny-patch16-224'
         )
 
