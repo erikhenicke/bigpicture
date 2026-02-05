@@ -88,8 +88,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    mean=[0.5, 0.5, 0.5],
-                    std=[0.5, 0.5, 0.5]
+                    # # Normalize to [-1, 1] range
+                    # mean=[0.5, 0.5, 0.5],
+                    # std=[0.5, 0.5, 0.5]
+                    # Normalize to [0, 1] range
+                    mean=[0.0, 0.0, 0.0],
+                    std=[1.0, 1.0, 1.0],
                 )
             ]
         )
@@ -106,9 +110,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
         landsat_max = 65353
         lower = (landsat_min * landsat_scale + landsat_offset) 
         upper = (landsat_max * landsat_scale + landsat_offset) 
-        # Normalize to [-1, 1] range 
-        std = (upper - lower) / 2 
-        mean = (upper + lower) / 2
+        # # Normalize to [-1, 1] range 
+        # std = (upper - lower) / 2 
+        # mean = (upper + lower) / 2
+        # Normalize to [0, 1] range
+        std = (upper - lower)
+        mean = lower
         return transforms.Compose(
             [
                 transforms.Normalize(
