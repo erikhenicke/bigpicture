@@ -1,14 +1,9 @@
 import torch.nn as nn
-from transformers import ViTForImageClassification, AutoImageProcessor 
+from transformers import ViTForImageClassification 
 
 class SingleScaleDeiT(nn.Module):
     def __init__(self, num_labels=62):
         super().__init__()
-
-        # Load feature extractor
-        self.feature_extractor = AutoImageProcessor.from_pretrained(
-            'facebook/deit-tiny-patch16-224'
-        )
 
         # Load DeiT model
         self.model = ViTForImageClassification.from_pretrained(
@@ -23,5 +18,5 @@ class SingleScaleDeiT(nn.Module):
     
     def forward(self, x, **kwargs):
         # Only use RGB for baseline
-        rgb_processed = self.feature_extractor(x['rgb'], return_tensors='pt')['pixel_values']
+        rgb_processed = x['rgb']
         return self.model(rgb_processed).logits

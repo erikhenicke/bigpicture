@@ -1,16 +1,11 @@
 import torch
 import torch.nn as nn
-from transformers import ViTForImageClassification, AutoImageProcessor 
+from transformers import ViTForImageClassification 
 
 
 class MultiResolutionDeiT(nn.Module):
     def __init__(self, num_labels=62):
         super().__init__()
-
-        # Load feature extractor
-        self.feature_extractor = AutoImageProcessor.from_pretrained(
-            'facebook/deit-tiny-patch16-224'
-        )
 
         # Independent encoders
         self.encoder_hr = ViTForImageClassification.from_pretrained(
@@ -50,16 +45,11 @@ class MultiResolutionDeiT(nn.Module):
         rgb = x['rgb']
         
         # For Landsat 6 bands, we need to select 3 for RGB-like input, for pretrained usage.
-        landsat = x['landsat'][:3, :, :]  # Take first 3 bands for now
+        landsat = x['landsat'][:, :3, :, :]  # Take first 3 bands for now (first dim is batch size)
 
-        # Preprocess with feature extractor
-        rgb_processed = self.feature_extractor(rgb, return_tensors='pt')['pixel_values']
-        landsat_processed = self.feature_extractor(landsat, return_tensors='pt')['pixel_values']
- 
-        
         # Extract [CLS] features
-        outputs_hr = self.encoder_hr.vit(rgb_processed)
-        outputs_lr = self.encoder_lr.vit(landsat_processed)
+        outputs_hr = self.encoder_hr.vit(rgb)
+        outputs_lr = self.encoder_lr.vit(landsat)
         
         feat_hr = outputs_hr.last_hidden_state[:, 0, :]
         feat_lr = outputs_lr.last_hidden_state[:, 0, :]

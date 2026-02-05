@@ -91,9 +91,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
                     # # Normalize to [-1, 1] range
                     # mean=[0.5, 0.5, 0.5],
                     # std=[0.5, 0.5, 0.5]
-                    # Normalize to [0, 1] range
-                    mean=[0.0, 0.0, 0.0],
-                    std=[1.0, 1.0, 1.0],
+                    # Normalize to Imagenet mean/std range
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
                 )
             ]
         )
@@ -121,6 +121,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 transforms.Normalize(
                     mean=[mean] * 6,
                     std=[std] * 6
+                ),
+                # Normalize to Imagenet mean/std range for pretrained usage (only for first 3 bands, rest are left as is)
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406, 0, 0, 0],
+                    std=[0.229, 0.224, 0.225, 1, 1, 1]
                 )
             ]
         )  
