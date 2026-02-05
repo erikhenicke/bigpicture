@@ -25,10 +25,6 @@ class MultiResolutionDeiT(nn.Module):
             num_labels=num_labels,
             ignore_mismatched_sizes=True
         )
-
-        # Freeze feature extractor parameters
-        for param in self.feature_extractor.parameters():
-            param.requires_grad = False
         
         # Freeze encoder parameters
         for param in self.encoder_hr.parameters():
