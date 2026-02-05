@@ -13,8 +13,8 @@ class SingleScaleDeiT(nn.Module):
         )
 
         # Freeze encoder parameters
-        for param in self.model.parameters():
-            if 'classifier' not in param.name:
+        for name, param in self.model.named_parameters():
+            if 'classifier' not in name:
                 param.requires_grad = False
     
     def forward(self, x, **kwargs):
