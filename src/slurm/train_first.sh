@@ -9,5 +9,5 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model=single --epochs=50 --batch_size=32 --frac=1.0
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model=multi --epochs=50 --batch_size=32 --frac=1.0
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model=single --epochs=1 --batch_size=32 --frac=0.01
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model=multi --epochs=1 --batch_size=32 --frac=0.01
