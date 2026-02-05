@@ -21,11 +21,11 @@ class MultiResolutionDeiT(nn.Module):
             ignore_mismatched_sizes=True
         )
         
-        # Freeze encoder parameters
-        for param in self.encoder_hr.parameters():
-            param.requires_grad = False
-        for param in self.encoder_lr.parameters():
-            param.requires_grad = False
+        # # Freeze encoder parameters
+        # for param in self.encoder_hr.parameters():
+        #     param.requires_grad = False
+        # for param in self.encoder_lr.parameters():
+        #     param.requires_grad = False
         
         # Remove classifiers
         self.encoder_hr.classifier = nn.Identity()

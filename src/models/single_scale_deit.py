@@ -12,10 +12,10 @@ class SingleScaleDeiT(nn.Module):
             ignore_mismatched_sizes=True
         )
 
-        # Freeze encoder parameters
-        for name, param in self.model.named_parameters():
-            if 'classifier' not in name:
-                param.requires_grad = False
+        # # Freeze encoder parameters
+        # for name, param in self.model.named_parameters():
+        #     if 'classifier' not in name:
+        #         param.requires_grad = False
     
     def forward(self, x, **kwargs):
         # Only use RGB for baseline
