@@ -77,7 +77,7 @@ def run_experiment(model_type='single', num_epochs=10, batch_size=32, frac=1.0):
     # Load dataset
     print("Loading dataset...")
     dataset = FMoWMultiScaleDataset(
-        fmow_dir='/home/datasets4/FMoW',
+        fmow_dir='/home/henicke/git/bigpicture/data',
         landsat_dir='/home/datasets4/FMoW_LandSat',
     )
     
@@ -151,9 +151,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='single', choices=['single', 'multi'])
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--frac', type=float, default=0.1, help='Fraction of data to use')
+    parser.add_argument('--frac', type=float, default=0.01, help='Fraction of data to use')
     args = parser.parse_args()
     
     print("="*50)
