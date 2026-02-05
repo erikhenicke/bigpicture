@@ -43,7 +43,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
             transform_rgb: Transforms for RGB images
             transform_landsat: Transforms for Landsat images
         """
-        # Import base FMoW dataset to reuse split logic
         from wilds import get_dataset
 
         # Initialize base FMoW dataset to get splits and metadata
@@ -51,13 +50,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
             dataset="fmow", root_dir=fmow_dir, download=False, split_scheme=split_scheme
         )
 
-        # Store directories
         self.root_fmow = Path(fmow_dir) / f"fmow_v{self.base_dataset.version}"
         self.fmow_images = self.root_fmow / "images"
         self.root_landsat = Path(landsat_dir) / "fmow_landsat"
         self.landsat_images = self.root_landsat / "images"
 
-        # Inherit all necessary attributes from base dataset
+        # Inherit attributes from base dataset
         self._dataset_name = "fmow_multiscale"
         self._data_dir = str(self.root_fmow)
         self._split_scheme = self.base_dataset._split_scheme
@@ -84,24 +82,41 @@ class FMoWMultiScaleDataset(WILDSDataset):
         )
 
     def get_default_transform_rgb(self):
-        """Default transform for RGB images (ImageNet normalization)"""
+        """Default transform for RGB images (Inception normalization)"""
         return transforms.Compose(
             [
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
-                # transforms.Normalize(
-                #     mean=[0.485, 0.456, 0.406],
-                #     std=[0.229, 0.224, 0.225]
-                # )
+                transforms.Normalize(
+                    mean=[0.5, 0.5, 0.5],
+                    std=[0.5, 0.5, 0.5]
+                )
             ]
         )
 
     def get_default_transform_landsat(self):
         """
         Default transform for Landsat images.
-        Note: This returns a preprocessing function, not a torchvision transform.
+
+        See https://developers.google.com/earth-engine/datasets/catalog/landsat/ for scaling info.
         """
-        return None  # Will handle normalization manually in load_landsat
+        landsat_scale = 2.75e-05
+        landsat_offset = -0.2
+        landsat_min = 0 
+        landsat_max = 65353
+        lower = (landsat_min * landsat_scale + landsat_offset) 
+        upper = (landsat_max * landsat_scale + landsat_offset) 
+        # Normalize to [-1, 1] range 
+        std = (upper - lower) / 2 
+        mean = (upper + lower) / 2
+        return transforms.Compose(
+            [
+                transforms.Normalize(
+                    mean=[mean] * 6,
+                    std=[std] * 6
+                )
+            ]
+        )  
 
     def __len__(self):
         return len(self._y_array)
@@ -111,20 +126,13 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Returns tuple of (x, y, metadata) following WILDS convention.
         x is now a dict with 'rgb' and 'landsat' keys.
         """
-        # Get actual file index (accounting for sequestered images)
         file_idx = self.full_idxs[idx]
 
-        # Load RGB image
         rgb_img = self.get_rgb_input(file_idx)
-
-        # Load Landsat image (all 6 bands)
         landsat_img = self.get_landsat_input(file_idx)
 
-        # Get label and metadata
         y = self._y_array[idx]
         metadata = self._metadata_array[idx]
-
-        # Combine into dict for x
         x = {"rgb": rgb_img, "landsat": landsat_img}
 
         return x, y, metadata
@@ -147,35 +155,28 @@ class FMoWMultiScaleDataset(WILDSDataset):
         tif_path = self.landsat_images / f"image_{idx}.tif"
 
         with rasterio.open(tif_path) as src:
-            # Read all 6 bands
-            data = src.read()  # Shape: (6, H, W)
+            data = src.read()  
 
-        # Convert to float32
         data = data.astype(np.float32)
-
-        # TODO
-        # Normalize (adjust based on your Landsat data range)
-        # Typical Landsat 8 surface reflectance ranges from 0-10000
-        # Adjust this normalization based on your specific data
-        # data = np.clip(data / 10000.0, 0, 1)
-
-        # Resize to 224x224 if needed
-        if data.shape[1] != 224 or data.shape[2] != 224:
-            # Use PIL for resizing each band
-            resized_bands = []
-            for band_idx in range(data.shape[0]):
-                band = data[band_idx]
-                band_img = Image.fromarray((band * 255).astype(np.uint8))
-                band_img = band_img.resize((224, 224), Image.BILINEAR)
-                resized_bands.append(np.array(band_img) / 255.0)
-            data = np.stack(resized_bands, axis=0)
-
-        # Convert to tensor
+        
         landsat_tensor = torch.from_numpy(data).float()
 
-        # Apply custom normalization if provided
         if self.transform_landsat is not None:
             landsat_tensor = self.transform_landsat(landsat_tensor)
+
+        # Resize to 224x224
+        if landsat_tensor.shape[1] != 224 or landsat_tensor.shape[2] != 224:
+            resized_bands = []
+            for band_idx in range(landsat_tensor.shape[0]):
+                band = landsat_tensor[band_idx, :, :]
+                # Scale from [-1, 1] to [0, 1] for PIL
+                band_scaled = (band + 1) / 2
+                band_img = transforms.ToPILImage()(band_scaled)
+                band_img = band_img.resize((224, 224), Image.BILINEAR)
+                # Scale back from [0, 1] to [-1, 1]
+                band_resized = transforms.ToTensor()(band_img).squeeze(0) * 2 - 1
+                resized_bands.append(band_resized)
+            landsat_tensor = torch.stack(resized_bands, dim=0)
 
         return landsat_tensor
 
@@ -195,7 +196,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return self.base_dataset.eval(y_pred, y_true, metadata, prediction_fn)
 
 
-# Custom collate function for DataLoader
 def collate_multiscale(batch):
     """
     Custom collate function to handle dict inputs from FMoWMultiScaleDataset.
@@ -234,15 +234,18 @@ if __name__ == "__main__":
         landsat_dir="/home/erik/git/bigpicture/data",
     )
 
-    sample, y, metadata = dataset[269149]
+    sample, y, metadata = dataset[271258]
     print("HR shape:", sample["rgb"].shape)
     print("LR shape:", sample["landsat"].shape)
+
+    print(sample["rgb"].amin(dim=(1, 2)), sample["rgb"].amax(dim=(1, 2)))
+    print(sample["landsat"].amin(dim=(1, 2)), sample["landsat"].amax(dim=(1, 2)))
 
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-    axes[0].imshow(sample["rgb"][[2, 1, 0], :, :].permute(1, 2, 0))
+    axes[0].imshow(((sample["rgb"][[2, 1, 0], :, :] + 1) / 2).permute(1, 2, 0))
     axes[0].set_title("FMoW High-Res")
-    axes[1].imshow(sample["landsat"][[2, 1, 0], :, :].permute(1, 2, 0))
+    axes[1].imshow(((sample["landsat"][[2, 1, 0], :, :] + 1) / 2).permute(1, 2, 0))
     axes[1].set_title("Landsat Broad-Scale")
     plt.show()

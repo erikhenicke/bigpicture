@@ -113,45 +113,6 @@ def mask_clouds_compute_validity(image: ee.Image, region_of_interest: ee.Geometr
     return typing.cast(ee.Image, masked_image.set('validity', validity))
 
 
-def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float) -> tuple[ee.Image, ee.Geometry.Rectangle, bool, str]:
-    """Get request for least cloudy image and request for the infromation if a composite will be returned.
-
-    Mosaic composite is requested, if single least cloudy image contains more than 1% of invalid pixels.
-
-    Args:
-        sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
-        l8 (ee.ImageCollection): Landsat8 image collection.
-        span_km (float): Image size in kilometer to download.
-
-    Returns:
-        tuple[ee.Image, ee.Geometry.Rectangle, bool, str]: 
-            - Request for least cloudy image
-            - Region of interes
-            - Bool that says if a composite will be returned
-            - String date of the image, if it is not a composite.
-    """
-    date = None
-    region_of_interest = extract_region_of_interest(sample_metadata, span_km)
-    l8_cloud_masked = (l8
-                       .filterBounds(region_of_interest)
-                       .filterMetadata('CLOUD_COVER', 'less_than', 50)
-                       .map(lambda img:
-                            mask_clouds_compute_validity(
-                                img, region_of_interest))
-                       )
-    least_cloudy = l8_cloud_masked.sort('validity', False).first()
-    validity = ee.Number(least_cloudy.get('validity')).getInfo()
-    is_least_cloudy_ok = validity >= 0.99
-    if is_least_cloudy_ok:
-        date = least_cloudy.date().format(None, 'GMT').getInfo()
-    mosaic = l8_cloud_masked.mosaic()
-    optical_bands = ['SR_B4', 'SR_B3', 'SR_B2']
-    vis_params = {'bands': optical_bands, 'min': 0, 'max': 0.3}
-    final_image = least_cloudy.visualize(
-        **vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
-    return (final_image, region_of_interest, is_least_cloudy_ok, date)
-
-
 def get_date_range(sample_metadata, day_span=90):
     sample_date = datetime.strptime(
         sample_metadata["timestamp"], '%Y-%m-%dT%H:%M:%SZ')

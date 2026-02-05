@@ -77,10 +77,8 @@ def run_experiment(model_type='single', num_epochs=10, batch_size=32, frac=1.0):
     # Load dataset
     print("Loading dataset...")
     dataset = FMoWMultiScaleDataset(
-        root_dir='data',
-        fmow_rgb_dir='images',
-        landsat_dir='landsat_images',
-        split_scheme='official'
+        fmow_dir='data',
+        landsat_dir='data',
     )
     
     # Get train/val subsets
