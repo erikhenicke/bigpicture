@@ -14,7 +14,8 @@ class SingleScaleDeiT(nn.Module):
 
         # Freeze encoder parameters
         for param in self.model.parameters():
-            param.requires_grad = False
+            if 'classifier' not in param.name:
+                param.requires_grad = False
     
     def forward(self, x, **kwargs):
         # Only use RGB for baseline
