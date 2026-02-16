@@ -7,11 +7,60 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
-import numpy as np
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
-import json
+import wandb
 
+
+def get_data(frac: float = 0.1):
+    dataset = FMoWMultiScaleDataset(
+        fmow_dir='/home/henicke/git/bigpicture/data',
+        landsat_dir='/home/datasets4/FMoW_LandSat',
+    )
+    return dataset.get_subset(split='train', frac=frac), dataset.get_subset(split='val', frac=frac)
+
+def get_loader(data, batch_size=32, shuffle=True, num_workers=4, collate_fn=collate_multiscale):
+    return DataLoader(
+        data, 
+        batch_size=batch_size, 
+        shuffle=shuffle, 
+        num_workers=num_workers,
+        collate_fn=collate_fn
+    )
+
+def make(config: dict, output_dir=Path('results'), device='cuda'):
+    
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize TensorBoard writer
+    writer = SummaryWriter(log_dir=output_dir / 'tensorboard')
+
+    train_data, val_data = get_data(frac=config.frac)
+    train_loader, val_loader = get_loader(train_data, batch_size=config.batch_size), get_loader(val_data, batch_size=config.batch_size, shuffle=False)
+    
+    print(f"Train size: {len(train_data)}, Val size: {len(val_data)}")
+    
+    # Initialize model
+    print(f"Initializing {config.model_type} model...")
+    if config.model_type == 'single':
+        model = SingleScaleDeiT(num_labels=62)
+    else:
+        model = MultiResolutionDeiT(num_labels=62)
+    
+    model = model.to(device)
+    
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters: {total_params:,}")
+    
+    # Training setup
+    optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
+    criterion = CrossEntropyLoss()
+
+    return model, train_loader, val_loader, optimizer, criterion, writer
+ 
 
 def train_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
@@ -23,7 +72,6 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
         x_dict, y, metadata = batch
         
         # Move to device
-        x_dict = {k: v.to(device) for k, v in x_dict.items()}
         y = y.to(device)
         
         optimizer.zero_grad()
@@ -39,7 +87,6 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
     
     return total_loss / len(dataloader), correct / total
 
-
 def evaluate(model, dataloader, criterion, device):
     model.eval()
 
@@ -49,7 +96,7 @@ def evaluate(model, dataloader, criterion, device):
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating"):
-            x_dict, y, metadata = batch
+            x_dict, y, _ = batch
             
             x_dict = {k: v.to(device) for k, v in x_dict.items()}
             y = y.to(device)
@@ -64,155 +111,116 @@ def evaluate(model, dataloader, criterion, device):
     
     return total_loss / len(dataloader), correct / total
 
+def train_batch(x, y, model, optimizer, criterion, device):
+    model.train()
 
-def run_experiment(model_type='single', num_epochs=10, batch_size=32, frac=1.0):
+    x = {k: v.to(device) for k, v in x.items()}
+    y = y.to(device)
+
+    optimizer.zero_grad()
+    logits = model(x)
+    loss = criterion(logits, y)
+    loss.backward()
+    optimizer.step()
+
+    preds = torch.argmax(logits, dim=1)
+    correct = (preds == y).sum().item()
+    total = y.size(0)
+
+    return loss.item(), correct / total
+
+def evaluate_batch(x, y, model, criterion, device):
+    model.eval()
+
+    x = {k: v.to(device) for k, v in x.items()}
+    y = y.to(device)
+
+    with torch.no_grad():
+        logits = model(x)
+        loss = criterion(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        correct = (preds == y).sum().item()
+        total = y.size(0)
+
+    return loss.item(), correct / total
+
+def train_log(loss, acc, writer, sample_ct, epoch):
+    writer.add_scalar('Loss/train_batch', loss, sample_ct)
+    writer.add_scalar('Accuracy/train_batch', acc, sample_ct)
+    wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch}, step=sample_ct)
+
+def val_log(loss, acc, writer, sample_ct, epoch):
+    writer.add_scalar('Loss/val_batch', loss, sample_ct)
+    writer.add_scalar('Accuracy/val_batch', acc, sample_ct)
+    wandb.log({'val_loss': loss, 'val_acc': acc, 'epoch': epoch}, step=sample_ct)
+
+def train(model, train_loader, val_loader, optimizer, criterion, writer, device, output_dir, config):
+
+    wandb.watch(model, criterion, log='all', log_freq=10)
+    
+    sample_ct = 0
+    batch_ct = 0
+    for epoch in tqdm(range(config.epochs), desc="Epochs"):
+        for train_batch in tqdm(train_loader, desc="Training"):
+            x, y, metadata = train_batch
+            loss, acc = train_batch(x, y, model, optimizer, criterion, device)
+            
+            # Log to TensorBoard and Weights & Biases
+            train_log(loss, acc, writer, sample_ct, epoch)
+            sample_ct += y.size(0)
+            batch_ct += 1
+        
+        for val_batch in tqdm(val_loader, desc="Evaluating"):
+            x, y, _ = val_batch
+            loss, acc = evaluate_batch(x, y, model, criterion, device)
+            
+            # Log to TensorBoard and Weights & Biases
+            val_log(loss, acc, writer, sample_ct, epoch)
+
+
+def run_experiment(args):
     """
     Run experiment with specified model type.
     
     Args:
-        model_type: 'single' or 'multi'
-        num_epochs: Number of training epochs
-        batch_size: Batch size
-        frac: Fraction of data to use (for quick experiments, use 0.1)
+        args: Contains 
+            model_type: 'single' or 'multi'
+            num_epochs: Number of training epochs
+            batch_size: Batch size
+            frac: Fraction of data to use (for quick experiments, use 0.1)
     """
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    output_dir = Path(f'results/{args.model_type}_model')
+    with wandb.init(project='fmow-deit', config=args):
+        config = wandb.config
+        model, train_loader, val_loader, optimizer, criterion, writer = make(config, output_dir=output_dir)
 
-    # Create output directory
-    output_dir = Path(f'results/{model_type}_model')
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir=output_dir / 'tensorboard')
+        train(model, train_loader, val_loader, optimizer, criterion, writer, device, output_dir, config)
 
-    # Load dataset
-    print("Loading dataset...")
-    dataset = FMoWMultiScaleDataset(
-        fmow_dir='/home/henicke/git/bigpicture/data',
-        landsat_dir='/home/datasets4/FMoW_LandSat',
-    )
-    
-    # Get train/val subsets
-    print(f"Creating subsets (using {frac*100}% of data)...")
-    train_data = dataset.get_subset(split='train', frac=frac)
-    val_data = dataset.get_subset(split='val', frac=frac)
-    
-    # Create dataloaders
-    train_loader = DataLoader(
-        train_data, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=4,
-        collate_fn=collate_multiscale
-    )
-    val_loader = DataLoader(
-        val_data, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=4,
-        collate_fn=collate_multiscale
-    )
-    
-    print(f"Train size: {len(train_data)}, Val size: {len(val_data)}")
-    
-    # Initialize model
-    print(f"Initializing {model_type} model...")
-    if model_type == 'single':
-        model = SingleScaleDeiT(num_labels=62)
-    else:
-        model = MultiResolutionDeiT(num_labels=62)
-    
-    model = model.to(device)
-    
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total parameters: {total_params:,}")
-    
-    # Training setup
-    optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
-    criterion = CrossEntropyLoss()
-    
-    # Training loop
-    best_val_acc = 0
-    results = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
-    
-    for epoch in range(num_epochs):
-        print(f"\nEpoch {epoch+1}/{num_epochs}")
-        
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
-        
-        results['train_loss'].append(train_loss)
-        results['train_acc'].append(train_acc)
-        results['val_loss'].append(val_loss)
-        results['val_acc'].append(val_acc)
-
-        # Log to TensorBoard
-        writer.add_scalar('Loss/train', train_loss, epoch)
-        writer.add_scalar('Loss/val', val_loss, epoch)
-        writer.add_scalar('Accuracy/train', train_acc, epoch)
-        writer.add_scalar('Accuracy/val', val_acc, epoch)
-
-        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-        
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), f'best_{model_type}_model.pth')
-            print(f"✓ Saved best model (val_acc: {val_acc:.4f})")
-
-        # Save metrics after each epoch (JSON backup)
-        with open(output_dir / 'metrics.json', 'w') as f:
-            json.dump(results, f, indent=2)
-    
     # Close TensorBoard writer
     writer.close()
-    
-    # Save final summary
-    summary = {
-        'model_type': model_type,
-        'num_epochs': num_epochs,
-        'batch_size': batch_size,
-        'frac': frac,
-        'best_val_acc': best_val_acc,
-        'final_train_acc': results['train_acc'][-1],
-        'final_val_acc': results['val_acc'][-1],
-        'total_params': sum(p.numel() for p in model.parameters())
-    }
 
-    with open(output_dir / 'summary.json', 'w') as f:
-        json.dump(summary, f, indent=2)
-    
-    print(f"\n✓ Saved metrics to {output_dir / 'metrics.json'}")
-    print(f"✓ Saved summary to {output_dir / 'summary.json'}")
-    print(f"✓ TensorBoard logs saved to {output_dir / 'tensorboard'}")
-    print(f"\nTo view in TensorBoard, run:")
-    print(f"  tensorboard --logdir={output_dir / 'tensorboard'}")
-    
-    return results, best_val_acc
-
+    return model
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='single', choices=['single', 'multi'])
+    parser.add_argument('--model_type', type=str, default='single', choices=['single', 'multi'])
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--frac', type=float, default=0.01, help='Fraction of data to use')
     args = parser.parse_args()
+
+    wandb.login()
     
     print("="*50)
     print(f"Running {args.model.upper()} model experiment")
     print("="*50)
     
-    results, best_acc = run_experiment(
-        model_type=args.model,
-        num_epochs=args.epochs,
-        batch_size=args.batch_size,
-        frac=args.frac
-    )
+    model = run_experiment(args)
     
     print("\n" + "="*50)
     print("EXPERIMENT COMPLETE")
     print("="*50)
-    print(f"Best Val Accuracy: {best_acc:.4f}")
