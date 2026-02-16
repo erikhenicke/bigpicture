@@ -29,8 +29,6 @@ def get_loader(data, batch_size=32, shuffle=True, num_workers=4, collate_fn=coll
     )
 
 def make(config: dict, output_dir=Path('results'), device='cuda'):
-    
-
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -165,17 +163,21 @@ def train(model, train_loader, val_loader, optimizer, criterion, writer, device,
             x, y, metadata = train_batch
             loss, acc = train_batch(x, y, model, optimizer, criterion, device)
             
-            # Log to TensorBoard and Weights & Biases
-            train_log(loss, acc, writer, sample_ct, epoch)
             sample_ct += y.size(0)
             batch_ct += 1
+
+            # Log to TensorBoard and Weights & Biases
+            if (batch_ct + 1) % 25 == 0:
+                train_log(loss, acc, writer, sample_ct, epoch)
+
         
         for val_batch in tqdm(val_loader, desc="Evaluating"):
             x, y, _ = val_batch
             loss, acc = evaluate_batch(x, y, model, criterion, device)
             
             # Log to TensorBoard and Weights & Biases
-            val_log(loss, acc, writer, sample_ct, epoch)
+            if (batch_ct + 1) % 25 == 0:
+                val_log(loss, acc, writer, sample_ct, epoch)
 
 
 def run_experiment(args):
