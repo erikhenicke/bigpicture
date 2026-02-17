@@ -7,8 +7,6 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
-from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
 import wandb
 
 
@@ -28,13 +26,7 @@ def get_loader(data, batch_size=32, shuffle=True, num_workers=4, collate_fn=coll
         collate_fn=collate_fn
     )
 
-def make(config: dict, output_dir=Path('results'), device='cuda'):
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir=output_dir / 'tensorboard')
-
+def make(config: dict, device='cuda'):
     train_data, val_data = get_data(frac=config.frac)
     train_loader, val_loader = get_loader(train_data, batch_size=config.batch_size), get_loader(val_data, batch_size=config.batch_size, shuffle=False)
     
@@ -57,57 +49,7 @@ def make(config: dict, output_dir=Path('results'), device='cuda'):
     optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
     criterion = CrossEntropyLoss()
 
-    return model, train_loader, val_loader, optimizer, criterion, writer
- 
-
-def train_epoch(model, dataloader, optimizer, criterion, device):
-    model.train()
-    total_loss = 0
-    correct = 0
-    total = 0
-    
-    for batch in tqdm(dataloader, desc="Training"):
-        x_dict, y, metadata = batch
-        
-        # Move to device
-        y = y.to(device)
-        
-        optimizer.zero_grad()
-        logits = model(x_dict)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
-        
-        total_loss += loss.item()
-        preds = torch.argmax(logits, dim=1)
-        correct += (preds == y).sum().item()
-        total += y.size(0)
-    
-    return total_loss / len(dataloader), correct / total
-
-def evaluate(model, dataloader, criterion, device):
-    model.eval()
-
-    total_loss = 0
-    correct = 0
-    total = 0
-    
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating"):
-            x_dict, y, _ = batch
-            
-            x_dict = {k: v.to(device) for k, v in x_dict.items()}
-            y = y.to(device)
-            
-            logits = model(x_dict)
-            loss = criterion(logits, y)
-            
-            total_loss += loss.item()
-            preds = torch.argmax(logits, dim=1)
-            correct += (preds == y).sum().item()
-            total += y.size(0)
-    
-    return total_loss / len(dataloader), correct / total
+    return model, train_loader, val_loader, optimizer, criterion
 
 def train_batch(x, y, model, optimizer, criterion, device):
     model.train()
@@ -142,42 +84,52 @@ def evaluate_batch(x, y, model, criterion, device):
 
     return loss.item(), correct / total
 
-def train_log(loss, acc, writer, sample_ct, epoch):
-    writer.add_scalar('Loss/train_batch', loss, sample_ct)
-    writer.add_scalar('Accuracy/train_batch', acc, sample_ct)
+def train_log(loss, acc, sample_ct, epoch):
     wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch}, step=sample_ct)
 
-def val_log(loss, acc, writer, sample_ct, epoch):
-    writer.add_scalar('Loss/val_batch', loss, sample_ct)
-    writer.add_scalar('Accuracy/val_batch', acc, sample_ct)
-    wandb.log({'val_loss': loss, 'val_acc': acc, 'epoch': epoch}, step=sample_ct)
+def val_log(loss, acc, epoch):
+    wandb.log({'val_loss': loss, 'val_acc': acc}, step=epoch)
 
-def train(model, train_loader, val_loader, optimizer, criterion, writer, device, output_dir, config):
+def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batch_ct, epoch):
+    for batch in tqdm(dataloader, desc="Training"):
+        x, y, _ = batch
+        loss, acc = train_batch(x, y, model, optimizer, criterion, device)
+        
+        sample_ct += y.size(0)
+        batch_ct += 1
+
+        # Log to TensorBoard and Weights & Biases
+        if (batch_ct + 1) % 25 == 0:
+            train_log(loss, acc, sample_ct, epoch)
+
+    return sample_ct, batch_ct
+
+def evaluate_epoch(model, dataloader, criterion, device, epoch):
+    val_loss = 0
+    val_correct = 0
+    val_total = 0
+    for batch in tqdm(dataloader, desc="Evaluating"):
+        x, y, _ = batch
+        loss, acc = evaluate_batch(x, y, model, criterion, device)
+        val_loss += loss
+        val_correct += acc * y.size(0)
+        val_total += y.size(0)
+    
+    # Log validation metrics after each epoch
+    val_loss /= len(dataloader)
+    val_acc = val_correct / val_total
+    val_log(val_loss, val_acc, epoch)
+
+
+def train(model, train_loader, val_loader, optimizer, criterion, device, config):
 
     wandb.watch(model, criterion, log='all', log_freq=10)
     
     sample_ct = 0
     batch_ct = 0
     for epoch in tqdm(range(config.epochs), desc="Epochs"):
-        for batch in tqdm(train_loader, desc="Training"):
-            x, y, _ = batch
-            loss, acc = train_batch(x, y, model, optimizer, criterion, device)
-            
-            sample_ct += y.size(0)
-            batch_ct += 1
-
-            # Log to TensorBoard and Weights & Biases
-            if (batch_ct + 1) % 1 == 0:
-                train_log(loss, acc, writer, sample_ct, epoch)
-
-        
-        for batch in tqdm(val_loader, desc="Evaluating"):
-            x, y, _ = batch
-            loss, acc = evaluate_batch(x, y, model, criterion, device)
-            
-            # Log to TensorBoard and Weights & Biases
-            if (batch_ct + 1) % 1 == 0:
-                val_log(loss, acc, writer, sample_ct, epoch)
+        sample_ct, batch_ct = train_epoch(model, train_loader, optimizer, criterion, device, sample_ct, batch_ct, epoch)
+        evaluate_epoch(model, val_loader, criterion, device, epoch)
 
 
 def run_experiment(args):
@@ -194,15 +146,11 @@ def run_experiment(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    output_dir = Path(f'results/{args.model_type}_model')
     with wandb.init(project='fmow-deit', config=args):
         config = wandb.config
-        model, train_loader, val_loader, optimizer, criterion, writer = make(config, output_dir=output_dir)
+        model, train_loader, val_loader, optimizer, criterion = make(config, device)
 
-        train(model, train_loader, val_loader, optimizer, criterion, writer, device, output_dir, config)
-
-    # Close TensorBoard writer
-    writer.close()
+        train(model, train_loader, val_loader, optimizer, criterion, device, config)
 
     return model
 
