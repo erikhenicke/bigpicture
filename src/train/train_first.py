@@ -159,8 +159,8 @@ def train(model, train_loader, val_loader, optimizer, criterion, writer, device,
     sample_ct = 0
     batch_ct = 0
     for epoch in tqdm(range(config.epochs), desc="Epochs"):
-        for train_batch in tqdm(train_loader, desc="Training"):
-            x, y, metadata = train_batch
+        for batch in tqdm(train_loader, desc="Training"):
+            x, y, _ = batch
             loss, acc = train_batch(x, y, model, optimizer, criterion, device)
             
             sample_ct += y.size(0)
@@ -171,8 +171,8 @@ def train(model, train_loader, val_loader, optimizer, criterion, writer, device,
                 train_log(loss, acc, writer, sample_ct, epoch)
 
         
-        for val_batch in tqdm(val_loader, desc="Evaluating"):
-            x, y, _ = val_batch
+        for batch in tqdm(val_loader, desc="Evaluating"):
+            x, y, _ = batch
             loss, acc = evaluate_batch(x, y, model, criterion, device)
             
             # Log to TensorBoard and Weights & Biases
