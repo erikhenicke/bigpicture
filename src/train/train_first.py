@@ -167,7 +167,7 @@ def train(model, train_loader, val_loader, optimizer, criterion, writer, device,
             batch_ct += 1
 
             # Log to TensorBoard and Weights & Biases
-            if (batch_ct + 1) % 25 == 0:
+            if (batch_ct + 1) % 1 == 0:
                 train_log(loss, acc, writer, sample_ct, epoch)
 
         
@@ -176,7 +176,7 @@ def train(model, train_loader, val_loader, optimizer, criterion, writer, device,
             loss, acc = evaluate_batch(x, y, model, criterion, device)
             
             # Log to TensorBoard and Weights & Biases
-            if (batch_ct + 1) % 25 == 0:
+            if (batch_ct + 1) % 1 == 0:
                 val_log(loss, acc, writer, sample_ct, epoch)
 
 
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     wandb.login()
     
     print("="*50)
-    print(f"Running {args.model.upper()} model experiment")
+    print(f"Running {args.model_type.upper()} model experiment")
     print("="*50)
     
     model = run_experiment(args)
