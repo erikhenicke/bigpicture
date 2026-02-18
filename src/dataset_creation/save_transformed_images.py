@@ -13,7 +13,7 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 def save_transformed_images(
     fmow_dir="data",
     landsat_dir="data",
-    output_dir="data/preprocessed",
+    output_dir="data",
     batch_size=1,
 ):
     """
@@ -27,8 +27,8 @@ def save_transformed_images(
     """
     
     # Create output directories
-    output_rgb_dir = Path(output_dir) / "fmow_rgb"
-    output_landsat_dir = Path(output_dir) / "landsat"
+    output_rgb_dir = Path(output_dir) / "fmow_preprocessed" / "fmow_rgb"
+    output_landsat_dir = Path(output_dir) / "fmow_preprocessed" / "landsat"
     output_rgb_dir.mkdir(parents=True, exist_ok=True)
     output_landsat_dir.mkdir(parents=True, exist_ok=True)
     
