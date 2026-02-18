@@ -9,5 +9,5 @@
 
 if [[ "$(hostname)" == "gaia4" ]]; then
     cd /home/henicke/git/bigpicture
-    PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/save_transformed_images.py --fmow-dir=/home/henicke/git/bigpicture/data --landsat-dir=/home/datasets4/FMoW_LandSat --output-dir=/data/henicke/FMoW_LandSat
+    PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/dataset_creation/save_transformed_images.py --fmow-dir=/home/henicke/git/bigpicture/data --landsat-dir=/home/datasets4/FMoW_LandSat --output-dir=/data/henicke/FMoW_LandSat
 fi
