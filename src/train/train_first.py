@@ -98,8 +98,8 @@ def evaluate_batch(x, y, model, criterion, device):
 def train_log(loss, acc, sample_ct, epoch):
     wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch}, step=sample_ct)
 
-def val_log(loss, acc, epoch):
-    wandb.log({'val_loss': loss, 'val_acc': acc}, step=epoch)
+def val_log(loss, acc, sample_ct):
+    wandb.log({'val_loss': loss, 'val_acc': acc}, step=sample_ct)
 
 def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batch_ct, epoch):
     for batch in tqdm(dataloader, desc="Training"):
@@ -115,7 +115,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batc
 
     return sample_ct, batch_ct
 
-def evaluate_epoch(model, dataloader, criterion, device, epoch):
+def evaluate_epoch(model, dataloader, criterion, device, sample_ct):
     val_loss = 0
     val_correct = 0
     val_total = 0
@@ -129,7 +129,7 @@ def evaluate_epoch(model, dataloader, criterion, device, epoch):
     # Log validation metrics after each epoch
     val_loss /= len(dataloader)
     val_acc = val_correct / val_total
-    val_log(val_loss, val_acc, epoch)
+    val_log(val_loss, val_acc, sample_ct)
 
 
 def train(model, train_loader, val_loader, optimizer, criterion, device, config):
@@ -140,7 +140,7 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, config)
     batch_ct = 0
     for epoch in tqdm(range(config.epochs), desc="Epochs"):
         sample_ct, batch_ct = train_epoch(model, train_loader, optimizer, criterion, device, sample_ct, batch_ct, epoch)
-        evaluate_epoch(model, val_loader, criterion, device, epoch)
+        evaluate_epoch(model, val_loader, criterion, device, sample_ct)
 
 
 def run_experiment(args):
