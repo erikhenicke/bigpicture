@@ -3,8 +3,8 @@
 #SBATCH --job-name=test_training
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=test_training.%j.out
-#SBATCH --error=test_training.%j.err
+#SBATCH --output=slurm/test_training.%j.out
+#SBATCH --error=slurm/test_training.%j.err
 #SBATCH --gres=gpu:1
   
 # Your commands go here

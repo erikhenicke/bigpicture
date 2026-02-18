@@ -3,8 +3,8 @@
 #SBATCH --job-name=download_landsat8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
-#SBATCH --output=download_landsat8.%j.out
-#SBATCH --error=download_landsat8.%j.err
+#SBATCH --output=slurm/download_landsat8.%j.out
+#SBATCH --error=slurm/download_landsat8.%j.err
   
 # Your commands go here
 source ~/.bashrc
