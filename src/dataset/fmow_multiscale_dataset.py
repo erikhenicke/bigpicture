@@ -138,14 +138,10 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Returns tuple of (x, y, metadata) following WILDS convention.
         x is now a dict with 'rgb' and 'landsat' keys.
         """
-        # TODO - implement actual loading instead of random tensors for testing
-        # file_idx = self.full_idxs[idx]
+        file_idx = self.full_idxs[idx]
 
-        # rgb_img = self.get_rgb_input(file_idx)
-        # landsat_img = self.get_landsat_input(file_idx)
-
-        rgb_img = torch.randn(3, 224, 224)
-        landsat_img = torch.randn(6, 224, 224)
+        rgb_img = self.get_rgb_input(file_idx)
+        landsat_img = self.get_landsat_input(file_idx)
 
         y = self._y_array[idx]
         metadata = self._metadata_array[idx]
