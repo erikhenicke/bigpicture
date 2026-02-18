@@ -19,7 +19,7 @@ def get_data(frac: float = 0.1):
     preprocessed_dir = None
 
     if platform.node() == 'gaia4':
-        preprocessed_dir = '/home/data/FMoW_LandSat'
+        preprocessed_dir = '/data/henicke/FMoW_LandSat'
 
     dataset = FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
