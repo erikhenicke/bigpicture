@@ -7,7 +7,6 @@ import argparse
 from pathlib import Path
 import torch
 from tqdm import tqdm
-import numpy as np
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 
 
@@ -33,17 +32,24 @@ def save_transformed_images(
     output_rgb_dir.mkdir(parents=True, exist_ok=True)
     output_landsat_dir.mkdir(parents=True, exist_ok=True)
     
+    # Read indices from landsat image filenames
+    landsat_images_dir = Path(landsat_dir) / "fmow_landsat" / "images"
+    idxs = []
+    if landsat_images_dir.exists():
+        for img_file in landsat_images_dir.glob("image_*.tif"):
+            idx_str = img_file.stem.replace("image_", "")
+            try:
+                idxs.append(int(idx_str))
+            except ValueError:
+                continue
+    
     print(f"Loading dataset from {fmow_dir}...")
     dataset = FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
     )
     
-    train_data_idxs = dataset.get_subset(split="train").indices
-    val_data_idxs = dataset.get_subset(split="val").indices
-    idxs = np.concatenate([train_data_idxs, val_data_idxs])
-    
-    print(f"Dataset contains {len(dataset)} images")
+    print(f"Found {len(idxs)} images in landsat directory")
     print(f"Saving RGB images to: {output_rgb_dir}")
     print(f"Saving Landsat images to: {output_landsat_dir}")
     print()
@@ -55,8 +61,14 @@ def save_transformed_images(
     
     with tqdm(total=len(idxs), desc="Processing images") as pbar:
         for idx in idxs:
+            # Skip if already preprocessed
+            if (output_rgb_dir / f"rgb_img_{idx}.pt").exists() and \
+               (output_landsat_dir / f"image_{idx}.pt").exists():
+                pbar.update(1)
+                continue
+            
             try:
-                x, y, metadata = dataset[idx]
+                x, _, _ = dataset[idx]
                 rgb_list.append(x["rgb"])
                 landsat_list.append(x["landsat"])
                 indices.append(idx)
@@ -64,7 +76,7 @@ def save_transformed_images(
                 pbar.update(1)
                 
                 # Save in batches to avoid memory issues
-                if len(rgb_list) >= batch_size or idx == len(idxs) - 1:
+                if len(rgb_list) >= batch_size or idx == idxs[-1]:
                     for i, orig_idx in enumerate(indices):
                         torch.save(rgb_list[i], output_rgb_dir / f"rgb_img_{orig_idx}.pt")
                         torch.save(landsat_list[i], output_landsat_dir / f"image_{orig_idx}.pt")
@@ -78,7 +90,7 @@ def save_transformed_images(
                 pbar.update(1)
                 continue
     
-    print(f"\n✓ Successfully saved all transformed images!")
+    print("\n✓ Successfully saved all transformed images!")
     print(f"  RGB images: {output_rgb_dir}")
     print(f"  Landsat images: {output_landsat_dir}")
 
