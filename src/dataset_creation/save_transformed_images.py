@@ -28,7 +28,7 @@ def save_transformed_images(
     """
     
     # Create output directories
-    output_rgb_dir = Path(output_dir) / "rgb"
+    output_rgb_dir = Path(output_dir) / "fmow_rgb"
     output_landsat_dir = Path(output_dir) / "landsat"
     output_rgb_dir.mkdir(parents=True, exist_ok=True)
     output_landsat_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/home/datasets4/FMoW_LandSat/preprocessed",
+        default="/home/datasets4/FMoW_LandSat/fmow_preprocessed",
         help="Directory to save preprocessed .pt files",
     )
     parser.add_argument(

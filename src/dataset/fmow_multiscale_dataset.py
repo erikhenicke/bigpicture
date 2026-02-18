@@ -12,7 +12,7 @@ from wilds.datasets.wilds_dataset import WILDSDataset
 class FMoWMultiScaleDataset(WILDSDataset):
     """
     Extended FMoW Dataset that loads both:
-    1. RGB images (224x224, 3 channels) - high resolution FMoW samples
+    1. FMoW RGB images (224x224, 3 channels) - high resolution FMoW samples
     2. Landsat GeoTIFF images (224x224, 6 bands) - broader scale context
 
     Inherits from WILDSDataset to maintain compatibility with WILDS package.
@@ -24,6 +24,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self,
         fmow_dir="data",
         landsat_dir="data",
+        preprocessed_dir=None,
         metadata_csv="rgb_metadata.csv",
         split_scheme="official",
         use_ood_val=True,
@@ -54,9 +55,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.fmow_images = self.root_fmow / "images"
         self.root_landsat = Path(landsat_dir) / "fmow_landsat"
         self.landsat_images = self.root_landsat / "images"
-        self.preprocessed = Path(landsat_dir) / "preprocessed"
-        self.fmow_images_preprocessed = self.preprocessed / "rgb"
-        self.landsat_images_preprocessed = self.preprocessed / "landsat"
+        if preprocessed_dir is not None:
+            self.fmow_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "fmow_rgb"
+            self.landsat_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "landsat"
 
         # Inherit attributes from base dataset
         self._dataset_name = "fmow_multiscale"
@@ -155,7 +156,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
     def get_rgb_input(self, idx):
         """Load RGB FMoW image"""
 
-        return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt")
+        if self.fmow_images_preprocessed is not None:
+            return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt")
 
         img_path = self.fmow_images / f"rgb_img_{idx}.png"
         img = Image.open(img_path).convert("RGB")
@@ -170,8 +172,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Load Landsat GeoTIFF image with all 6 bands.
         Returns tensor of shape (6, 224, 224).
         """
-
-        return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt") 
+        if self.landsat_images_preprocessed is not None:
+            return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt") 
 
         tif_path = self.landsat_images / f"image_{idx}.tif"
 

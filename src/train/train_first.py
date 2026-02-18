@@ -2,6 +2,8 @@ from models.single_scale_deit import SingleScaleDeiT
 from models.multi_scale_deit import MultiResolutionDeiT
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 
+import platform
+
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -11,9 +13,18 @@ import wandb
 
 
 def get_data(frac: float = 0.1):
+
+    fmow_dir = '/home/henicke/git/bigpicture/data'
+    landsat_dir = '/home/datasets4/FMoW_LandSat'
+    preprocessed_dir = None
+
+    if platform.node() == 'gaia4':
+        preprocessed_dir = '/home/data/FMoW_LandSat'
+
     dataset = FMoWMultiScaleDataset(
-        fmow_dir='/home/henicke/git/bigpicture/data',
-        landsat_dir='/home/datasets4/FMoW_LandSat',
+        fmow_dir=fmow_dir,
+        landsat_dir=landsat_dir,
+        preprocessed_dir=preprocessed_dir
     )
     return dataset.get_subset(split='train', frac=frac), dataset.get_subset(split='val', frac=frac)
 

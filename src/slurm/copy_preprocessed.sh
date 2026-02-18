@@ -3,7 +3,6 @@
 #SBATCH --exclude=gaia1,gaia2,gaia3,gaia5,gaia6,gaia7
 #SBATCH --job-name=copy_fmow
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
 #SBATCH --output=copy_fmow.%j.out
 #SBATCH --error=copy_fmow.%j.err
 

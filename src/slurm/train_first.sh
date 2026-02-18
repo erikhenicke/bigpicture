@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=robolab
+#SBATCH --exclude=gaia1,gaia2,gaia3,gaia5,gaia6,gaia7
 #SBATCH --job-name=train_sm_deit
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
@@ -9,5 +10,5 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model_type=multi --epochs=10 --batch_size=32 --frac=1.0
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model_type=single --epochs=10 --batch_size=32 --frac=1.0
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model_type=multi --epochs=50 --batch_size=384 --frac=1.0
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model_type=single --epochs=50 --batch_size=384 --frac=1.0
