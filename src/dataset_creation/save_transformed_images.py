@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 import torch
 from tqdm import tqdm
+import numpy as np
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 
 
@@ -38,6 +39,10 @@ def save_transformed_images(
         landsat_dir=landsat_dir,
     )
     
+    train_data_idxs = dataset.get_subset(split="train").indices
+    val_data_idxs = dataset.get_subset(split="val").indices
+    idxs = np.concatenate([train_data_idxs, val_data_idxs])
+    
     print(f"Dataset contains {len(dataset)} images")
     print(f"Saving RGB images to: {output_rgb_dir}")
     print(f"Saving Landsat images to: {output_landsat_dir}")
@@ -48,8 +53,8 @@ def save_transformed_images(
     landsat_list = []
     indices = []
     
-    with tqdm(total=len(dataset), desc="Processing images") as pbar:
-        for idx in dataset.full_idxs:
+    with tqdm(total=len(idxs), desc="Processing images") as pbar:
+        for idx in idxs:
             try:
                 x, y, metadata = dataset[idx]
                 rgb_list.append(x["rgb"])
@@ -59,7 +64,7 @@ def save_transformed_images(
                 pbar.update(1)
                 
                 # Save in batches to avoid memory issues
-                if len(rgb_list) >= batch_size or idx == len(dataset) - 1:
+                if len(rgb_list) >= batch_size or idx == len(idxs) - 1:
                     for i, orig_idx in enumerate(indices):
                         torch.save(rgb_list[i], output_rgb_dir / f"rgb_img_{orig_idx}.pt")
                         torch.save(landsat_list[i], output_landsat_dir / f"image_{orig_idx}.pt")
