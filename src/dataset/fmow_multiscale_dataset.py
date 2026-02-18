@@ -54,6 +54,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.fmow_images = self.root_fmow / "images"
         self.root_landsat = Path(landsat_dir) / "fmow_landsat"
         self.landsat_images = self.root_landsat / "images"
+        self.preprocessed = Path(landsat_dir) / "preprocessed"
+        self.fmow_images_preprocessed = self.preprocessed / "rgb"
+        self.landsat_images_preprocessed = self.preprocessed / "landsat"
 
         # Inherit attributes from base dataset
         self._dataset_name = "fmow_multiscale"
@@ -151,6 +154,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     def get_rgb_input(self, idx):
         """Load RGB FMoW image"""
+
+        return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt")
+
         img_path = self.fmow_images / f"rgb_img_{idx}.png"
         img = Image.open(img_path).convert("RGB")
 
@@ -164,6 +170,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Load Landsat GeoTIFF image with all 6 bands.
         Returns tensor of shape (6, 224, 224).
         """
+
+        return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt") 
+
         tif_path = self.landsat_images / f"image_{idx}.tif"
 
         with rasterio.open(tif_path) as src:
