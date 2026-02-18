@@ -49,7 +49,7 @@ def save_transformed_images(
     indices = []
     
     with tqdm(total=len(dataset), desc="Processing images") as pbar:
-        for idx in range(len(dataset)):
+        for idx in dataset.full_idxs:
             try:
                 x, y, metadata = dataset[idx]
                 rgb_list.append(x["rgb"])
