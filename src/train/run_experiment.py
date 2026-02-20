@@ -1,16 +1,21 @@
 from models.single_scale_deit import SingleScaleDeiT
-from models.multi_scale_deit import MultiResolutionDeiT
-from models.dense_net_121 import DenseNet121 
+from models.multi_scale_deit import MultiScaleDeiT
+from models.single_scale_dense_net_121 import SingleScaleDenseNet121 
+from models.multi_scale_dense_net_121 import MultiScaleDenseNet121
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 
 import platform
+from collections import defaultdict
 
 import torch
 from torch.utils.data import DataLoader
-from torch.optim import AdamW
+from torch.optim import Adam, AdamW
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
 import wandb
+
+REGION_INDEX = 0
+FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
 
 
 def get_data(frac: float = 0.1):
@@ -45,12 +50,14 @@ def make(config: dict, device='cuda'):
     
     # Initialize model
     print(f"Initializing {config.model_type} model...")
-    if config.model_type == 'single':
+    if config.model_type == 'single-deit':
         model = SingleScaleDeiT(num_labels=62)
-    elif config.model_type == 'multi':
-        model = MultiResolutionDeiT(num_labels=62)
+    elif config.model_type == 'multi-deit':
+        model = MultiScaleDeiT(num_labels=62, in_channels=config.landsat_in_channels)
+    elif config.model_type == 'single-dense-net-121':
+        model = SingleScaleDenseNet121(num_labels=62)
     else:
-        model = DenseNet121(num_labels=62)
+        model = MultiScaleDenseNet121(num_labels=62, in_channels=config.landsat_in_channels)
     
     model = model.to(device)
     
@@ -62,7 +69,7 @@ def make(config: dict, device='cuda'):
     if config.optimizer == 'adamw':
         optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+        optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
 
     criterion = CrossEntropyLoss()
 
@@ -86,26 +93,8 @@ def train_batch(x, y, model, optimizer, criterion, device):
 
     return loss.item(), correct / total
 
-def evaluate_batch(x, y, model, criterion, device):
-    model.eval()
-
-    x = {k: v.to(device) for k, v in x.items()}
-    y = y.to(device)
-
-    with torch.no_grad():
-        logits = model(x)
-        loss = criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        correct = (preds == y).sum().item()
-        total = y.size(0)
-
-    return loss.item(), correct / total
-
 def train_log(loss, acc, sample_ct, epoch):
     wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch}, step=sample_ct)
-
-def val_log(loss, acc, sample_ct):
-    wandb.log({'val_loss': loss, 'val_acc': acc}, step=sample_ct)
 
 def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batch_ct, epoch):
     for batch in tqdm(dataloader, desc="Training"):
@@ -121,21 +110,90 @@ def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batc
 
     return sample_ct, batch_ct
 
+def _get_region_names(dataloader):
+    dataset = dataloader.dataset
+    base_dataset = getattr(dataset, "dataset", dataset)
+    metadata_map = getattr(base_dataset, "_metadata_map", None)
+    print(metadata_map)
+    if metadata_map and "region" in metadata_map:
+        return list(metadata_map["region"])
+    return []
+
+def evaluate_batch(x, y, metadata, model, criterion, device):
+    model.eval()
+
+    x = {k: v.to(device) for k, v in x.items()}
+    y = y.to(device)
+    print(metadata)
+    region_ids = metadata[:, REGION_INDEX].to(device)
+
+    with torch.no_grad():
+        logits = model(x)
+        loss = criterion(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        correct_mask = (preds == y)
+        correct = correct_mask.sum().item()
+        total = y.size(0)
+
+    region_correct = defaultdict(int)
+    region_total = defaultdict(int)
+    for rid in torch.unique(region_ids):
+        rid_int = int(rid.item())
+        mask = region_ids == rid
+        region_total[rid_int] += int(mask.sum().item())
+        region_correct[rid_int] += int((correct_mask & mask).sum().item())
+
+    return loss.item(), correct / total, region_correct, region_total
+
+def val_log(loss, acc, sample_ct, extra_metrics=None):
+    payload = {'val_loss': loss, 'val_acc': acc}
+    if extra_metrics:
+        payload.update(extra_metrics)
+    wandb.log(payload, step=sample_ct)
+
 def evaluate_epoch(model, dataloader, criterion, device, sample_ct):
     val_loss = 0
     val_correct = 0
     val_total = 0
+    region_correct_total = defaultdict(int)
+    region_total_total = defaultdict(int)
+    region_names = _get_region_names(dataloader)
+
     for batch in tqdm(dataloader, desc="Evaluating"):
-        x, y, _ = batch
-        loss, acc = evaluate_batch(x, y, model, criterion, device)
+        x, y, metadata = batch
+        loss, acc, region_correct, region_total = evaluate_batch(
+            x, y, metadata, model, criterion, device
+        )
         val_loss += loss
         val_correct += acc * y.size(0)
         val_total += y.size(0)
+
+        for rid, count in region_total.items():
+            region_total_total[rid] += count
+        for rid, count in region_correct.items():
+            region_correct_total[rid] += count
     
     # Log validation metrics after each epoch
     val_loss /= len(dataloader)
     val_acc = val_correct / val_total
-    val_log(val_loss, val_acc, sample_ct)
+
+    per_region_acc = {}
+    for rid, total in region_total_total.items():
+        if total == 0:
+            continue
+        name = region_names[rid] if rid < len(region_names) else str(rid)
+        per_region_acc[name] = region_correct_total[rid] / total
+
+    filtered_acc = [acc for name, acc in per_region_acc.items() if name in FIVE_REGIONS]
+    worst_group_acc = min(filtered_acc) if filtered_acc else 0.0
+
+    extra_metrics = {
+        "val_worst_group_acc": worst_group_acc,
+    }
+    for name, acc in per_region_acc.items():
+        extra_metrics[f"val_region_{name}_acc"] = acc
+
+    val_log(val_loss, val_acc, sample_ct, extra_metrics=extra_metrics)
 
 
 def train(model, train_loader, val_loader, optimizer, criterion, device, config):
@@ -177,7 +235,8 @@ def run_experiment(args):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single', choices=['single', 'multi', 'dense_net_121'])
+    parser.add_argument('--model_type', type=str, default='single', choices=['single-deit', 'multi-deit', 'single-dense-net-121', 'multi-dense-net-121'])
+    parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--frac', type=float, default=0.01, help='Fraction of data to use')

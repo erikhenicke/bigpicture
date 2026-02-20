@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torchvision.models import densenet121
 
-class DenseNet121(nn.Module):
+class SingleScaleDenseNet121(nn.Module):
     def __init__(self, num_labels=62):
         super().__init__()
 

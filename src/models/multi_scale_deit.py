@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import ViTForImageClassification 
 
 
-class MultiResolutionDeiT(nn.Module):
+class MultiScaleDeiT(nn.Module):
     def __init__(self, num_labels=62, in_channels=6, pos_enc='learnable'):
         super().__init__()
 
