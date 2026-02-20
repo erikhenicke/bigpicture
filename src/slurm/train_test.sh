@@ -9,4 +9,4 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/train_first.py --model_type=multi --epochs=1 --batch_size=10 --frac=0.01
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi --epochs=1 --batch_size=10 --frac=0.01

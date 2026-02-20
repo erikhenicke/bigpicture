@@ -1,5 +1,6 @@
 from models.single_scale_deit import SingleScaleDeiT
 from models.multi_scale_deit import MultiResolutionDeiT
+from models.dense_net_121 import DenseNet121 
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 
 import platform
@@ -13,12 +14,11 @@ import wandb
 
 
 def get_data(frac: float = 0.1):
-
     fmow_dir = '/home/henicke/git/bigpicture/data'
     landsat_dir = '/home/datasets4/FMoW_LandSat'
     preprocessed_dir = None
 
-    if platform.node() == 'gaia4':
+    if platform.node() == 'gaia4' or platform.node() == 'gaia5':
         preprocessed_dir = '/data/henicke/FMoW_LandSat'
 
     dataset = FMoWMultiScaleDataset(
@@ -47,8 +47,10 @@ def make(config: dict, device='cuda'):
     print(f"Initializing {config.model_type} model...")
     if config.model_type == 'single':
         model = SingleScaleDeiT(num_labels=62)
-    else:
+    elif config.model_type == 'multi':
         model = MultiResolutionDeiT(num_labels=62)
+    else:
+        model = DenseNet121(num_labels=62)
     
     model = model.to(device)
     
@@ -57,7 +59,11 @@ def make(config: dict, device='cuda'):
     print(f"Total parameters: {total_params:,}")
     
     # Training setup
-    optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
+    if config.optimizer == 'adamw':
+        optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+
     criterion = CrossEntropyLoss()
 
     return model, train_loader, val_loader, optimizer, criterion
@@ -139,6 +145,9 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, config)
     sample_ct = 0
     batch_ct = 0
     for epoch in tqdm(range(config.epochs), desc="Epochs"):
+        if config.learning_rate_decay < 1.0:
+            lr = config.learning_rate * (config.learning_rate_decay ** epoch)
+            optimizer.param_groups[0]['lr'] = lr
         sample_ct, batch_ct = train_epoch(model, train_loader, optimizer, criterion, device, sample_ct, batch_ct, epoch)
         evaluate_epoch(model, val_loader, criterion, device, sample_ct)
 
@@ -168,10 +177,14 @@ def run_experiment(args):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single', choices=['single', 'multi'])
+    parser.add_argument('--model_type', type=str, default='single', choices=['single', 'multi', 'dense_net_121'])
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--frac', type=float, default=0.01, help='Fraction of data to use')
+    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam'])
+    parser.add_argument('--learning_rate', type=float, default=5e-5)
+    parser.add_argument('--learning_rate_decay', type=float, default=1.0)
+    parser.add_argument('--weight_decay', type=float, default=0)
     args = parser.parse_args()
 
     wandb.login()
