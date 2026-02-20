@@ -1,4 +1,3 @@
-
 #!/bin/bash
 #SBATCH --partition=robolab
 #SBATCH --exclude=gaia1,gaia2,gaia3,gaia6,gaia7
