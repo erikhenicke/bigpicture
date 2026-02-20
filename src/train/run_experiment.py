@@ -114,7 +114,6 @@ def _get_region_names(dataloader):
     dataset = dataloader.dataset
     base_dataset = getattr(dataset, "dataset", dataset)
     metadata_map = getattr(base_dataset, "_metadata_map", None)
-    print(metadata_map)
     if metadata_map and "region" in metadata_map:
         return list(metadata_map["region"])
     return []
@@ -124,7 +123,6 @@ def evaluate_batch(x, y, metadata, model, criterion, device):
 
     x = {k: v.to(device) for k, v in x.items()}
     y = y.to(device)
-    print(metadata)
     region_ids = metadata[:, REGION_INDEX].to(device)
 
     with torch.no_grad():
@@ -239,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--frac', type=float, default=0.01, help='Fraction of data to use')
+    parser.add_argument('--frac', type=float, default=1.0, help='Fraction of data to use')
     parser.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam'])
     parser.add_argument('--learning_rate', type=float, default=5e-5)
     parser.add_argument('--learning_rate_decay', type=float, default=1.0)

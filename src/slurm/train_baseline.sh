@@ -10,4 +10,4 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-dense-net-121 --epochs=50 --batch_size=64 --frac=0.01 --optimizer=adam --learning_rate=1e-4 --learning_rate_decay=0.96
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-dense-net-121 --epochs=100 --batch_size=64 --frac=1.0 --optimizer=adam --learning_rate=1e-4 --learning_rate_decay=0.96
