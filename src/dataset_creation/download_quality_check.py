@@ -14,7 +14,8 @@ PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
             "datasets4" / "FMoW_LandSat" / "fmow_landsat")
 IMAGES_DIR = DATA_DIR / "images"
-LOG_FILE = PROJECT_ROOT / 'quality_check.log'
+LOG_DIR = PROJECT_ROOT / "log"
+LOG_FILE = LOG_DIR / 'quality_check.log'
 
 
 def check_image_quality(image_path, zero_threshold=0.01, mask_threshold=0.01, nan_inf_threshold=0.0):
@@ -90,6 +91,9 @@ def get_downloaded_indices(tiff_files, logger):
 
 def main(num_samples=None, zero_threshold=0.01, mask_threshold=0.01, nan_inf_threshold=0.0):
 
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR)
+
     # Initialize logging
     logger = logging.getLogger('quality_check')
     logger.setLevel(logging.INFO)
@@ -112,7 +116,7 @@ def main(num_samples=None, zero_threshold=0.01, mask_threshold=0.01, nan_inf_thr
         return
 
     # Check if download is complete
-    dataset = get_dataset(dataset="fmow")
+    dataset = get_dataset(dataset="fmow", download=False, root_dir="/home/henicke/data")
     split_names = ['train', 'val', 'test', 'id_val', 'id_test']
     subsets_indices = [dataset.get_subset(
         split_name).indices for split_name in split_names]

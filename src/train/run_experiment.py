@@ -19,7 +19,7 @@ FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
 
 
 def get_data(frac: float = 0.1):
-    fmow_dir = '/home/henicke/git/bigpicture/data'
+    fmow_dir = '/home/henicke/data'
     landsat_dir = '/home/datasets4/FMoW_LandSat'
     preprocessed_dir = None
 

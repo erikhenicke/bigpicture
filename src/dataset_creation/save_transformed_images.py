@@ -102,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fmow-dir",
         type=str,
-        default="/home/henicke/git/bigpicture/data",
+        default="/home/henicke/data",
         help="Directory containing FMoW dataset",
     )
     parser.add_argument(

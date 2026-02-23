@@ -19,8 +19,8 @@ from geopy.point import Point
 tqdm.pandas()
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-DATA_DIR = PROJECT_ROOT / "data"
-DEST_DIR = PROJECT_ROOT.parent.parent.parent / "datasets4" / "FMoW_LandSat" / "fmow_landsat"
+DATA_DIR = pathlib.Path("/home/henicke/data")
+DEST_DIR = pathlib.Path("/home/datasets4/FMoW_LandSat/fmow_landsat")
 METADATA_DIR = DATA_DIR / "groundtruth"
 
 if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR) and os.path.exists(METADATA_DIR) and os.path.exists(DEST_DIR)):
@@ -146,7 +146,7 @@ def extract_center_coords_and_img_span(wilds_metadata_sample):
 
 
 def main():
-    dataset = get_dataset(dataset="fmow")
+    dataset = get_dataset(dataset="fmow", download=False, root_dir="/home/henicke/data")
     metadata = dataset.metadata
     coords_and_span = metadata.progress_apply(
         extract_center_coords_and_img_span, axis=1)

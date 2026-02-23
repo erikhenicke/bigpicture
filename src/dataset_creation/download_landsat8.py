@@ -13,6 +13,9 @@ import shutil
 import random
 import logging
 import typing
+import pytz
+import re
+
 
 import requests
 import numpy as np
@@ -25,17 +28,17 @@ from geopy.point import Point
 pandarallel.initialize(nb_workers=20)
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
-# TODO
-DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
-# DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
-#             "datasets4" / "FMoW_LandSat" / "fmow_landsat")
+DATA_DIR = (PROJECT_ROOT.parent.parent.parent /
+            "datasets4" / "FMoW_LandSat" / "fmow_landsat")
 IMAGES_DIR = DATA_DIR / "images"
-LOG_FILE = PROJECT_ROOT / 'download.log'
+LOG_DIR = PROJECT_ROOT / "log"
+LOG_FILE = LOG_DIR / 'download.log'
 EE_PROJECT_NAME = 'seeing-the-big-picture'
+APPEND_DOWNLOAD = True
 EXTENSION_FACTOR = 3.0
 SCALE = 30.0
 MAX_PIXELS = 1e8
-MIN_COL_SIZE = 100
+MIN_COL_SIZE = 50
 
 
 def compute_img_span(img_center_lon: float, img_center_lat: float, img_span_km: float) -> tuple[float, float]:
@@ -80,76 +83,6 @@ def extract_region_of_interest(sample_metadata: pd.Series, span_km: float) -> ee
     return ee.Geometry.Rectangle(extended_bounds)
 
 
-def mask_clouds_compute_validity(image: ee.Image, region_of_interest: ee.Geometry.Rectangle) -> ee.Image:
-    """Updates an image mask, to filter out cloudy pixels and compute the fraction of non-masked pixels in the ROI.
-
-    For a detailed description of the 'QA_PIXEL' flags see:
-        https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands
-
-    Args:
-        image (ee.Image): Image to filter clouds from.
-        region_of_interest (ee.Geometry.Rectangle): Region to compute the fraction of non-masked pixels of the image for.
-    Returns:
-        ee.Image: Image that also holds the fraction of pixels, which are not masked.
-    """
-    qa = image.select('QA_PIXEL')
-    # Only pixels for which the first 5 bits equal zero are not masked away.
-    cloud_mask = qa.bitwiseAnd(int('11111', 2)).eq(0)
-    masked_image = image.updateMask(cloud_mask)
-
-    validity = ee.Number(
-        masked_image.select(['SR_B4', 'SR_B3', 'SR_B2'])
-        .mask()
-        .reduce(ee.Reducer.min())
-        .reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=region_of_interest,
-            scale=SCALE,
-            maxPixels=MAX_PIXELS)
-        .get('min')
-    )
-    return typing.cast(ee.Image, masked_image.set('validity', validity))
-
-
-def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float) -> tuple[ee.Image, ee.Geometry.Rectangle, bool, str]:
-    """Get request for least cloudy image and request for the infromation if a composite will be returned.
-
-    Mosaic composite is requested, if single least cloudy image contains more than 1% of invalid pixels.
-
-    Args:
-        sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
-        l8 (ee.ImageCollection): Landsat8 image collection.
-        span_km (float): Image size in kilometer to download.
-
-    Returns:
-        tuple[ee.Image, ee.Geometry.Rectangle, bool, str]: 
-            - Request for least cloudy image
-            - Region of interes
-            - Bool that says if a composite will be returned
-            - String date of the image, if it is not a composite.
-    """
-    date = None
-    region_of_interest = extract_region_of_interest(sample_metadata, span_km)
-    l8_cloud_masked = (l8
-                       .filterBounds(region_of_interest)
-                       .filterMetadata('CLOUD_COVER', 'less_than', 50)
-                       .map(lambda img:
-                            mask_clouds_compute_validity(
-                                img, region_of_interest))
-                       )
-    least_cloudy = l8_cloud_masked.sort('validity', False).first()
-    validity = ee.Number(least_cloudy.get('validity')).getInfo()
-    is_least_cloudy_ok = validity >= 0.99
-    if is_least_cloudy_ok:
-        date = least_cloudy.date().format(None, 'GMT').getInfo()
-    mosaic = l8_cloud_masked.mosaic()
-    optical_bands = ['SR_B4', 'SR_B3', 'SR_B2']
-    vis_params = {'bands': optical_bands, 'min': 0, 'max': 0.3}
-    final_image = least_cloudy.visualize(
-        **vis_params) if is_least_cloudy_ok else mosaic.visualize(**vis_params)
-    return (final_image, region_of_interest, is_least_cloudy_ok, date)
-
-
 def get_date_range(sample_metadata, day_span=90):
     sample_date = datetime.strptime(
         sample_metadata["timestamp"], '%Y-%m-%dT%H:%M:%SZ')
@@ -173,14 +106,7 @@ def month_add(date: str, months_to_add=1) -> str:
 
 def mask_slc_gaps(image):
     qa_pixel = image.select('QA_PIXEL')
-
-    # Bit 1: Fill (includes SLC gaps)
-    fill_mask = qa_pixel.bitwiseAnd(0).eq(0)
-    # Bit 4: Cloud
-    cloud_mask = qa_pixel.bitwiseAnd(8).eq(0)  # 1<<4 = 16
-    cloud_shadow_mask = qa_pixel.bitwiseAnd(16).eq(0)  # 1<<4 = 16
-
-    full_mask = fill_mask.And(cloud_mask).And(cloud_shadow_mask)
+    full_mask = qa_pixel.bitwiseAnd(63).eq(0)
     return image.updateMask(full_mask)
 
 
@@ -212,9 +138,8 @@ def get_median_request(sample_metadata, cols, cols_bands, span_km):
     region_of_interest = extract_region_of_interest(sample_metadata, span_km)
     col, date_range, col_name, col_size = get_landsat_col(
         cols, get_date_range(sample_metadata), region_of_interest)
-    vis_params = {'bands': cols_bands[col_name], 'min': 0, 'max': 0.3}
     median_img = col.median().clip(region_of_interest).reproject(
-        crs='EPSG:3857', scale=30).visualize(**vis_params)
+        crs='EPSG:3857', scale=30)
     return (median_img, region_of_interest, date_range, col_name, col_size)
 
 
@@ -228,11 +153,12 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
         span_km (float): Image size in kilometer to download.
         logger (logging.Logger):
     """
+    date_range, col_size, col_name = None, None, None
     attempts = 30
     attempts_left = attempts
     while attempts_left > 0:
         try:
-            image_request, region, date_range, col_str, col_size = get_median_request(
+            image_request, region, date_range, col_name, col_size = get_median_request(
                 sample_metadata, cols, cols_bands, span_km
             )
         except Exception as e:
@@ -243,23 +169,16 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
             break
 
     sample_idx = sample_metadata.name
-    # download_path = IMAGES_DIR / f"rgb_image_{sample_idx}.tif"
-    download_path = IMAGES_DIR / \
-        f"rgb_image_{sample_idx}_{col_str}_{col_size}.png"
-
-    # if col_str == 'L7':
-    #     image_request_bands = image_request.select(l7_bands)
-    # else:  # L8
-    #     image_request_bands = image_request.select(l8_bands)
+    download_path = (
+        IMAGES_DIR / f"image_{sample_idx}.tif")
 
     while attempts_left > 0:
         try:
-            url = image_request.getDownloadUrl({
+            url = image_request.select(cols_bands[col_name]).getDownloadUrl({
                 'scale': 30,
-                'format': 'PNG',
-                'dimensions': f'{pixel_dim}x{pixel_dim}'
-                # 'format': 'GeoTIFF',
-                # 'filePerBand': False
+                'dimensions': f'{pixel_dim}x{pixel_dim}',
+                'format': 'GeoTIFF',
+                'filePerBand': False
             })
             response = requests.get(url, stream=True)
 
@@ -276,7 +195,7 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
         else:
             break
 
-    return pd.Series({"date_range": date_range, "col_size": col_size, "col": col_str})
+    return pd.Series({"date_range": date_range, "col_size": col_size, "col": col_name})
 
 
 def scale_optical_bands(image, optical_bands):
@@ -291,12 +210,60 @@ def scale_optical_bands(image, optical_bands):
     return image.addBands(scaled_optical_bands, optical_bands, True)
 
 
+def get_fmow_wilds_mask(metadata):
+    timestamps = pd.to_datetime(metadata['timestamp'])
+    utc = pytz.UTC
+    id_mask = (timestamps >= utc.localize(datetime(2002, 1, 1))) & (
+        timestamps < utc.localize(datetime(2012 + 1, 1, 1)))
+    ood_val_mask = (timestamps >= utc.localize(datetime(2013, 1, 1))) & (
+        timestamps < utc.localize(datetime(2015 + 1, 1, 1)))
+    ood_test_mask = (timestamps >= utc.localize(datetime(2016, 1, 1))) & (
+        timestamps < utc.localize(datetime(2017 + 1, 1, 1)))
+    train_mask = (metadata['split'] == 'train')
+    val_mask = (metadata['split'] == 'val')
+    test_mask = (metadata['split'] == 'test')
+    return (id_mask & train_mask) | (ood_val_mask & val_mask) | (ood_test_mask & test_mask) | (id_mask & val_mask) | (id_mask & test_mask)
+
+
+def get_missing_mask(metadata):
+    """
+    Reads all TIFF files in IMAGE_DIR, extracts indices from filenames ('image_<idx>.tif'),
+    and returns a mask for rows in metadata where the index is missing from the folder.
+
+    Parameters:
+    - metadata (pd.DataFrame): Pandas DataFrame with metadata, must have an 'index' column (or specify index_col).
+
+    Returns:
+    - np.ndarray: Boolean mask where True indicates missing files.
+    """
+    # Read all TIFF filenames
+    tiff_files = [f for f in os.listdir(IMAGES_DIR) if f.endswith('.tif')]
+
+    # Extract indices using regex: image_(\d+).tif -> \d+
+    downloaded_indices = set()
+    pattern = r'image_(\d+)\.tif'
+    for filename in tiff_files:
+        match = re.search(pattern, filename)
+        if match:
+            downloaded_indices.add(int(match.group(1)))
+
+    # Get indices from metadata
+    metadata_indices = metadata.index.astype(
+        int).values
+
+    missing_mask = ~np.isin(metadata_indices, list(downloaded_indices))
+    return missing_mask
+
+
 def main():
     if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR)):
         raise NotADirectoryError()
 
     if not os.path.exists(IMAGES_DIR):
         os.makedirs(IMAGES_DIR)
+
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR)
 
     # Setup access for Google Earth Engine
     try:
@@ -318,31 +285,31 @@ def main():
 
     logger.addHandler(file_handler)
 
-    optical_bands_l5_l7 = ['SR_B3', 'SR_B2', 'SR_B1']  # , 'SR_B4', 'SR_B5']
-    optical_bands_l8 = ['SR_B4', 'SR_B3', 'SR_B2']  # , 'SR_B5', 'SR_B6']
+    # Setup Image collections
+    optical_bands_l5_l7 = ['SR_B1', 'SR_B2',
+                           'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7']
+    optical_bands_l8 = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']
     scale_l5_l7 = partial(scale_optical_bands,
                           optical_bands=optical_bands_l5_l7)
     scale_l8 = partial(scale_optical_bands, optical_bands=optical_bands_l8)
 
-    # Setup Image collection
     l5 = (ee.ImageCollection("LANDSAT/LT05/C02/T1_L2").map(scale_l5_l7))
     l7 = (ee.ImageCollection("LANDSAT/LE07/C02/T1_L2").map(scale_l5_l7))
     l8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').map(scale_l8))
 
-    landsat_cols = {'l8': l8, 'l5': l5, 'l7': l7}
-    landsat_cols_bands = {'l8': optical_bands_l8,
-                          'l7': optical_bands_l5_l7, 'l5': optical_bands_l5_l7}
+    cols = {'l8': l8, 'l5': l5, 'l7': l7}
+    cols_bands = {'l8': optical_bands_l8,
+                  'l7': optical_bands_l5_l7, 'l5': optical_bands_l5_l7}
 
     # Read metadata
     metadata = pd.read_csv(
         DATA_DIR / "rgb_metadata_extended.csv")
 
-    selected_splits = {"train", "val", "test"}
-    is_train_val_test = metadata["split"].isin(selected_splits)
-    is_first_sample = metadata["img_filename"].str.endswith("0_rgb.jpg")
-
-    # Sample size of metadata_selected is 470,086
-    metadata_selected = metadata.loc[is_train_val_test & is_first_sample]
+    wilds_mask = get_fmow_wilds_mask(metadata)
+    missing_mask = get_missing_mask(metadata)
+    metadata_mask = (
+        wilds_mask & missing_mask) if APPEND_DOWNLOAD else wilds_mask
+    metadata_selected = metadata.loc[metadata_mask]
     size = len(metadata_selected)
 
     max_span = metadata_selected["img_span_km"].max()
@@ -351,31 +318,20 @@ def main():
     logger.info("Download span of %f km was used (%d times the biggest sample span).",
                 download_span, EXTENSION_FACTOR)
 
-    # download_l8_image = partial(
-    #     download_image, l7=l7, l7_bands=optical_bands_l7, l8=l8, l8_bands=optical_bands_l8, span_km=download_span, logger=logger)
     download_l8_image = partial(
-        download_image, cols=landsat_cols, cols_bands=landsat_cols_bands, span_km=download_span, pixel_dim=pixel_dim, logger=logger)
-
-    # TODO
-    test_size = 50
-    test_subset = metadata_selected.sample(n=test_size)
+        download_image, cols=cols, cols_bands=cols_bands, span_km=download_span, pixel_dim=pixel_dim, logger=logger)
 
     start = time.time()
-    # download_metadata = metadata_selected.parallel_apply(
-    #     download_l8_image, axis=1)
-    download_metadata = test_subset.parallel_apply(download_l8_image, axis=1)
+    download_metadata = metadata_selected.parallel_apply(
+        download_l8_image, axis=1)
     end = time.time()
     logger.info("Download of %d images took %s seconds.",
                 size, f"{end - start:.2f}")
     print(f"Download of {size} images took {end - start:.2f} seconds.")
 
-    # metadata_downloaded = pd.concat(
-    #     [metadata_selected, download_metadata], axis=1)
-    # metadata_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
-
-    test_subset_downloaded = pd.concat(
-        [test_subset, download_metadata], axis=1)
-    test_subset_downloaded.to_csv(DATA_DIR / "test.csv")
+    metadata_downloaded = pd.concat(
+        [metadata_selected, download_metadata], axis=1)
+    metadata_downloaded.to_csv(DATA_DIR / "rgb_metadata_download.csv")
 
 
 if __name__ == '__main__':

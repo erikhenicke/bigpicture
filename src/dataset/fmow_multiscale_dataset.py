@@ -253,8 +253,8 @@ def collate_multiscale(batch):
 
 if __name__ == "__main__":
     dataset = FMoWMultiScaleDataset(
-        fmow_dir="/home/erik/git/bigpicture/data",
-        landsat_dir="/home/erik/git/bigpicture/data",
+        fmow_dir="/home/henicke/data",
+        landsat_dir="/home/datasets4/FMoW_LandSat",
     )
 
     sample, y, metadata = dataset[271258]

@@ -11,7 +11,7 @@ FIVE_REGIONS = ["Europe", "Americas", "Asia", "Africa", "Oceania"]
 
 
 def get_data(frac: float = 0.1):
-    fmow_dir = '/home/henicke/git/bigpicture/data'
+    fmow_dir = '/home/henicke/data'
     landsat_dir = '/home/datasets4/FMoW_LandSat'
     preprocessed_dir = None
 
@@ -82,7 +82,7 @@ def split_train_val_by_region(train_subset, val_subset, mapping_csv: str):
 if __name__ == "__main__":
     train, val = get_data(frac=1.0)
 
-    mapping_csv = Path('/home/henicke/git/bigpicture/data/fmow_v1.1/country_code_mapping.csv')
+    mapping_csv = Path('/home/henicke/data/fmow_v1.1/country_code_mapping.csv')
     train_regions, val_regions = split_train_val_by_region(train, val, str(mapping_csv))
 
     print("Train split sizes by region:")
