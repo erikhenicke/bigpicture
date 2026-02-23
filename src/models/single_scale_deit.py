@@ -9,7 +9,8 @@ class SingleScaleDeiT(nn.Module):
         self.model = ViTForImageClassification.from_pretrained(
             'facebook/deit-tiny-patch16-224',
             num_labels=num_labels,
-            ignore_mismatched_sizes=True
+            ignore_mismatched_sizes=True,
+            use_safetensors=True,
         )
 
     def forward(self, x, **kwargs):

@@ -12,13 +12,15 @@ class MultiScaleDeiT(nn.Module):
             'facebook/deit-tiny-patch16-224',
             output_hidden_states=True,
             num_labels=num_labels,
-            ignore_mismatched_sizes=True
+            ignore_mismatched_sizes=True,
+            use_safetensors=True,
         )
         self.encoder_lr = ViTForImageClassification.from_pretrained(
             'facebook/deit-tiny-patch16-224',
             output_hidden_states=True,
             num_labels=num_labels,
-            ignore_mismatched_sizes=True
+            ignore_mismatched_sizes=True,
+            use_safetensors=True,
         )
 
         if pos_enc not in ('learnable', 'sinusoidal'):
