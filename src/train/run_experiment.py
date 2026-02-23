@@ -307,7 +307,7 @@ if __name__ == "__main__":
     parser.add_argument('--learning_rate', type=float, default=5e-5)
     parser.add_argument('--learning_rate_decay', type=float, default=1.0)
     parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--mce_n_bins', type=int, default=15, help='Number of bins for Multiclass Calibration Error')
+    parser.add_argument('--mce_n_bins', type=int, default=10, help='Number of bins for Multiclass Calibration Error')
     args = parser.parse_args()
 
     wandb.login()
