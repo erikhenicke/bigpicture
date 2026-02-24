@@ -9,7 +9,7 @@ from collections import defaultdict
 
 import torch
 from torch.utils.data import DataLoader
-from torch.optim import Adam, AdamW
+from torch.optim import Adam, AdamW, SGD
 from torch.nn import CrossEntropyLoss
 from torchmetrics.classification import MulticlassCalibrationError
 from tqdm import tqdm
@@ -80,8 +80,10 @@ def make(config: dict, device='cuda'):
     # Training setup
     if config.optimizer == 'adamw':
         optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    else:
+    elif config.optimizer == 'adam':
         optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    else:
+        optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
 
     criterion = CrossEntropyLoss()
 
@@ -303,7 +305,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--frac', type=float, default=1.0, help='Fraction of data to use')
-    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam'])
+    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam', 'sgd'])
     parser.add_argument('--learning_rate', type=float, default=5e-5)
     parser.add_argument('--learning_rate_decay', type=float, default=1.0)
     parser.add_argument('--weight_decay', type=float, default=0)
