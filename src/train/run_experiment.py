@@ -6,6 +6,7 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multi
 
 import platform
 from collections import defaultdict
+import tempfile
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,12 +16,26 @@ from torchmetrics.classification import MulticlassCalibrationError
 from tqdm import tqdm
 import wandb
 
+# To compute per-region metrics, the region-id is retrieved from sample metadata at index 0 (_metadata_array in FMoWDataset class).
 REGION_INDEX = 0
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
 NUM_CLASSES = 62
+SGD_MOMENTUM = 0.9
+DATA_LOADER_COLLATE_FN = collate_multiscale
+DATA_LOADER_NUM_WORKERS = 4
 
 
-def get_data(frac: float = 0.1):
+def get_data_loader(data: torch.utils.data.Dataset, batch_size: int, shuffle: bool):
+    return DataLoader(
+        data, 
+        batch_size=batch_size, 
+        shuffle=shuffle, 
+        num_workers=DATA_LOADER_NUM_WORKERS,
+        collate_fn=DATA_LOADER_COLLATE_FN
+    )
+
+
+def get_data_loaders(eval_splits: list, batch_size: int, frac: float):
     fmow_dir = '/home/henicke/data'
     landsat_dir = '/home/datasets4/FMoW_LandSat'
     preprocessed_dir = None
@@ -33,32 +48,32 @@ def get_data(frac: float = 0.1):
         landsat_dir=landsat_dir,
         preprocessed_dir=preprocessed_dir
     )
-    return (
-        dataset.get_subset(split='train', frac=frac),
-        dataset.get_subset(split='val', frac=frac),
-        dataset.get_subset(split='id_val', frac=frac),
-    )
+    train_dataset = dataset.get_subset(split='train', frac=frac)
+    eval_datasets = [dataset.get_subset(split=split, frac=frac) for split in eval_splits]
+    return get_data_loader(train_dataset, batch_size=batch_size, shuffle=True), *[get_data_loader(data, batch_size=batch_size, shuffle=False) for data in eval_datasets]
 
-def get_loader(data, batch_size=32, shuffle=True, num_workers=4, collate_fn=collate_multiscale):
-    return DataLoader(
-        data, 
-        batch_size=batch_size, 
-        shuffle=shuffle, 
-        num_workers=num_workers,
-        collate_fn=collate_fn
-    )
 
 def make(config: dict, device='cuda'):
-    train_data, val_od_data, val_id_data = get_data(frac=config.frac)
-    train_loader = get_loader(train_data, batch_size=config.batch_size)
-    val_od_loader = get_loader(val_od_data, batch_size=config.batch_size, shuffle=False)
-    val_id_loader = get_loader(val_id_data, batch_size=config.batch_size, shuffle=False)
+    train_loader, val_od_loader, val_id_loader, test_od_loader, test_id_loader = get_data_loaders(
+        eval_splits=['val', 'id_val', 'test', 'id_test'], 
+        batch_size=config.batch_size, 
+        frac=config.frac
+    )
+    train_data = train_loader.dataset
+    val_od_data = val_od_loader.dataset
+    val_id_data = val_id_loader.dataset
+    test_od_data = test_od_loader.dataset
+    test_id_data = test_id_loader.dataset
     
     print(
         f"Train size: {len(train_data)}, "
         f"Val-OD size: {len(val_od_data)}, "
-        f"Val-ID size: {len(val_id_data)}"
+        f"Val-ID size: {len(val_id_data)}, "
+        f"Test-OD size: {len(test_od_data)}, "
+        f"Test-ID size: {len(test_id_data)}"
     )
+
+    data_loaders = (train_loader, val_od_loader, val_id_loader, test_od_loader, test_id_loader)
     
     # Initialize model
     print(f"Initializing {config.model_type} model...")
@@ -83,11 +98,11 @@ def make(config: dict, device='cuda'):
     elif config.optimizer == 'adam':
         optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     else:
-        optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+        optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
 
     criterion = CrossEntropyLoss()
 
-    return model, train_loader, val_od_loader, val_id_loader, optimizer, criterion
+    return model, data_loaders, optimizer, criterion
 
 def train_batch(x, y, model, optimizer, criterion, device):
     model.train()
@@ -107,22 +122,18 @@ def train_batch(x, y, model, optimizer, criterion, device):
 
     return loss.item(), correct / total
 
-def train_log(loss, acc, sample_ct, epoch):
-    wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch}, step=sample_ct)
+def train_log(loss, acc, epoch):
+    wandb.log({'train_loss': loss, 'train_acc': acc}, step=epoch)
 
-def train_epoch(model, dataloader, optimizer, criterion, device, sample_ct, batch_ct, epoch):
-    for batch in tqdm(dataloader, desc="Training"):
+def train_epoch(model, dataloader, optimizer, criterion, device, epoch):
+    for batch_ct, batch in enumerate(tqdm(dataloader, desc="Training")):
         x, y, _ = batch
         loss, acc = train_batch(x, y, model, optimizer, criterion, device)
-        
-        sample_ct += y.size(0)
-        batch_ct += 1
 
         # Log to TensorBoard and Weights & Biases
-        if (batch_ct + 1) % 25 == 0:
-            train_log(loss, acc, sample_ct, epoch)
-
-    return sample_ct, batch_ct
+        if batch_ct % 25 == 0:
+            epoch_progress = epoch + (batch_ct / len(dataloader))
+            train_log(loss, acc, epoch_progress)
 
 def _get_region_names(dataloader):
     dataset = dataloader.dataset
@@ -146,7 +157,6 @@ def evaluate_batch(x, y, metadata, model, criterion, device, calibration_metric=
         preds = torch.argmax(logits, dim=1)
         correct_mask = (preds == y)
         correct = correct_mask.sum().item()
-        total = y.size(0)
         entropy = -(probs * torch.log(probs.clamp_min(0e-12))).sum(dim=1)
         entropy_correct = entropy[correct_mask].sum().item()
         entropy_incorrect = entropy[~correct_mask].sum().item()
@@ -157,27 +167,48 @@ def evaluate_batch(x, y, metadata, model, criterion, device, calibration_metric=
     region_correct = defaultdict(int)
     region_total = defaultdict(int)
     for rid in torch.unique(region_ids):
-        rid_int = int(rid.item())
+        rid_int = rid.item()
         mask = region_ids == rid
-        region_total[rid_int] += int(mask.sum().item())
-        region_correct[rid_int] += int((correct_mask & mask).sum().item())
+        region_total[rid_int] += mask.sum().item()
+        region_correct[rid_int] += (correct_mask & mask).sum().item()
 
     return (
         loss.item(),
-        correct / total,
+        correct,
         region_correct,
         region_total,
         entropy_correct,
         entropy_incorrect,
     )
 
-def val_log(prefix, loss, acc, sample_ct, extra_metrics=None):
+def val_log(prefix, loss, acc, epoch, extra_metrics=None):
     payload = {f'{prefix}-loss': loss, f'{prefix}-acc': acc}
     if extra_metrics:
         payload.update(extra_metrics)
-    wandb.log(payload, step=sample_ct)
+    wandb.log(payload, step=epoch)
 
-def evaluate_epoch(model, dataloader, criterion, device, sample_ct, metric_prefix, mce_n_bins=15):
+
+def log_model_artifact(model, artifact_name, aliases=None, metadata=None):
+    artifact = wandb.Artifact(artifact_name, type='model')
+    if metadata:
+        artifact.metadata.update(metadata)
+    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pt') as tmp_file:
+        torch.save(model.state_dict(), tmp_file.name)
+        artifact.add_file(tmp_file.name, name='model.pt')
+    wandb.log_artifact(artifact, aliases=aliases)
+
+# TODO: Validate
+def delete_old_artifact_versions(artifact_name: str, keep_alias: str):
+    if wandb.run is None:
+        return
+    api = wandb.Api()
+    full_name = f"{wandb.run.entity}/{wandb.run.project}/{artifact_name}"
+    versions = api.artifact_versions("model", full_name)
+    for version in versions:
+        if keep_alias not in version.aliases:
+            version.delete(delete_aliases=True)
+
+def evaluate(model, dataloader, criterion, device, data_prefix, ece_n_bins=15):
     val_loss = 0
     val_correct = 0
     val_total = 0
@@ -186,9 +217,9 @@ def evaluate_epoch(model, dataloader, criterion, device, sample_ct, metric_prefi
     region_correct_total = defaultdict(int)
     region_total_total = defaultdict(int)
     region_names = _get_region_names(dataloader)
-    mce_metric = MulticlassCalibrationError(
+    ece_metric = MulticlassCalibrationError(
         num_classes=NUM_CLASSES,
-        n_bins=mce_n_bins,
+        n_bins=ece_n_bins,
         norm='l1'
     ).to(device)
 
@@ -196,18 +227,18 @@ def evaluate_epoch(model, dataloader, criterion, device, sample_ct, metric_prefi
         x, y, metadata = batch
         (
             loss,
-            acc,
+            correct,
             region_correct,
             region_total,
             entropy_correct,
             entropy_incorrect,
         ) = evaluate_batch(
-            x, y, metadata, model, criterion, device, calibration_metric=mce_metric
+            x, y, metadata, model, criterion, device, calibration_metric=ece_metric
         )
         val_loss += loss
         val_entropy_correct += entropy_correct
         val_entropy_incorrect += entropy_incorrect 
-        val_correct += acc * y.size(0)
+        val_correct += correct
         val_total += y.size(0)
 
         for rid, count in region_total.items():
@@ -218,9 +249,9 @@ def evaluate_epoch(model, dataloader, criterion, device, sample_ct, metric_prefi
     # Log validation metrics after each epoch
     val_loss /= len(dataloader)
     val_acc = val_correct / val_total
-    val_mce = mce_metric.compute().item()
-    val_entropy_correct *= val_acc
-    val_entropy_incorrect *= (1 - val_acc) 
+    val_ece = ece_metric.compute().item()
+    val_entropy_correct /= val_correct if val_correct > 0 else 1
+    val_entropy_incorrect /= (val_total - val_correct) if (val_total - val_correct) > 0 else 1
 
     per_region_acc = {}
     for rid, total in region_total_total.items():
@@ -232,46 +263,92 @@ def evaluate_epoch(model, dataloader, criterion, device, sample_ct, metric_prefi
     filtered_acc = [acc for name, acc in per_region_acc.items() if name in FIVE_REGIONS]
     worst_group_acc = min(filtered_acc) if filtered_acc else 0.0
 
-    extra_metrics = {
-        f"{metric_prefix}-worst-group-acc": worst_group_acc,
-        f"{metric_prefix}-mce": val_mce,
-        f"{metric_prefix}-entropy-correct": val_entropy_correct,
-        f"{metric_prefix}-entropy-incorrect": val_entropy_incorrect,
+    metrics = {
+        f"{data_prefix}-loss": val_loss,
+        f"{data_prefix}-acc": val_acc,
+        f"{data_prefix}-worst-group-acc": worst_group_acc,
+        f"{data_prefix}-ece": val_ece,
+        f"{data_prefix}-entropy-correct": val_entropy_correct,
+        f"{data_prefix}-entropy-incorrect": val_entropy_incorrect,
     }
     for name, acc in per_region_acc.items():
-        extra_metrics[f"{metric_prefix}-region-{name}-acc"] = acc
+        metrics[f"{data_prefix}-region-{name.lower()}-acc"] = acc
 
-    val_log(metric_prefix, val_loss, val_acc, sample_ct, extra_metrics=extra_metrics)
+    return metrics 
 
 
-def train(model, train_loader, val_od_loader, val_id_loader, optimizer, criterion, device, config):
-
-    wandb.watch(model, criterion, log='all', log_freq=10)
+def train(model, data_loaders, optimizer, criterion, device, config):
+    train_loader, val_od_loader, val_id_loader, test_od_loader, test_id_loader = data_loaders
+    # Group validation and test loaders
+    val_loaders = {'val-od': val_od_loader, 'val-id': val_id_loader}
+    test_loaders = {'test-od': test_od_loader, 'test-id': test_id_loader}
     
-    sample_ct = 0
-    batch_ct = 0
+    best_worst_group_acc = 0
+    
     for epoch in tqdm(range(config.epochs), desc="Epochs"):
         if config.learning_rate_decay < 1.0:
             lr = config.learning_rate * (config.learning_rate_decay ** epoch)
             optimizer.param_groups[0]['lr'] = lr
-        sample_ct, batch_ct = train_epoch(model, train_loader, optimizer, criterion, device, sample_ct, batch_ct, epoch)
-        evaluate_epoch(
+        train_epoch(model, train_loader, optimizer, criterion, device, epoch)
+        
+        # Evaluate on validation splits
+        for prefix, loader in val_loaders.items():
+            eval_metrics = evaluate(
+                model,
+                loader,
+                criterion,
+                device,
+                epoch,
+                data_prefix=prefix,
+                ece_n_bins=config.ece_n_bins,
+            )
+            # TODO: Log validation metrics to Weights & Biases
+            
+            # Track best worst group accuracy on val-od split
+            if prefix == 'val-od' and eval_metrics[f"{prefix}-worst-group-acc"] > best_worst_group_acc:
+                best_worst_group_acc = eval_metrics[f"{prefix}-worst-group-acc"]
+                # TODO: Eval best model on test
+                log_model_artifact(
+                    model,
+                    artifact_name='best-model',
+                    aliases=['best'],
+                    metadata={
+                        'worst_group_acc': best_worst_group_acc,
+                        'epoch': epoch,
+                    },
+                )
+                delete_old_artifact_versions('best-model', keep_alias='best')
+                print(f"Logged best model with worst-group-acc: {best_worst_group_acc:.4f}")
+        
+        # Save checkpoint every 5 epochs
+        if (epoch + 1) % 5 == 0:
+            log_model_artifact(
+                model,
+                artifact_name=f'checkpoint-epoch-{epoch}',
+                metadata={'epoch': epoch},
+            )
+            print(f"Logged checkpoint at epoch {epoch}")
+    
+    # Save final model
+    log_model_artifact(
+        model,
+        artifact_name='final-model',
+        aliases=['final'],
+        metadata={'total_epochs': config.epochs},
+    )
+    print("Logged final model")
+    
+    # Evaluate on test splits
+    final_epoch = config.epochs
+    for prefix, loader in test_loaders.items():
+        evaluate(
             model,
-            val_od_loader,
+            loader,
             criterion,
             device,
-            sample_ct,
-            metric_prefix='val-od',
-            mce_n_bins=config.mce_n_bins,
-        )
-        evaluate_epoch(
-            model,
-            val_id_loader,
-            criterion,
-            device,
-            sample_ct,
-            metric_prefix='val-id',
-            mce_n_bins=config.mce_n_bins,
+            final_epoch,
+            data_prefix=prefix,
+            ece_n_bins=config.ece_n_bins,
         )
 
 
@@ -291,9 +368,9 @@ def run_experiment(args):
     print(f"Using device: {device}")
     with wandb.init(project='fmow-deit', config=args):
         config = wandb.config
-        model, train_loader, val_od_loader, val_id_loader, optimizer, criterion = make(config, device)
+        model, data_loaders, optimizer, criterion = make(config, device)
 
-        train(model, train_loader, val_od_loader, val_id_loader, optimizer, criterion, device, config)
+        train(model, data_loaders, optimizer, criterion, device, config)
 
     return model
 
@@ -309,7 +386,7 @@ if __name__ == "__main__":
     parser.add_argument('--learning_rate', type=float, default=5e-5)
     parser.add_argument('--learning_rate_decay', type=float, default=1.0)
     parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--mce_n_bins', type=int, default=10, help='Number of bins for Multiclass Calibration Error')
+    parser.add_argument('--ece_n_bins', type=int, default=10, help='Number of bins for ECE (Expected Calibration Error)')
     args = parser.parse_args()
 
     wandb.login()
