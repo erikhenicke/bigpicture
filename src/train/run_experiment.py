@@ -58,13 +58,13 @@ def make_data_loaders(train_split, val_splits, test_splits, speaking_names, conf
 def make_model(config: dict, device: str):
     print(f'Initializing {config.model_type} model...')
     if config.model_type == 'single-deit':
-        model = SingleScaleDeiT(num_labels=NUM_CLASSES)
+        model = SingleScaleDeiT(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     elif config.model_type == 'multi-deit':
-        model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, use_image_net=config.use_image_net)
+        model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
     elif config.model_type == 'single-densenet':
-        model = SingleScaleDenseNet121(num_labels=NUM_CLASSES)
+        model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     else:
-        model = MultiScaleDenseNet121(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels)
+        model = MultiScaleDenseNet121(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
     
     return model.to(device)
 
