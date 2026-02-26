@@ -27,6 +27,7 @@ class MultiScaleDeiT(nn.Module):
             ))
 
         lr_config = copy.deepcopy(self.encoder_hr.config)
+        lr_config.num_channels = in_channels
         self.encoder_lr = ViTForImageClassification(lr_config)
 
         if pos_enc not in ('learnable', 'sinusoidal'):
@@ -81,6 +82,7 @@ class MultiScaleDeiT(nn.Module):
         old_projection = patch_embeddings.projection
 
         if old_projection.in_channels == in_channels:
+            print(f"Input channels already match ({in_channels}), no adaptation needed.")
             return
 
         new_projection = nn.Conv2d(
@@ -104,6 +106,8 @@ class MultiScaleDeiT(nn.Module):
                 new_projection.bias.copy_(old_projection.bias)
 
         patch_embeddings.projection = new_projection
+        self.encoder_lr.config.num_channels = in_channels
+        self.encoder_lr.vit.config.num_channels = in_channels
 
     def _set_sinusoidal_positional_encoding(self, vit_module) -> None:
         embeddings = vit_module.embeddings
