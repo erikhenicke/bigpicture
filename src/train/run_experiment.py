@@ -61,7 +61,7 @@ def make_model(config: dict, device: str):
         model = SingleScaleDeiT(num_labels=NUM_CLASSES)
     elif config.model_type == 'multi-deit':
         model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, use_image_net=config.use_image_net)
-    elif config.model_type == 'single-dense-net-121':
+    elif config.model_type == 'single-densenet':
         model = SingleScaleDenseNet121(num_labels=NUM_CLASSES)
     else:
         model = MultiScaleDenseNet121(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels)
@@ -367,7 +367,7 @@ def train(context, config):
                 epoch=epoch,
                 config=config,
             )
-            print(f'Logged checkpoint at epoch {epoch}')
+            print(f'Logged checkpoint at epoch {epoch + 1}')
     
     # Save final model
     log_model_artifact(
@@ -398,7 +398,7 @@ def run_experiment(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
 
-    run_name = f'{args.model_type}-{args.optimizer}-{args.learning_rate}-{datetime.now().strftime("%m-%d")}'.replace('.', '_')
+    run_name = f'{args.model_type}-init-{args.image_net}-{args.optimizer}-{args.learning_rate:.0e}-{datetime.now().strftime("%m-%d")}'.replace('.', '_')
 
     with wandb.init(project='fmow', name=run_name, config=args):
         config = wandb.config
@@ -409,8 +409,8 @@ if __name__ == '__main__':
     import argparse
     from datetime import datetime
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'multi-deit', 'single-dense-net-121', 'multi-dense-net-121'])
-    parser.add_argument('--use_image_net', action='store_true', help='Whether to initialize the DeiT encoders with ImageNet pre-trained weights (only applicable for DeiT models)')
+    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'multi-deit', 'single-densenet', 'multi-densenet'])
+    parser.add_argument('--image_net', type=str, default='both', choices=['both', 'hr', 'none'], help='Whether to initialize multi-scale branches with ImageNet pre-trained weights')
     parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)

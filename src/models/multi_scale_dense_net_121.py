@@ -4,21 +4,28 @@ from torchvision.models import densenet121
 
 
 class MultiScaleDenseNet121(nn.Module):
-    def __init__(self, num_labels=62, in_channels=6):
+    def __init__(self, num_labels=62, in_channels=6, image_net='both'):
         super().__init__()
 
-        self.encoder_hr = densenet121(weights="IMAGENET1K_V1")
-        self.encoder_lr = densenet121(weights="IMAGENET1K_V1")
-
+        if not (3 <= in_channels <= 6):
+            raise ValueError(f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6.")
+        
         self.in_channels = in_channels
+
+        if image_net == 'both':
+            self.encoder_hr = densenet121(weights="IMAGENET1K_V1")
+            self.encoder_lr = densenet121(weights="IMAGENET1K_V1")
+
+        else:
+            if image_net == 'hr':
+                self.encoder_hr = densenet121(weights="IMAGENET1K_V1")
+            else:
+                self.encoder_hr = densenet121(weights=None)
+
+            self.encoder_lr = densenet121(weights=None)
+
         if 4 <= in_channels <= 6:
             self._adapt_landsat_encoder_input_channels(in_channels=in_channels)
-        elif in_channels == 3:
-            pass
-        else:
-            raise ValueError(
-                f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6."
-            )
 
         num_features = self.encoder_hr.classifier.in_features
 

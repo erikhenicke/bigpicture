@@ -5,11 +5,15 @@ from transformers import ViTForImageClassification, ViTConfig
 
 
 class MultiScaleDeiT(nn.Module):
-    def __init__(self, num_labels=62, in_channels=6, pos_enc='learnable', use_image_net=True):
+    def __init__(self, num_labels=62, in_channels=6, pos_enc='learnable', image_net='both'):
         super().__init__()
 
-        # Independent encoders
-        if use_image_net:
+        if not (3 <= in_channels <= 6):
+            raise ValueError(f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6.")
+
+        self.in_channels = in_channels
+
+        if image_net == 'both':
             self.encoder_hr = ViTForImageClassification.from_pretrained(
                 'facebook/deit-tiny-patch16-224',
                 output_hidden_states=True,
@@ -17,18 +21,38 @@ class MultiScaleDeiT(nn.Module):
                 ignore_mismatched_sizes=True,
                 use_safetensors=True,
             )
-        else:
-            self.encoder_hr = ViTForImageClassification(ViTConfig.from_pretrained(
+            self.encoder_lr = ViTForImageClassification.from_pretrained(
                 'facebook/deit-tiny-patch16-224',
                 output_hidden_states=True,
                 num_labels=num_labels,
                 ignore_mismatched_sizes=True,
                 use_safetensors=True,
-            ))
+            )
 
-        lr_config = copy.deepcopy(self.encoder_hr.config)
-        lr_config.num_channels = in_channels
-        self.encoder_lr = ViTForImageClassification(lr_config)
+            if 4 <= in_channels <= 6: 
+                self._adapt_landsat_encoder_input_channels(in_channels)
+ 
+        else:
+            if image_net == 'hr':
+                self.encoder_hr = ViTForImageClassification.from_pretrained(
+                    'facebook/deit-tiny-patch16-224',
+                    output_hidden_states=True,
+                    num_labels=num_labels,
+                    ignore_mismatched_sizes=True,
+                    use_safetensors=True,
+                )
+            else:
+                self.encoder_hr = ViTForImageClassification(ViTConfig.from_pretrained(
+                    'facebook/deit-tiny-patch16-224',
+                    output_hidden_states=True,
+                    num_labels=num_labels,
+                    ignore_mismatched_sizes=True,
+                    use_safetensors=True,
+                ))
+
+            lr_config = copy.deepcopy(self.encoder_hr.config)
+            lr_config.num_channels = in_channels
+            self.encoder_lr = ViTForImageClassification(lr_config)
 
         if pos_enc not in ('learnable', 'sinusoidal'):
             raise ValueError(
@@ -39,14 +63,7 @@ class MultiScaleDeiT(nn.Module):
             self._set_sinusoidal_positional_encoding(self.encoder_hr.vit)
             self._set_sinusoidal_positional_encoding(self.encoder_lr.vit)
 
-        self.in_channels = in_channels
-        if 4 <= in_channels <= 6: 
-            self._adapt_landsat_encoder_input_channels(in_channels=in_channels)
-        elif in_channels == 3:
-            pass
-        else:
-            raise ValueError(f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6.")
-        
+       
         # Remove classifiers
         self.encoder_hr.classifier = nn.Identity()
         self.encoder_lr.classifier = nn.Identity()
@@ -81,10 +98,6 @@ class MultiScaleDeiT(nn.Module):
         patch_embeddings = self.encoder_lr.vit.embeddings.patch_embeddings
         old_projection = patch_embeddings.projection
 
-        if old_projection.in_channels == in_channels:
-            print(f"Input channels already match ({in_channels}), no adaptation needed.")
-            return
-
         new_projection = nn.Conv2d(
             in_channels=in_channels,
             out_channels=old_projection.out_channels,
@@ -106,8 +119,6 @@ class MultiScaleDeiT(nn.Module):
                 new_projection.bias.copy_(old_projection.bias)
 
         patch_embeddings.projection = new_projection
-        self.encoder_lr.config.num_channels = in_channels
-        self.encoder_lr.vit.config.num_channels = in_channels
 
     def _set_sinusoidal_positional_encoding(self, vit_module) -> None:
         embeddings = vit_module.embeddings
