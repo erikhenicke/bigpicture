@@ -10,5 +10,6 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi-deit --epochs=100 --batch_size=384 --frac=1.0 --optimizer=adamw --learning_rate=5e-5 --weight_decay=0.01
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi-deit --epochs=100 --batch_size=384 --frac=1.0 --optimizer=adam --learning_rate=1e-4 --weight_decay=0.01
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi-deit --use_image_net --epochs=50 --batch_size=384 --frac=0.01 --optimizer=adamw --learning_rate=5e-5 --weight_decay=0.01
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi-deit --epochs=50 --batch_size=384 --frac=0.01 --optimizer=adamw --learning_rate=5e-5 --weight_decay=0.01
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=multi-deit --use_image_net --epochs=50 --batch_size=384 --frac=0.01 --optimizer=adam --learning_rate=1e-4 --learning_rate_scheduler=plateau --learning_rate_decay=0.5 --plateau_patience=5

@@ -157,7 +157,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         """Load RGB FMoW image"""
 
         if hasattr(self, 'fmow_images_preprocessed') and self.fmow_images_preprocessed is not None:
-            return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt")
+            return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt", weights_only=False)
 
         img_path = self.fmow_images / f"rgb_img_{idx}.png"
         img = Image.open(img_path).convert("RGB")
@@ -173,7 +173,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Returns tensor of shape (6, 224, 224).
         """
         if hasattr(self, 'landsat_images_preprocessed') and self.landsat_images_preprocessed is not None:
-            return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt") 
+            return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt", weights_only=False)
 
         tif_path = self.landsat_images / f"image_{idx}.tif"
 

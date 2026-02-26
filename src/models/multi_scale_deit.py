@@ -1,27 +1,33 @@
 import torch
 import torch.nn as nn
-from transformers import ViTForImageClassification 
+import copy
+from transformers import ViTForImageClassification, ViTConfig
 
 
 class MultiScaleDeiT(nn.Module):
-    def __init__(self, num_labels=62, in_channels=6, pos_enc='learnable'):
+    def __init__(self, num_labels=62, in_channels=6, pos_enc='learnable', use_image_net=True):
         super().__init__()
 
         # Independent encoders
-        self.encoder_hr = ViTForImageClassification.from_pretrained(
-            'facebook/deit-tiny-patch16-224',
-            output_hidden_states=True,
-            num_labels=num_labels,
-            ignore_mismatched_sizes=True,
-            use_safetensors=True,
-        )
-        self.encoder_lr = ViTForImageClassification.from_pretrained(
-            'facebook/deit-tiny-patch16-224',
-            output_hidden_states=True,
-            num_labels=num_labels,
-            ignore_mismatched_sizes=True,
-            use_safetensors=True,
-        )
+        if use_image_net:
+            self.encoder_hr = ViTForImageClassification.from_pretrained(
+                'facebook/deit-tiny-patch16-224',
+                output_hidden_states=True,
+                num_labels=num_labels,
+                ignore_mismatched_sizes=True,
+                use_safetensors=True,
+            )
+        else:
+            self.encoder_hr = ViTForImageClassification(ViTConfig.from_pretrained(
+                'facebook/deit-tiny-patch16-224',
+                output_hidden_states=True,
+                num_labels=num_labels,
+                ignore_mismatched_sizes=True,
+                use_safetensors=True,
+            ))
+
+        lr_config = copy.deepcopy(self.encoder_hr.config)
+        self.encoder_lr = ViTForImageClassification(lr_config)
 
         if pos_enc not in ('learnable', 'sinusoidal'):
             raise ValueError(
