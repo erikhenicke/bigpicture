@@ -43,14 +43,22 @@ def make_data_loaders(train_split, val_splits, test_splits, speaking_names, conf
 
     if platform.node() == 'gaia4' or platform.node() == 'gaia5':
         preprocessed_dir = '/data/henicke/FMoW_LandSat'
+        
+    dataset_augment = FMoWMultiScaleDataset(
+        fmow_dir=fmow_dir,
+        landsat_dir=landsat_dir,
+        preprocessed_dir=preprocessed_dir,
+        augment=config.data_augmentation
+    )
 
     dataset = FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
         preprocessed_dir=preprocessed_dir
     )
+
     return (
-        get_data_loader(dataset, train_split, config, shuffle=True), 
+        get_data_loader(dataset_augment, train_split, config, shuffle=True), 
         {speaking_names[split]: get_data_loader(dataset, split, config, shuffle=False) for split in val_splits},
         {speaking_names[split]: get_data_loader(dataset, split, config, shuffle=False) for split in test_splits}
     )
@@ -422,6 +430,7 @@ if __name__ == '__main__':
     parser.add_argument('--plateau_patience', type=int, default=5, help='Number of epochs with no improvement after which learning rate will be reduced')
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--ece_n_bins', type=int, default=10, help='Number of bins for ECE (Expected Calibration Error)')
+    parser.add_argument('--data_augmentation', action='store_true', default=False, help='Whether to apply data augmentation (random horizontal and vertical flips)')
     args = parser.parse_args()
 
     wandb.login()

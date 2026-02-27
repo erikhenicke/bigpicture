@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 import rasterio
 from wilds.datasets.wilds_dataset import WILDSDataset
 
@@ -31,6 +31,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
         seed=111,
         transform_rgb=None,
         transform_landsat=None,
+        augment=False,  
+        hflip_prob=0.5,               
+        vflip_prob=0.5,               
     ):
         """
         Args:
@@ -85,6 +88,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
             transform_landsat or self.get_default_transform_landsat()
         )
 
+        self.augment = augment
+        self.hflip_prob = hflip_prob
+        self.vflip_prob = vflip_prob
+ 
+
     def get_default_transform_rgb(self):
         """Default transform for RGB images (Inception normalization)"""
         return transforms.Compose(
@@ -95,7 +103,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
                     # Normalize to [-1, 1] range
                     mean=[0.5, 0.5, 0.5],
                     std=[0.5, 0.5, 0.5]
-                    # # Normalize to Imagenet mean/std range
+                    # Normalize to Imagenet mean/std range
                     # mean=[0.485, 0.456, 0.406],
                     # std=[0.229, 0.224, 0.225]
                 )
@@ -134,6 +142,23 @@ class FMoWMultiScaleDataset(WILDSDataset):
             ]
         )  
 
+    def _apply_augmentation(self, rgb_img: torch.Tensor, landsat_img: torch.Tensor):
+        """
+        Apply the same spatial augmentation to both modalities to keep alignment.
+        Expects tensors shaped:
+          rgb_img:      (3, H, W)
+          landsat_img:  (C, H, W)
+        """
+        if torch.rand(1).item() < self.hflip_prob:
+            rgb_img = torch.flip(rgb_img, dims=[2])       # flip width
+            landsat_img = torch.flip(landsat_img, dims=[2])
+
+        if torch.rand(1).item() < self.vflip_prob:
+            rgb_img = torch.flip(rgb_img, dims=[1])       # flip height
+            landsat_img = torch.flip(landsat_img, dims=[1])
+
+        return rgb_img, landsat_img
+
     def __len__(self):
         return len(self._y_array)
 
@@ -146,6 +171,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         rgb_img = self.get_rgb_input(file_idx)
         landsat_img = self.get_landsat_input(file_idx)
+
+        if self.augment:
+            rgb_img, landsat_img = self._apply_augmentation(rgb_img, landsat_img)
 
         y = self._y_array[idx]
         metadata = self._metadata_array[idx]
