@@ -31,7 +31,8 @@ class MultiScaleDeiT(nn.Module):
 
             if 4 <= in_channels <= 6: 
                 self._adapt_landsat_encoder_input_channels(in_channels)
- 
+                self.encoder_lr.config.num_channels = in_channels
+
         else:
             if image_net == 'hr':
                 self.encoder_hr = ViTForImageClassification.from_pretrained(
