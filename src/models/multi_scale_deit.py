@@ -120,6 +120,9 @@ class MultiScaleDeiT(nn.Module):
                 new_projection.bias.copy_(old_projection.bias)
 
         patch_embeddings.projection = new_projection
+        patch_embeddings.num_channels = in_channels
+        self.encoder_lr.config.num_channels = in_channels
+        self.encoder_lr.vit.config.num_channels = in_channels
 
     def _set_sinusoidal_positional_encoding(self, vit_module) -> None:
         embeddings = vit_module.embeddings
