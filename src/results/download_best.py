@@ -9,12 +9,12 @@ import wandb
 from great_tables import GT
 
 
-def _get_nested(mapping: dict[str, Any], dotted_key: str) -> Any:
+def _get_nested(mapping: dict[str, Any], dotted_key: str, default: Any = None) -> Any:
 	value: Any = mapping
 	for key in dotted_key.split('.'):
 		if not isinstance(value, dict):
-			return None
-		value = value.get(key)
+			return default
+		value = value.get(key, default)
 	return value
 
 
@@ -73,6 +73,7 @@ def collect_best_artifacts(
 					'config.model_type': _get_nested(config, 'model_type'),
 					'config.optimizer': _get_nested(config, 'optimizer'),
 					'config.image_net': _get_nested(config, 'image_net'),
+					'config.augmentation': _get_nested(config, 'data_augmentation', default=False),
 					'val-od-worst-group-acc': metadata.get('val-od-worst-group-acc'),
 					'test-od-worst-group-acc': metadata.get('test-od-worst-group-acc'),
 				}
@@ -100,6 +101,7 @@ def build_table(df: pd.DataFrame, run_group: str, output_html: Path) -> None:
 					'config.model_type': '—',
 					'config.optimizer': '—',
 					'config.image_net': '—',
+					'config.augmentation': False,
 					'val-od-worst-group-acc': None,
 					'test-od-worst-group-acc': None,
 					'run_name': 'No artifacts found',
@@ -113,6 +115,7 @@ def build_table(df: pd.DataFrame, run_group: str, output_html: Path) -> None:
 				'config.model_type',
 				'config.optimizer',
 				'config.image_net',
+				'config.augmentation',
 				'val-od-worst-group-acc',
 				'test-od-worst-group-acc',
 				'run_name',
