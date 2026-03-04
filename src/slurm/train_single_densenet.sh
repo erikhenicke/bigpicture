@@ -10,5 +10,6 @@
   
 # Your commands go here
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-densenet --image_net=hr --epochs=50 --batch_size=64 --frac=1 --optimizer=adam --learning_rate=1e-4 --learning_rate_scheduler=step --learning_rate_decay=0.96
-PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-densenet --image_net=none --epochs=50 --batch_size=64 --frac=1 --optimizer=adam --learning_rate=1e-4 --learning_rate_scheduler=step --learning_rate_decay=0.96
+
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-densenet --data_augmentation --image_net=hr --epochs=50 --batch_size=64 --frac=1 --optimizer=adam --learning_rate=1e-4 --learning_rate_scheduler=step --learning_rate_decay=0.96
+# PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py --model_type=single-densenet --image_net=none --epochs=50 --batch_size=64 --frac=1 --optimizer=adam --learning_rate=1e-4 --learning_rate_scheduler=step --learning_rate_decay=0.96
