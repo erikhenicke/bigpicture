@@ -85,7 +85,7 @@ def collect_best_artifacts(
 	df = pd.DataFrame(rows)
 	if not df.empty:
 		df = df.sort_values(
-			by=['val-od-worst-group-acc', 'test-od-worst-group-acc'],
+			by=['test-od-worst-group-acc', 'val-od-worst-group-acc'],
 			ascending=False,
 			na_position='last',
 		).reset_index(drop=True)
