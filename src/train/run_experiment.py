@@ -71,7 +71,7 @@ def make_model(config: dict, device: str):
     elif config.model_type == 'multi-deit':
         model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
     elif config.model_type == 'multi-deit-cross-attn':
-        model = MultiScaleDeiTCrossFusion(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net, cross_attn_depths=[5, 8, 11])
+        model = MultiScaleDeiTCrossFusion(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net, cross_attn_depths=config.cross_attention_depths)
     elif config.model_type == 'single-densenet':
         model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     else:
@@ -434,6 +434,7 @@ if __name__ == '__main__':
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--ece_n_bins', type=int, default=10, help='Number of bins for ECE (Expected Calibration Error)')
     parser.add_argument('--data_augmentation', action='store_true', default=False, help='Whether to apply data augmentation (random horizontal and vertical flips)')
+    parser.add_argument('--cross_attention_depths', type=int, nargs='+', default=None, help='List of layer indices at which to apply cross-attention (only for multi-deit-cross-attn model)')
     args = parser.parse_args()
 
     wandb.login()
