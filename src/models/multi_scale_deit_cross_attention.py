@@ -23,10 +23,10 @@ class CrossAttentionBlock(nn.Module):
 
 
     def forward(self, tokens_hr, tokens_lr):
-        cls_hr = tokens_hr[:, 0, :]
-        cls_lr = tokens_lr[:, 0, :]
-        patch_hr = tokens_hr[:, 0:, :]
-        patch_lr = tokens_lr[:, 0:, :]
+        cls_hr = tokens_hr[:, :1, :]
+        cls_lr = tokens_lr[:, :1, :]
+        patch_hr = tokens_hr[:, 1:, :]
+        patch_lr = tokens_lr[:, 1:, :]
 
         delta_hr, _ = self.cross_attn_hr(
             query=self.norm_q_hr(cls_hr),
@@ -82,8 +82,8 @@ class DualEncoderWithCrossAttention(nn.Module):
         x_lr = vit_lr.embeddings(landsat)
 
         for layer_idx, block_hr in enumerate(vit_hr.encoder.layer):
-            x_hr = block_hr(x_hr)[0]
-            x_lr = vit_lr.encoder.layer[layer_idx](x_lr)[0]
+            x_hr = block_hr(x_hr)
+            x_lr = vit_lr.encoder.layer[layer_idx](x_lr)
 
             if layer_idx in self.cross_attn_depths:
                 x_hr, x_lr = self.cross_attn_blocks[f"depth_{layer_idx}"](x_hr, x_lr)
