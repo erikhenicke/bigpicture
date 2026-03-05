@@ -2,6 +2,7 @@ from models.single_scale_deit import SingleScaleDeiT
 from models.multi_scale_deit import MultiScaleDeiT
 from models.single_scale_dense_net_121 import SingleScaleDenseNet121 
 from models.multi_scale_dense_net_121 import MultiScaleDenseNet121
+from models.multi_scale_deit_cross_attention import MultiScaleDeiTCrossFusion
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 
 import platform
@@ -69,6 +70,8 @@ def make_model(config: dict, device: str):
         model = SingleScaleDeiT(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     elif config.model_type == 'multi-deit':
         model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
+    elif config.model_type == 'multi-deit-cross-attn':
+        model = MultiScaleDeiTCrossFusion(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net, cross_attn_depths=[5, 8, 11])
     elif config.model_type == 'single-densenet':
         model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     else:
@@ -417,7 +420,7 @@ if __name__ == '__main__':
     import argparse
     from datetime import datetime
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'multi-deit', 'single-densenet', 'multi-densenet'])
+    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'multi-deit', 'multi-deit-cross-attn', 'single-densenet', 'multi-densenet'])
     parser.add_argument('--image_net', type=str, default='both', choices=['both', 'hr', 'none'], help='Whether to initialize multi-scale branches with ImageNet pre-trained weights')
     parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
     parser.add_argument('--epochs', type=int, default=1)

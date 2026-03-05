@@ -71,7 +71,7 @@ class MultiScaleDeiT(nn.Module):
         
         # Fusion (DeiT-tiny hidden_size=192)
         self.fusion = nn.Sequential(
-            nn.Linear(192 * 2, 384),
+            nn.Linear(384, 384),
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(384, 192)
