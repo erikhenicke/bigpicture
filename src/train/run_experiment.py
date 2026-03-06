@@ -22,6 +22,7 @@ import wandb
 REGION_INDEX = 0
 FIVE_REGIONS = {'Europe', 'Americas', 'Asia', 'Africa', 'Oceania'}
 NUM_CLASSES = 62
+NUM_REGIONS = 5 
 SGD_MOMENTUM = 0.9
 DATA_LOADER_COLLATE_FN = collate_multiscale
 DATA_LOADER_NUM_WORKERS = 4
@@ -71,7 +72,14 @@ def make_model(config: dict, device: str):
     elif config.model_type == 'multi-deit':
         model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
     elif config.model_type == 'multi-deit-cross-attn':
-        model = MultiScaleDeiTCrossFusion(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net, cross_attn_depths=config.cross_attention_depths)
+        model = MultiScaleDeiTCrossFusion(
+            num_labels=NUM_CLASSES, 
+            in_channels=config.landsat_in_channels, 
+            image_net=config.image_net, 
+            cross_attn_depths=config.cross_attention_depths,
+            num_regions=NUM_REGIONS,
+            region_aux_enabled=config.region_aux_enabled,
+        )
     elif config.model_type == 'single-densenet':
         model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
     else:
@@ -80,24 +88,56 @@ def make_model(config: dict, device: str):
     return model.to(device)
 
 def make_optimizer(model, config):
-    optimizer = None
-    if config.optimizer == 'adamw':
-        optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    elif config.optimizer == 'adam':
-        optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    # For multi-deit-cross-attn with region aux, create separate optimizers
+    if config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled:
+        # Main optimizer: backbone + fusion + main classifier (exclude region_classifier)
+        main_params = []
+        for name, p in model.named_parameters():
+            print(f'Parameter: {name}')
+            if not name.startswith('region_classifier.'):
+                main_params.append(p)
+        
+        if config.optimizer == 'adamw':
+            optimizer_main = AdamW(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
+            optimizer_region = AdamW(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay)
+        elif config.optimizer == 'adam':
+            optimizer_main = Adam(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
+            optimizer_region = Adam(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay)
+        else:
+            optimizer_main = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
+            optimizer_region = SGD(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
+        
+        optimizer = {'main': optimizer_main, 'region': optimizer_region}
+        
+        scheduler = None
+        if config.learning_rate_scheduler == 'plateau':
+            scheduler = ReduceLROnPlateau(
+                optimizer_main,
+                mode='max',
+                factor=config.learning_rate_decay,
+                patience=config.plateau_patience,
+            )
+        elif config.learning_rate_scheduler == 'step':
+            scheduler = StepLR(optimizer_main, step_size=1, gamma=config.learning_rate_decay)
     else:
-        optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-    
-    scheduler = None
-    if config.learning_rate_scheduler == 'plateau':
-        scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode='max',
-            factor=config.learning_rate_decay,
-            patience=config.plateau_patience,
-        )
-    elif config.learning_rate_scheduler == 'step':
-        scheduler = StepLR(optimizer, step_size=1, gamma=config.learning_rate_decay)
+        # Standard single optimizer
+        if config.optimizer == 'adamw':
+            optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+        elif config.optimizer == 'adam':
+            optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+        else:
+            optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
+        
+        scheduler = None
+        if config.learning_rate_scheduler == 'plateau':
+            scheduler = ReduceLROnPlateau(
+                optimizer,
+                mode='max',
+                factor=config.learning_rate_decay,
+                patience=config.plateau_patience,
+            )
+        elif config.learning_rate_scheduler == 'step':
+            scheduler = StepLR(optimizer, step_size=1, gamma=config.learning_rate_decay)
 
     return optimizer, scheduler
 
@@ -107,7 +147,12 @@ def print_setup_summary(model, data_loaders, optimizer, criterion):
     print('\nData loaders:')
     for name, loader in data_loaders.items():
         print(f'{name}: {len(loader.dataset)} samples')
-    print(f'\nOptimizer: {optimizer.__class__.__name__}')
+    
+    if isinstance(optimizer, dict):
+        print(f'\nOptimizer (main): {optimizer["main"].__class__.__name__}')
+        print(f'Optimizer (region): {optimizer["region"].__class__.__name__}')
+    else:
+        print(f'\nOptimizer: {optimizer.__class__.__name__}')
     print(f'Criterion: {criterion.__class__.__name__}')
 
 def make_training_context(config: dict, device: str):
@@ -119,6 +164,9 @@ def make_training_context(config: dict, device: str):
     model = make_model(config, device)
     optimizer, scheduler = make_optimizer(model, config)
     criterion = CrossEntropyLoss()
+    
+    # Separate criterion for region classification
+    criterion_region = CrossEntropyLoss() if config.region_aux_enabled else None
 
     print_setup_summary(model, {'train': train_loader, **val_loaders, **test_loaders}, optimizer, criterion)
 
@@ -130,45 +178,98 @@ def make_training_context(config: dict, device: str):
         'optimizer': optimizer,
         'scheduler': scheduler,
         'criterion': criterion,
-        'device': device
+        'criterion_region': criterion_region,
+        'device': device,
+        'config': config,
     }
 
-def train_batch(x, y, context):
+def train_batch(x, y, metadata, context):
     model = context['model']
     optimizer = context['optimizer']
     criterion = context['criterion']
+    criterion_region = context.get('criterion_region')
     device = context['device']
+    config = context['config']
 
     model.train()
 
     x = {k: v.to(device) for k, v in x.items()}
     y = y.to(device)
+    
+    # Check if region aux is enabled for this model
+    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
+    
+    if region_aux_enabled:
+        # Two separate backward passes
+        region_y = metadata[:, REGION_INDEX].to(device)
+        
+        # Forward pass (single forward, returns both logits)
+        outputs = model(x, return_aux=True)
+        class_logits = outputs['class_logits']
+        region_logits = outputs['region_logits']
+        
+        # Backward pass 1: Main classification task
+        optimizer['main'].zero_grad()
+        loss_main = criterion(class_logits, y)
+        loss_main.backward()
+        optimizer['main'].step()
+        
+        # Backward pass 2: Region classification task (only updates region_classifier)
+        optimizer['region'].zero_grad()
+        loss_region = criterion_region(region_logits, region_y)
+        loss_region.backward()
+        optimizer['region'].step()
+        
+        # Compute metrics
+        preds = torch.argmax(class_logits, dim=1)
+        correct = (preds == y).sum().item()
+        
+        region_preds = torch.argmax(region_logits, dim=1)
+        region_correct = (region_preds == region_y).sum().item()
+        
+        total = y.size(0)
+        
+        return {
+            'loss': loss_main.item(),
+            'acc': correct / total,
+            'region_loss': loss_region.item(),
+            'region_acc': region_correct / total,
+        }
+    else:
+        # Standard single backward pass
+        optimizer.zero_grad()
+        logits = model(x)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
 
-    optimizer.zero_grad()
-    logits = model(x)
-    loss = criterion(logits, y)
-    loss.backward()
-    optimizer.step()
+        preds = torch.argmax(logits, dim=1)
+        correct = (preds == y).sum().item()
+        total = y.size(0)
 
-    preds = torch.argmax(logits, dim=1)
-    correct = (preds == y).sum().item()
-    total = y.size(0)
+        return {'loss': loss.item(), 'acc': correct / total}
 
-    return loss.item(), correct / total
-
-def train_log(loss, acc, epoch_progress):
-    wandb.log({'train_loss': loss, 'train_acc': acc, 'epoch': epoch_progress})
+def train_log(metrics, epoch_progress):
+    log_dict = {
+        'train_loss': metrics['loss'], 
+        'train_acc': metrics['acc'], 
+        'epoch': epoch_progress
+    }
+    if 'region_loss' in metrics:
+        log_dict['train_region_loss'] = metrics['region_loss']
+        log_dict['train_region_acc'] = metrics['region_acc']
+    wandb.log(log_dict)
 
 def train_epoch(context, epoch):
     train_loader = context['train_loader']
     for batch_ct, batch in enumerate(tqdm(train_loader, desc='Training')):
-        x, y, _ = batch
-        loss, acc = train_batch(x, y, context)
+        x, y, metadata = batch
+        metrics = train_batch(x, y, metadata, context)
 
         # Log to Weights & Biases
         if batch_ct % 25 == 0:
             epoch_progress = epoch + (batch_ct / len(train_loader))
-            train_log(loss, acc, epoch_progress)
+            train_log(metrics, epoch_progress)
 
 def _get_region_names(dataloader):
     dataset = dataloader.dataset
@@ -181,15 +282,32 @@ def _get_region_names(dataloader):
 def evaluate_batch(x, y, metadata, context, calibration_metric=None):
     model = context['model']
     criterion = context['criterion']
+    criterion_region = context.get('criterion_region')
     device = context['device']
+    config = context['config']
 
     model.eval()
     x = {k: v.to(device) for k, v in x.items()}
     y = y.to(device)
     region_ids = metadata[:, REGION_INDEX].to(device)
+    
+    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
 
     with torch.no_grad():
-        logits = model(x)
+        if region_aux_enabled:
+            outputs = model(x, return_aux=True)
+            logits = outputs['class_logits']
+            region_logits = outputs['region_logits']
+            
+            # Region classification metrics
+            loss_region = criterion_region(region_logits, region_ids)
+            region_preds = torch.argmax(region_logits, dim=1)
+            region_correct_count = (region_preds == region_ids).sum().item()
+        else:
+            logits = model(x)
+            loss_region = None
+            region_correct_count = 0
+            
         probs = torch.softmax(logits, dim=1)
         loss = criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -217,6 +335,8 @@ def evaluate_batch(x, y, metadata, context, calibration_metric=None):
         region_total,
         entropy_correct,
         entropy_incorrect,
+        loss_region.item() if loss_region is not None else 0.0,
+        region_correct_count,
     )
 
 
@@ -226,9 +346,18 @@ def log_model_artifact(model, artifact_name, metadata, optimizer, epoch, config,
         artifact.metadata.update(metadata)
 
     if save_full_checkpoint:
+        # Handle dict optimizer (region aux) or single optimizer
+        if isinstance(optimizer, dict):
+            optimizer_state = {
+                'main': optimizer['main'].state_dict(),
+                'region': optimizer['region'].state_dict(),
+            }
+        else:
+            optimizer_state = optimizer.state_dict()
+            
         payload = {
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
+            'optimizer_state_dict': optimizer_state,
             'epoch': epoch,
             'config': dict(config),
         }
@@ -249,6 +378,8 @@ def evaluate(loader, loader_name, context, config):
     val_total = 0
     val_entropy_correct = 0
     val_entropy_incorrect = 0 
+    val_region_loss = 0
+    val_region_correct = 0
     region_correct_total = defaultdict(int)
     region_total_total = defaultdict(int)
     region_names = _get_region_names(loader)
@@ -267,6 +398,8 @@ def evaluate(loader, loader_name, context, config):
             region_total,
             entropy_correct,
             entropy_incorrect,
+            region_loss,
+            region_correct_count,
         ) = evaluate_batch(
             x, y, metadata, context, calibration_metric=ece_metric
         )
@@ -275,6 +408,8 @@ def evaluate(loader, loader_name, context, config):
         val_entropy_incorrect += entropy_incorrect 
         val_correct += correct
         val_total += y.size(0)
+        val_region_loss += region_loss
+        val_region_correct += region_correct_count
 
         for rid, count in region_total.items():
             region_total_total[rid] += count
@@ -305,6 +440,15 @@ def evaluate(loader, loader_name, context, config):
         f'{loader_name}-entropy-correct': val_entropy_correct,
         f'{loader_name}-entropy-incorrect': val_entropy_incorrect,
     }
+    
+    # Add region classification metrics if enabled
+    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
+    if region_aux_enabled:
+        val_region_loss /= len(loader)
+        val_region_acc = val_region_correct / val_total
+        metrics[f'{loader_name}-region-loss'] = val_region_loss
+        metrics[f'{loader_name}-region-acc'] = val_region_acc
+    
     for name, acc in per_region_acc.items():
         metrics[f'{loader_name}-region-{name.lower()}-acc'] = acc
 
@@ -326,6 +470,7 @@ def train(context, config):
     
     best_worst_group_acc = 0
     scheduler = context['scheduler']
+    optimizer = context['optimizer']
     if wandb.run is None:
         raise RuntimeError('Expected an active wandb run before training starts.')
     run_artifact_name = f'run-{wandb.run.name}'
@@ -361,7 +506,7 @@ def train(context, config):
                     'epoch': epoch+1,
                     'checkpoint_type': 'best',
                 },
-                optimizer=context['optimizer'],
+                optimizer=optimizer,
                 epoch=epoch+1,
                 config=config,
             )
@@ -374,7 +519,7 @@ def train(context, config):
                 artifact_name=run_artifact_name,
                 aliases=[f'checkpoint-epoch-{epoch+1}'],
                 metadata={'epoch': epoch+1, 'checkpoint_type': 'periodic'},
-                optimizer=context['optimizer'],
+                optimizer=optimizer,
                 epoch=epoch,
                 config=config,
             )
@@ -386,7 +531,7 @@ def train(context, config):
         artifact_name=run_artifact_name,
         aliases=['final'],
         metadata={'total_epochs': config.epochs, 'checkpoint_type': 'final'},
-        optimizer=context['optimizer'],
+        optimizer=optimizer,
         epoch=config.epochs,
         config=config,
         save_full_checkpoint=True,
@@ -435,6 +580,8 @@ if __name__ == '__main__':
     parser.add_argument('--ece_n_bins', type=int, default=10, help='Number of bins for ECE (Expected Calibration Error)')
     parser.add_argument('--data_augmentation', action='store_true', default=False, help='Whether to apply data augmentation (random horizontal and vertical flips)')
     parser.add_argument('--cross_attention_depths', type=int, nargs='+', default=None, help='List of layer indices at which to apply cross-attention (only for multi-deit-cross-attn model)')
+    parser.add_argument('--region_aux_enabled', action='store_true', default=False, help='Enable auxiliary region classification task on LR encoder CLS token (multi-deit-cross-attn only)')
+    parser.add_argument('--region_aux_lr', type=float, default=1e-4, help='Learning rate for region classifier head (default: 1e-3)')
     args = parser.parse_args()
 
     wandb.login()

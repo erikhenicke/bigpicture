@@ -103,6 +103,8 @@ class MultiScaleDeiTCrossFusion(nn.Module):
         cross_fusion_dim=192,
         cross_fusion_heads=3,
         cross_fusion_drop=0.0,
+        num_regions=0,
+        region_aux_enabled=False,
     ):
         super().__init__()
 
@@ -111,6 +113,7 @@ class MultiScaleDeiTCrossFusion(nn.Module):
 
         self.in_channels = in_channels
         self.cross_attn_enabled = cross_attn_enabled
+        self.region_aux_enabled = region_aux_enabled
 
         if image_net == "both":
             self.encoder_hr = self._get_deit(num_labels=num_labels, pretrained=True)
@@ -149,8 +152,12 @@ class MultiScaleDeiTCrossFusion(nn.Module):
             nn.Linear(cross_fusion_dim * 2, cross_fusion_dim),
         )
         self.classifier = nn.Linear(cross_fusion_dim, num_labels)
+        
+        # Region classification head (auxiliary task on LR encoder CLS token)
+        if self.region_aux_enabled and num_regions > 0:
+            self.region_classifier = nn.Linear(cross_fusion_dim, num_regions)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, return_aux=False, **kwargs):
         rgb = x["rgb"]
         landsat = x["landsat"][:, : self.in_channels, :, :]
 
@@ -164,7 +171,16 @@ class MultiScaleDeiTCrossFusion(nn.Module):
         feat_lr = tokens_lr[:, 0, :]
 
         fused = self.fusion(torch.cat([feat_hr, feat_lr], dim=1))
-        return self.classifier(fused)
+        class_logits = self.classifier(fused)
+        
+        # Return auxiliary region logits if requested
+        if return_aux and self.region_aux_enabled:
+            # Detach LR CLS token to prevent region loss from updating encoder
+            feat_lr_region = feat_lr.detach()
+            region_logits = self.region_classifier(feat_lr_region)
+            return {"class_logits": class_logits, "region_logits": region_logits}
+        
+        return class_logits
 
     def _adapt_landsat_encoder_input_channels(self, in_channels: int) -> None:
         patch_embeddings = self.encoder_lr.vit.embeddings.patch_embeddings
