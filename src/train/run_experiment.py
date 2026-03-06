@@ -93,7 +93,6 @@ def make_optimizer(model, config):
         # Main optimizer: backbone + fusion + main classifier (exclude region_classifier)
         main_params = []
         for name, p in model.named_parameters():
-            print(f'Parameter: {name}')
             if not name.startswith('region_classifier.'):
                 main_params.append(p)
         

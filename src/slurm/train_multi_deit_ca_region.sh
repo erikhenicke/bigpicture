@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:1
   
 cd /home/henicke/git/bigpicture
-PYTHONPATH=/home/henicke/git/bigpicture/src python /home/henicke/git/bigpicture/src/train/run_experiment.py \
+PYTHONPATH=/home/henicke/git/bigpicture/src /home/henicke/miniconda3/envs/wilds2/bin/python /home/henicke/git/bigpicture/src/train/run_experiment.py \
   --model_type=multi-deit-cross-attn \
   --cross_attention_depths 5 8 11 \
   --data_augmentation \
