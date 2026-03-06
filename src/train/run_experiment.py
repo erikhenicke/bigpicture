@@ -21,8 +21,8 @@ import wandb
 # To compute per-region metrics, the region-id is retrieved from sample metadata at index 0 (_metadata_array in FMoWDataset class).
 REGION_INDEX = 0
 FIVE_REGIONS = {'Europe', 'Americas', 'Asia', 'Africa', 'Oceania'}
+NUM_REGIONS = 6
 NUM_CLASSES = 62
-NUM_REGIONS = 5 
 SGD_MOMENTUM = 0.9
 DATA_LOADER_COLLATE_FN = collate_multiscale
 DATA_LOADER_NUM_WORKERS = 4
