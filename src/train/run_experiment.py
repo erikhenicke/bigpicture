@@ -1,4 +1,5 @@
 from models.single_scale_deit import SingleScaleDeiT
+from models.single_scale_deit_landsat import SingleScaleDeiTLandsat
 from models.multi_scale_deit import MultiScaleDeiT
 from models.single_scale_dense_net_121 import SingleScaleDenseNet121 
 from models.multi_scale_dense_net_121 import MultiScaleDenseNet121
@@ -69,6 +70,12 @@ def make_model(config: dict, device: str):
     print(f'Initializing {config.model_type} model...')
     if config.model_type == 'single-deit':
         model = SingleScaleDeiT(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
+    elif config.model_type == 'single-deit-landsat':
+        model = SingleScaleDeiTLandsat(
+            num_labels=NUM_CLASSES,
+            in_channels=config.landsat_in_channels,
+            image_net=(config.image_net != 'none'),
+        )
     elif config.model_type == 'multi-deit':
         model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
     elif config.model_type == 'multi-deit-cross-attn':
@@ -564,7 +571,7 @@ if __name__ == '__main__':
     import argparse
     from datetime import datetime
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'multi-deit', 'multi-deit-cross-attn', 'single-densenet', 'multi-densenet'])
+    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'single-deit-landsat', 'multi-deit', 'multi-deit-cross-attn', 'single-densenet', 'multi-densenet'])
     parser.add_argument('--image_net', type=str, default='both', choices=['both', 'hr', 'none'], help='Whether to initialize multi-scale branches with ImageNet pre-trained weights')
     parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
     parser.add_argument('--epochs', type=int, default=1)
