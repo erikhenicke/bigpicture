@@ -42,7 +42,7 @@ class MultiScaleDeiTSatCLIP(nn.Module):
 
         self._adapt_satclip_input_channels(self.in_channels)
 
-        self._freeze_satclip_branch()
+        # self._freeze_satclip_branch()
 
         self.satclip_projection = nn.Linear(256, 192)
 
