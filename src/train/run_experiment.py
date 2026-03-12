@@ -86,8 +86,8 @@ def make_model(config: dict, device: str):
             region_aux_enabled=config.region_aux_enabled,
         )
     elif config.model_type == 'multi-deit-satclip':
-        from models.multi_scale_deit_satclip import MultiScaleDeiTSatClip
-        model = MultiScaleDeiTSatClip(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels)
+        from models.multi_scale_deit_satclip import MultiScaleDeiTSatCLIP
+        model = MultiScaleDeiTSatCLIP(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels)
     elif config.model_type == 'single-densenet':
         from models.single_scale_dense_net_121 import SingleScaleDenseNet121
         model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
