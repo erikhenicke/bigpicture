@@ -130,57 +130,33 @@ def build_table(df: pd.DataFrame, run_group: str, output_html: Path) -> None:
 	output_html.write_text(gt.as_raw_html(), encoding='utf-8')
 
 
-def parse_args() -> argparse.Namespace:
-	parser = argparse.ArgumentParser(
-		description=(
-			'Download all W&B artifacts aliased as "best" from runs in a run group, '
-			'collect selected run config + artifact metrics, and render a Great Tables report.'
-		)
-	)
-	parser.add_argument(
-		'--download-dir',
-		type=Path,
-		default=Path('artifacts/best_branches'),
-		help='Directory where best artifacts will be downloaded.',
-	)
-	parser.add_argument(
-		'--output-csv',
-		type=Path,
-		default=Path('results/branches/best_artifacts.csv'),
-		help='Output CSV path for the collected dataframe.',
-	)
-	parser.add_argument(
-		'--output-html',
-		type=Path,
-		default=Path('results/branches/best_artifacts.html'),
-		help='Output HTML path for the Great Tables report.',
-	)
-	return parser.parse_args()
-
-
 def main() -> None:
-	args = parse_args()
-
-	args.download_dir.mkdir(parents=True, exist_ok=True)
-	args.output_csv.parent.mkdir(parents=True, exist_ok=True)
-	args.output_html.parent.mkdir(parents=True, exist_ok=True)
-
 	wandb.login()
 
 	project_path = 'ehenicke-friedrich-schiller-universit-t-jena/fmow'
-	run_group = 'branches'
+	run_group = 'densenet'
+
+	output_csv = Path(f'results/{run_group}/best_artifacts.csv')
+	output_html = Path(f'results/{run_group}/best_artifacts.html')
+	download_dir = Path(f'artifacts/{run_group}')
+
+	download_dir.mkdir(parents=True, exist_ok=True)
+	output_csv.parent.mkdir(parents=True, exist_ok=True)
+	output_html.parent.mkdir(parents=True, exist_ok=True)
+
 	df = collect_best_artifacts(
 		project_path=project_path,
 		run_group=run_group,
-		download_root=args.download_dir,
+		download_root=download_dir,
 	)
 
-	df.to_csv(args.output_csv, index=False)
-	build_table(df=df, run_group=run_group, output_html=args.output_html)
+
+	df.to_csv(output_csv, index=False)
+	build_table(df=df, run_group=run_group, output_html=output_html)
 
 	print(f'Collected {len(df)} best artifacts from run group "{run_group}".')
-	print(f'DataFrame CSV: {args.output_csv}')
-	print(f'Great Tables HTML: {args.output_html}')
+	print(f'DataFrame CSV: {output_csv}')
+	print(f'Great Tables HTML: {output_html}')
 
 
 if __name__ == '__main__':
