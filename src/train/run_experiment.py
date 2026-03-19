@@ -103,18 +103,20 @@ def make_optimizer(model, config):
         # Main optimizer: backbone + fusion + main classifier (exclude region_classifier)
         main_params = []
         for name, p in model.named_parameters():
-            if not name.startswith('region_classifier.'):
+            if not name.startswith('region_classifier.') and p.requires_grad:
                 main_params.append(p)
+
+        region_params = [p for p in model.region_classifier.parameters() if p.requires_grad]
         
         if config.optimizer == 'adamw':
             optimizer_main = AdamW(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-            optimizer_region = AdamW(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay)
+            optimizer_region = AdamW(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay)
         elif config.optimizer == 'adam':
             optimizer_main = Adam(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-            optimizer_region = Adam(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay)
+            optimizer_region = Adam(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay)
         else:
             optimizer_main = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-            optimizer_region = SGD(model.region_classifier.parameters(), lr=config.region_aux_lr, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
+            optimizer_region = SGD(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
         
         optimizer = {'main': optimizer_main, 'region': optimizer_region}
         
@@ -129,13 +131,15 @@ def make_optimizer(model, config):
         elif config.learning_rate_scheduler == 'step':
             scheduler = StepLR(optimizer_main, step_size=1, gamma=config.learning_rate_decay)
     else:
+        main_params = [p for p in model.parameters() if p.requires_grad]
+
         # Standard single optimizer
         if config.optimizer == 'adamw':
-            optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+            optimizer = AdamW(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
         elif config.optimizer == 'adam':
-            optimizer = Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+            optimizer = Adam(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
         else:
-            optimizer = SGD(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
+            optimizer = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
         
         scheduler = None
         if config.learning_rate_scheduler == 'plateau':
