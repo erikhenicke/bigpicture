@@ -1,3 +1,6 @@
-[submodule "libs/satclip"]
-	path = libs/satclip
-	url = https://github.com/microsoft/satclip.git
+[submodule "lib/satclip"]
+	path = lib/satclip
+	url = git@github.com:microsoft/satclip.git
+[submodule "lib/wilds-geoshift"]
+	path = lib/wilds-geoshift
+	url = git@github.com:crastoru/wilds-geoshift.git

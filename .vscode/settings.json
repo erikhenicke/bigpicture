@@ -11,6 +11,6 @@
     ],
     "python.testing.pytestEnabled": false,
     "python.testing.unittestEnabled": true,
-    "python.analysis.extraPaths": ["./src", "./libs/satclip/satclip"],
+    "python.analysis.extraPaths": ["./src", "./lib/satclip/satclip", "./lib/wilds-geoshift"],
     "python.experiments.optInto": ["pythonTerminalEnvVarActivation"],
 }

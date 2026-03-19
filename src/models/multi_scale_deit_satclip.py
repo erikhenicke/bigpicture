@@ -1,5 +1,5 @@
-from train.run_experiment import get_data_loader
-
+import os
+import sys
 from typing import Any, Optional, Tuple
 
 import torch
@@ -7,6 +7,7 @@ import torch.nn as nn
 from huggingface_hub import hf_hub_download
 from transformers import ViTForImageClassification
 
+sys.path.append(os.path.join(os.getcwd(), "lib/satclip/satclip"))
 from load import get_satclip
 
 
