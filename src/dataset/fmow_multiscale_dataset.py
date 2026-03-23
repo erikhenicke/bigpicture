@@ -97,7 +97,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
         """Default transform for RGB images (Inception normalization)"""
         return transforms.Compose(
             [
-                transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     # Normalize to [-1, 1] range

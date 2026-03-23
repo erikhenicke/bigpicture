@@ -51,9 +51,8 @@ def save_transformed_images(
     
     print(f"Found {len(idxs)} images in landsat directory")
     print(f"Saving RGB images to: {output_rgb_dir}")
-    print(f"Saving Landsat images to: {output_landsat_dir}")
-    print()
-    
+    print(f"Saving Landsat images to: {output_landsat_dir}\n")
+     
     # Process all images with progress bar
     rgb_list = []
     landsat_list = []
@@ -90,9 +89,9 @@ def save_transformed_images(
                 pbar.update(1)
                 continue
     
-    print("\n✓ Successfully saved all transformed images!")
-    print(f"  RGB images: {output_rgb_dir}")
-    print(f"  Landsat images: {output_landsat_dir}")
+    print("\nSuccessfully saved all transformed images!")
+    print(f" RGB images: {output_rgb_dir}")
+    print(f" Landsat images: {output_landsat_dir}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --partition=robolab
-#SBATCH --exclude=gaia1,gaia2,gaia3,gaia5,gaia6,gaia7
+#SBATCH --nodelist=gaia4,gaia5
 #SBATCH --job-name=preprocess_fmow
 #SBATCH --nodes=1
 #SBATCH --output=slurm/preprocess_fmow.%j.out

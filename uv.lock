@@ -258,6 +258,7 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
     { name = "wandb" },
+    { name = "welford-torch" },
     { name = "wilds" },
 ]
 
@@ -294,6 +295,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "transformers", specifier = ">=5.3.0" },
     { name = "wandb", specifier = ">=0.25.1" },
+    { name = "welford-torch", specifier = ">=0.2.5" },
     { name = "wilds", specifier = ">=2.0.0" },
 ]
 
@@ -3425,6 +3427,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/11/19/466c1d03323a4a0ed7d4036a59b18d6b6f67cb5032e444205927e226b18d/wandb-0.25.1-py3-none-win32.whl", hash = "sha256:8f2d04f16b88d65bfba9d79fb945f6c64e2686215469a841936e0972be8ec6a5", size = 24967338, upload-time = "2026-03-10T23:51:31.833Z" },
     { url = "https://files.pythonhosted.org/packages/89/22/680d34c1587f3a979c701b66d71aa7c42b4ef2fdf0774f67034e618e834e/wandb-0.25.1-py3-none-win_amd64.whl", hash = "sha256:62db5166de14456156d7a85953a58733a631228e6d4248a753605f75f75fb845", size = 24967343, upload-time = "2026-03-10T23:51:36.026Z" },
     { url = "https://files.pythonhosted.org/packages/c4/e8/76836b75d401ff5912aaf513176e64557ceaec4c4946bfd38a698ff84d48/wandb-0.25.1-py3-none-win_arm64.whl", hash = "sha256:cc7c34b70cf4b7be4d395541e82e325fd9d2be978d62c9ec01f1a7141523b6bb", size = 22080774, upload-time = "2026-03-10T23:51:40.196Z" },
+]
+
+[[package]]
+name = "welford-torch"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/32/0f/3d7dcc3f08b8d3914624c1ea76811d34c85267415f71b2b497b132bdfd39/welford_torch-0.2.5.tar.gz", hash = "sha256:228f970aaaf7dcd595747a43db6eb7358cf0bb86873b1a9f7975e0b81902e761", size = 13256, upload-time = "2025-01-27T17:14:45.666Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/f5/3cd8bac1f78b3c5cbf9bfaa17b07b4d66cc733d595a69aaa6cff57a6bdba/welford_torch-0.2.5-py3-none-any.whl", hash = "sha256:0b5966701c5b37ad2cb4658e379be201b7f9252a5f8aac3accedeeee6a5f6f2c", size = 13977, upload-time = "2025-01-27T17:14:44.23Z" },
 ]
 
 [[package]]
