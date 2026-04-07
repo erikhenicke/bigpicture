@@ -15,6 +15,7 @@ dependencies = [
     "lightning>=2.6.1",
     "matplotlib>=3.10.8",
     "numpy>=2.4.3",
+    "omegaconf>=2.3.0",
     "pandarallel>=1.6.5",
     "pandas>=3.0.1",
     "pillow>=12.1.1",

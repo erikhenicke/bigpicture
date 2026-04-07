@@ -117,7 +117,7 @@ def make_optimizer(model, config):
         else:
             optimizer_main = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
             optimizer_region = SGD(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-        
+
         optimizer = {'main': optimizer_main, 'region': optimizer_region}
         
         scheduler = None
@@ -550,6 +550,7 @@ def train(context, config):
         save_full_checkpoint=True,
     )
     print('Logged final model')
+
 
 
 def run_experiment(args):

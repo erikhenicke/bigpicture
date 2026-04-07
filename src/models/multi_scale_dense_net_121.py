@@ -56,6 +56,7 @@ class MultiScaleDenseNet121(nn.Module):
     def _extract_features(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
         features = model.features(x)
         out = nn.functional.relu(features, inplace=False)
+        # Adaptive average pooling sets kernel size and stride automatically, with (1, 1) global average pooling is applied to each feature map.
         out = nn.functional.adaptive_avg_pool2d(out, (1, 1))
         return torch.flatten(out, 1)
 
