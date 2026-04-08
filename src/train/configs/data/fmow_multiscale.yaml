@@ -1,0 +1,15 @@
+fmow_dir: /home/henicke/data
+landsat_dir: /home/datasets4/FMoW_LandSat
+preprocessed_dir_default: null
+preprocessed_dir_gaia: /data/henicke/FMoW_LandSat
+
+batch_size: 32
+num_workers: 4
+frac: 0.01
+augment_train: true
+
+train_split: train
+val_splits: [val, id_val]
+test_splits: [test, id_test]
+val_loader_names: [val-od, val-id]
+test_loader_names: [test-od, test-id]

@@ -97,7 +97,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
         """Default transform for RGB images (Inception normalization)"""
         return transforms.Compose(
             [
-                transforms.ToTensor(),
+                # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(
                     # Normalize to [-1, 1] range
                     mean=[0.5, 0.5, 0.5],
@@ -224,7 +226,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 band_img = transforms.ToPILImage()(band_scaled)
                 band_img = band_img.resize((224, 224), Image.BILINEAR)
                 # Scale back from [0, 1] to [-1, 1]
-                band_resized = transforms.ToTensor()(band_img).squeeze(0) * 2 - 1
+                # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
+                band_resized = transforms.Compose([
+                    transforms.ToImage(),
+                    transforms.ToDtype(torch.float32, scale=True)
+                ])(band_img).squeeze(0) * 2 - 1
                 resized_bands.append(band_resized)
             landsat_tensor = torch.stack(resized_bands, dim=0)
 

@@ -150,7 +150,7 @@ class DualBranch(nn.Module):
 
 if __name__ == "__main__":
     # Example usage
-    hr_branch = DenseNetBranch(in_channels=3, image_net=True)
+    hr_branch = DeitBranch(in_channels=3, image_net=True)
     lr_branch = DeitBranch(in_channels=6, image_net=True)
     model = DualBranch(hr_encoder=hr_branch, lr_encoder=lr_branch, landsat_channels=6)
 

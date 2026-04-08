@@ -1,0 +1,27 @@
+num_labels: 62
+landsat_in_channels: 6
+
+hr_encoder:
+  _target_: models.components.branches.DeitBranch
+  in_channels: 3
+  image_net: true
+
+lr_encoder:
+  _target_: models.components.branches.DeitBranch
+  in_channels: 6
+  image_net: true
+
+branches:
+  _target_: models.components.branches.DualBranch
+  landsat_channels: ${model.landsat_in_channels}
+
+fusion:
+  _target_: models.components.fusion.ConcatFusion
+  hr_dim: 192
+  lr_dim: 192
+  out_dim: 256
+
+region_index: 0
+ece_n_bins: 10
+monitor_metric: val-od-worst-group-task-acc
+compile: false

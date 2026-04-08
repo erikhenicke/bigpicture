@@ -1,0 +1,13 @@
+defaults:
+  - data: fmow_multiscale
+  - model: late_fusion_deit
+  - optim: adamw_plateau
+  - trainer: default
+  - wandb: fmow
+  - _self_
+
+seed: 111
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
