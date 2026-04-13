@@ -28,7 +28,7 @@ class LateFusionModule(LightningModule):
         ece_n_bins: int = 10,
         val_loader_names: List[str] = ["val"],
         test_loader_names: List[str] = ["test"], 
-        key_metric: str = "val-od-worst-group-task-acc",
+        key_metric: str = "val/val-od-worst-group-task-acc",
         compile: bool = False,
     ) -> None:
         """Initialize a `LateFusionModule`.
@@ -139,8 +139,8 @@ class LateFusionModule(LightningModule):
         # update and log metrics
         self.train_task_loss(task_loss)
         self.train_task_acc(task_preds, y)
-        self.log("train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         # return loss or backpropagation will fail
         return task_loss

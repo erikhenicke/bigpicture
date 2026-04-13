@@ -32,7 +32,7 @@ WEIGHT_DECAY = 0.0
 LR_DECAY = 0.5
 PLATEAU_PATIENCE = 5 
 ECE_N_BINS = 10
-MONITOR_METRIC = "val-od-worst-group-task-acc"
+MONITOR_METRIC = "val/val-od-worst-group-task-acc"
 
 
 def make_data_loaders():

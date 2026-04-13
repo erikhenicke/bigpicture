@@ -23,5 +23,5 @@ fusion:
 
 region_index: 0
 ece_n_bins: 10
-monitor_metric: val-od-worst-group-task-acc
+monitor_metric: val/val-od-worst-group-task-acc
 compile: false
