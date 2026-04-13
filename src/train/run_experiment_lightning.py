@@ -1,5 +1,4 @@
 from functools import partial
-import platform
 
 import torch
 from lightning import Trainer, seed_everything
@@ -7,13 +6,16 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
 import wandb
 
-from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 from models.components.branches import DeitBranch, DualBranch
 from models.components.fusion import ConcatFusion
 from models.late_fusion import LateFusionModule
+from train.utils import (
+    make_multiscale_dataset,
+    make_multiscale_loader,
+    resolve_preprocessed_dir,
+)
 
 # Hardcoded test configuration for first Lightning integration run.
 PROJECT_NAME = "fmow"
@@ -33,45 +35,51 @@ ECE_N_BINS = 10
 MONITOR_METRIC = "val-od-worst-group-task-acc"
 
 
-def get_data_loader(dataset: FMoWMultiScaleDataset, split: str, shuffle: bool = False) -> DataLoader:
-    return DataLoader(
-        dataset.get_subset(split, frac=FRAC),
-        batch_size=BATCH_SIZE,
-        shuffle=shuffle,
-        num_workers=DATA_LOADER_NUM_WORKERS,
-        collate_fn=collate_multiscale,
-    )
-
-
 def make_data_loaders():
-    fmow_dir = "/home/henicke/data"
-    landsat_dir = "/home/datasets4/FMoW_LandSat"
-    preprocessed_dir = None
+    preprocessed_dir = resolve_preprocessed_dir(None)
 
-    if platform.node() in {"gaia4", "gaia5"}:
-        preprocessed_dir = "/data/henicke/FMoW_LandSat"
+    dataset_train = make_multiscale_dataset(preprocessed_dir=preprocessed_dir, augment=True)
+    dataset_eval = make_multiscale_dataset(preprocessed_dir=preprocessed_dir)
 
-    dataset_train = FMoWMultiScaleDataset(
-        fmow_dir=fmow_dir,
-        landsat_dir=landsat_dir,
-        preprocessed_dir=preprocessed_dir,
-        augment=True,
+    train_loader = make_multiscale_loader(
+        dataset_train,
+        split="train",
+        frac=FRAC,
+        batch_size=BATCH_SIZE,
+        num_workers=DATA_LOADER_NUM_WORKERS,
+        shuffle=True,
     )
-
-    dataset_eval = FMoWMultiScaleDataset(
-        fmow_dir=fmow_dir,
-        landsat_dir=landsat_dir,
-        preprocessed_dir=preprocessed_dir,
-    )
-
-    train_loader = get_data_loader(dataset_train, split="train", shuffle=True)
     val_loaders = [
-        get_data_loader(dataset_eval, split="val", shuffle=False),
-        get_data_loader(dataset_eval, split="id_val", shuffle=False),
+        make_multiscale_loader(
+            dataset_eval,
+            split="val",
+            frac=FRAC,
+            batch_size=BATCH_SIZE,
+            num_workers=DATA_LOADER_NUM_WORKERS,
+        ),
+        make_multiscale_loader(
+            dataset_eval,
+            split="id_val",
+            frac=FRAC,
+            batch_size=BATCH_SIZE,
+            num_workers=DATA_LOADER_NUM_WORKERS,
+        ),
     ]
     test_loaders = [
-        get_data_loader(dataset_eval, split="test", shuffle=False),
-        get_data_loader(dataset_eval, split="id_test", shuffle=False),
+        make_multiscale_loader(
+            dataset_eval,
+            split="test",
+            frac=FRAC,
+            batch_size=BATCH_SIZE,
+            num_workers=DATA_LOADER_NUM_WORKERS,
+        ),
+        make_multiscale_loader(
+            dataset_eval,
+            split="id_test",
+            frac=FRAC,
+            batch_size=BATCH_SIZE,
+            num_workers=DATA_LOADER_NUM_WORKERS,
+        ),
     ]
     return train_loader, val_loaders, test_loaders
 

@@ -1,6 +1,3 @@
-from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
-
-import platform
 from collections import defaultdict
 import tempfile
 
@@ -13,6 +10,8 @@ from torchmetrics.classification import MulticlassCalibrationError
 from tqdm import tqdm
 import wandb
 
+from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
+
 # To compute per-region metrics, the region-id is retrieved from sample metadata at index 0 (_metadata_array in FMoWDataset class).
 REGION_INDEX = 0
 FIVE_REGIONS = {'Europe', 'Americas', 'Asia', 'Africa', 'Oceania'}
@@ -23,41 +22,41 @@ DATA_LOADER_COLLATE_FN = collate_multiscale
 DATA_LOADER_NUM_WORKERS = 4
 
 
-def get_data_loader(dataset: FMoWMultiScaleDataset, split, config, shuffle=False):
-    return DataLoader(
-        dataset.get_subset(split, frac=config.frac), 
-        batch_size=config.batch_size, 
-        shuffle=shuffle, 
-        num_workers=DATA_LOADER_NUM_WORKERS,
-        collate_fn=DATA_LOADER_COLLATE_FN
-    )
-
-
 def make_data_loaders(train_split, val_splits, test_splits, speaking_names, config):
-    fmow_dir = '/home/henicke/data'
-    landsat_dir = '/home/datasets4/FMoW_LandSat'
-    preprocessed_dir = None
+    preprocessed_dir = resolve_preprocessed_dir(None)
 
-    if platform.node() == 'gaia4' or platform.node() == 'gaia5':
-        preprocessed_dir = '/data/henicke/FMoW_LandSat'
-        
-    dataset_augment = FMoWMultiScaleDataset(
-        fmow_dir=fmow_dir,
-        landsat_dir=landsat_dir,
-        preprocessed_dir=preprocessed_dir,
-        augment=config.data_augmentation
-    )
-
-    dataset = FMoWMultiScaleDataset(
-        fmow_dir=fmow_dir,
-        landsat_dir=landsat_dir,
-        preprocessed_dir=preprocessed_dir
-    )
+    dataset_augment = make_multiscale_dataset(preprocessed_dir=preprocessed_dir, augment=config.data_augmentation)
+    dataset = make_multiscale_dataset(preprocessed_dir=preprocessed_dir)
 
     return (
-        get_data_loader(dataset_augment, train_split, config, shuffle=True), 
-        {speaking_names[split]: get_data_loader(dataset, split, config, shuffle=False) for split in val_splits},
-        {speaking_names[split]: get_data_loader(dataset, split, config, shuffle=False) for split in test_splits}
+        make_multiscale_loader(
+            dataset_augment,
+            train_split,
+            frac=config.frac,
+            batch_size=config.batch_size,
+            num_workers=DATA_LOADER_NUM_WORKERS,
+            shuffle=True,
+        ),
+        {
+            speaking_names[split]: make_multiscale_loader(
+                dataset,
+                split,
+                frac=config.frac,
+                batch_size=config.batch_size,
+                num_workers=DATA_LOADER_NUM_WORKERS,
+            )
+            for split in val_splits
+        },
+        {
+            speaking_names[split]: make_multiscale_loader(
+                dataset,
+                split,
+                frac=config.frac,
+                batch_size=config.batch_size,
+                num_workers=DATA_LOADER_NUM_WORKERS,
+            )
+            for split in test_splits
+        },
     )
 
 def make_model(config: dict, device: str):

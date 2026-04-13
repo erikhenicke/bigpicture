@@ -1,4 +1,3 @@
-import platform
 from pathlib import Path
 from typing import List, Tuple
 
@@ -11,36 +10,35 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 import wandb
 
-from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
 from models.late_fusion import LateFusionModule
+from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
 
 
 def _resolve_preprocessed_dir(cfg: DictConfig) -> str | None:
-    if platform.node() in {"gaia4", "gaia5"}:
-        return cfg.data.preprocessed_dir_gaia
-    return cfg.data.preprocessed_dir_default
+    return resolve_preprocessed_dir(cfg.data.preprocessed_dir_default, cfg.data.preprocessed_dir_gaia)
 
 
 def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, shuffle: bool) -> DataLoader:
-    return DataLoader(
-        dataset.get_subset(split, frac=cfg.data.frac),
+    return make_multiscale_loader(
+        dataset,
+        split=split,
+        frac=cfg.data.frac,
         batch_size=cfg.data.batch_size,
-        shuffle=shuffle,
         num_workers=cfg.data.num_workers,
-        collate_fn=collate_multiscale,
+        shuffle=shuffle,
     )
 
 
 def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
     preprocessed_dir = _resolve_preprocessed_dir(cfg)
 
-    dataset_train = FMoWMultiScaleDataset(
+    dataset_train = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
         preprocessed_dir=preprocessed_dir,
         augment=cfg.data.augment_train,
     )
-    dataset_eval = FMoWMultiScaleDataset(
+    dataset_eval = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
         preprocessed_dir=preprocessed_dir,
