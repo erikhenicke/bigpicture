@@ -62,17 +62,32 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
     lr_encoder = instantiate(cfg.model.lr_encoder)
     branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
     fusion = instantiate(cfg.model.fusion)
+    late_fusion_model = instantiate(
+        cfg.model.model,
+        branches=branches,
+        fusion=fusion,
+        num_labels=cfg.model.num_labels,
+        domain_num_labels=cfg.model.domain_num_labels,
+    )
 
     optimizer_factory = instantiate(cfg.optim.optimizer)
     scheduler_factory = instantiate(cfg.optim.scheduler)
+    domain_optimizer_factory = instantiate(
+        cfg.optim.domain_optimizer,
+        lr=cfg.optim.optimizer.lr * cfg.model.domain_optimizer_lr_factor,
+    )
+    domain_scheduler_factory = instantiate(cfg.optim.domain_scheduler)
 
     return LateFusionModule(
-        branches=branches,
-        fusion=fusion,
+        model=late_fusion_model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
+        domain_optimizer=domain_optimizer_factory,
+        domain_scheduler=domain_scheduler_factory,
         num_labels=cfg.model.num_labels,
+        domain_num_labels=cfg.model.domain_num_labels,
         region_index=cfg.model.region_index,
+        domain_loss_alpha=cfg.model.domain_loss_alpha,
         ece_n_bins=cfg.model.ece_n_bins,
         val_loader_names=list(cfg.data.val_loader_names),
         test_loader_names=list(cfg.data.test_loader_names),
@@ -97,6 +112,7 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
     model = make_model(cfg)
 
     checkpoint_callback = ModelCheckpoint(
+        dirpath=f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}",
         monitor=cfg.model.monitor_metric,
         mode="max",
         save_top_k=1,

@@ -4,8 +4,8 @@
 #SBATCH --job-name=train_multi_deit
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=slurm/train_multi_deit.%j.out
-#SBATCH --error=slurm/train_multi_deit.%j.err
+#SBATCH --output=log/slurm/train_multi_deit.%j.out
+#SBATCH --error=log/slurm/train_multi_deit.%j.err
 #SBATCH --gres=gpu:1
   
 # Your commands go here

@@ -4,8 +4,8 @@
 #SBATCH --job-name=train_late_fusion_hydra
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=slurm/train_late_fusion_hydra.%j.out
-#SBATCH --error=slurm/train_late_fusion_hydra.%j.err
+#SBATCH --output=log/slurm/train_late_fusion_hydra.%j.out
+#SBATCH --error=log/slurm/train_late_fusion_hydra.%j.err
 #SBATCH --gres=gpu:1
 
 cd /home/henicke/git/bigpicture

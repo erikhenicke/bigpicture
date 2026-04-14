@@ -4,10 +4,16 @@ defaults:
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow
+  - checkpoint: default
   - _self_
 
 seed: 111
 
+run_name: late-fusion-lightning-hydra-test
+
+wandb:
+  run_name: ${run_name}-${now:%y-%m-%d}
+
 hydra:
   run:
-    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: log/hydra/${now:%Y-%m-%d}/${run_name}-${now:%H-%M-%S}

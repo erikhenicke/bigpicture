@@ -3,8 +3,8 @@
 #SBATCH --exclude=gaia1,gaia2,gaia3,gaia4,gaia6,gaia7
 #SBATCH --job-name=copy_fmow
 #SBATCH --nodes=1
-#SBATCH --output=slurm/copy_fmow.%j.out
-#SBATCH --error=slurm/copy_fmow.%j.err
+#SBATCH --output=log/slurm/copy_fmow.%j.out
+#SBATCH --error=log/slurm/copy_fmow.%j.err
 
 set -euo pipefail
 

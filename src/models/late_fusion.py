@@ -3,12 +3,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
 from lightning import LightningModule
 from torch import nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 
-from models.components.fusion import Fusion
-from models.components.branches import DualBranch
+from models.components.late_fusion_model import LateFusionModel
 from models.utils import make_eval_state, extract_region_names, update_eval_metrics, compute_final_eval_metrics
 
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
@@ -19,12 +19,15 @@ class LateFusionModule(LightningModule):
 
     def __init__(
         self,
-        branches: DualBranch,
-        fusion: Fusion,
+        model: LateFusionModel,
         optimizer: Callable[..., torch.optim.Optimizer],
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
+        domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,
+        domain_scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         num_labels: int = 62,
+        domain_num_labels: int = 5,
         region_index: int = 0,
+        domain_loss_alpha: float = 0.2,
         ece_n_bins: int = 10,
         val_loader_names: List[str] = ["val"],
         test_loader_names: List[str] = ["test"], 
@@ -33,8 +36,7 @@ class LateFusionModule(LightningModule):
     ) -> None:
         """Initialize a `LateFusionModule`.
 
-        :param branches: The branches for high and low resolution feature extraction.
-        :param fusion: The fusion module.
+        :param model: The fusion classifier.
         """
         super().__init__()
 
@@ -42,22 +44,26 @@ class LateFusionModule(LightningModule):
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(
             logger=False,
-            ignore=["branches", "fusion", "optimizer", "scheduler"],
+            ignore=["model", "optimizer", "scheduler", "domain_optimizer", "domain_scheduler"],
         )
 
         # Keep callables out of checkpoint hyperparameters (PyTorch 2.6+ weights_only default).
         self.optimizer_factory = optimizer
         self.scheduler_factory = scheduler
+        self.domain_optimizer_factory = domain_optimizer
+        self.domain_scheduler_factory = domain_scheduler
 
-        self.branches = branches
-        self.fusion = fusion
-        self.classifier = nn.Linear(self.fusion.out_dim, self.hparams.num_labels)
+        self.model = model
 
-        self.criterion = nn.CrossEntropyLoss()
-        self.criterion_per_sample = nn.CrossEntropyLoss(reduction="none")
+        self.task_criterion = nn.CrossEntropyLoss()
+        self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none")
+        self.domain_criterion = nn.CrossEntropyLoss()
 
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_labels)
         self.train_task_loss = MeanMetric()
+        self.train_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.domain_num_labels)
+        self.train_domain_loss = MeanMetric()
+        self.train_total_loss = MeanMetric()
         self.val_acc_best = MaxMetric()
 
         self.val_loader_names = val_loader_names 
@@ -88,22 +94,32 @@ class LateFusionModule(LightningModule):
         self._test_state: Dict[int, Dict[str, Any]] = {}
         self._val_region_names: Dict[int, List[str]] = {}
         self._test_region_names: Dict[int, List[str]] = {}
+        self._task_scheduler = None
+        self._domain_scheduler = None
+
+        self.automatic_optimization = False
 
 
     def forward(self, x: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Perform a forward pass through the model `self.branches`, `self.fusion`, and `self.classifier`.
+        """Perform a forward pass through the model.
 
         :param x: A dict of images.
         :return: A tensor of logits.
         """
-        hr_features, lr_features = self.branches(x)
-        fused_features = self.fusion(hr_features, lr_features)
-        return self.classifier(fused_features)
+        return self._shared_forward(x)["task_logits"]
+
+    def _shared_forward(self, x: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+       return self.model(x)
+        
 
     def on_train_start(self) -> None:
         """Lightning hook that is called when training begins."""
         self.train()
         self.val_acc_best.reset()
+        self.train_task_loss.reset()
+        self.train_domain_loss.reset()
+        self.train_task_acc.reset()
+        self.train_domain_acc.reset()
 
     def model_step(
         self, batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
@@ -119,7 +135,7 @@ class LateFusionModule(LightningModule):
         """
         x, y = batch[0], batch[1]
         logits = self.forward(x)
-        loss = self.criterion(logits, y)
+        loss = self.task_criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
         return loss, preds, logits
 
@@ -133,21 +149,53 @@ class LateFusionModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
-        y = batch[1]
-        task_loss, task_preds, _ = self.model_step(batch)
+        x, y, metadata = batch
+        regions = metadata[:, self.hparams.region_index].long()
+
+        result = self._shared_forward(x)
+        task_logits = result["task_logits"]
+        domain_logits_detached = result["domain_logits_detached"]
+        task_loss = self.task_criterion(task_logits, y)
+        domain_loss = self.domain_criterion(domain_logits_detached, regions)
+        total_loss = task_loss + self.hparams.domain_loss_alpha * domain_loss
+
+        task_preds = torch.argmax(task_logits, dim=1)
+        domain_preds = torch.argmax(domain_logits_detached, dim=1)
+
+        task_optimizer, domain_optimizer = self.optimizers()
+
+        task_optimizer.zero_grad()
+        self.toggle_optimizer(task_optimizer)
+        self.manual_backward(total_loss)
+        task_optimizer.step()
+        self.untoggle_optimizer(task_optimizer)
+
+        domain_optimizer.zero_grad()
+        self.toggle_optimizer(domain_optimizer)
+        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
+        self.manual_backward(domain_loss_head)
+        domain_optimizer.step()
+        self.untoggle_optimizer(domain_optimizer)
 
         # update and log metrics
         self.train_task_loss(task_loss)
         self.train_task_acc(task_preds, y)
+        self.train_domain_loss(domain_loss)
+        self.train_domain_acc(domain_preds, regions)
+        self.train_total_loss(total_loss)
         self.log("train/train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/train-domain-loss", self.train_domain_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log("train/train-domain-acc", self.train_domain_acc, on_step=False, on_epoch=True, prog_bar=False)
+        self.log("train/train-total-loss", self.train_total_loss, on_step=False, on_epoch=True, prog_bar=True)
 
         # return loss or backpropagation will fail
-        return task_loss
+        return total_loss
 
     def on_train_epoch_end(self) -> None:
         """Lightning hook that is called when a training epoch ends."""
-        pass
+        if self._domain_scheduler is not None:
+            self._domain_scheduler.step()
 
     def on_validation_epoch_start(self) -> None:
         """Lightning hook that is called at the beginning of a validation epoch.
@@ -189,7 +237,7 @@ class LateFusionModule(LightningModule):
 
         update_eval_metrics(
             self._val_state[dataloader_idx],
-            self.criterion_per_sample,
+            self.task_criterion_per_sample,
             self.val_ece_metrics[dataloader_idx],
             task_logits,
             task_loss,
@@ -215,6 +263,17 @@ class LateFusionModule(LightningModule):
 
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
+        if self.trainer.sanity_checking:
+            return
+
+        if self._task_scheduler is not None:
+            monitor_value = self.trainer.callback_metrics.get(self.hparams.key_metric)
+            if monitor_value is not None:
+                if isinstance(self._task_scheduler, ReduceLROnPlateau):
+                    self._task_scheduler.step(monitor_value.item() if hasattr(monitor_value, "item") else monitor_value)
+                else:
+                    self._task_scheduler.step()
 
     def on_test_epoch_start(self) -> None:
         """Lightning hook that is called at the beginning of a test epoch.
@@ -256,7 +315,7 @@ class LateFusionModule(LightningModule):
 
         update_eval_metrics(
             self._test_state[dataloader_idx],
-            self.criterion_per_sample,
+            self.task_criterion_per_sample,
             self.test_ece_metrics[dataloader_idx],
             task_logits,
             task_loss,
@@ -290,11 +349,9 @@ class LateFusionModule(LightningModule):
         :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
         """
         if self.hparams.compile and stage == "fit":
-            self.branches = torch.compile(self.branches)
-            self.fusion = torch.compile(self.fusion)
-            self.classifier = torch.compile(self.classifier)
+            self.model = torch.compile(self.model)
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> Any:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
         Normally you'd need one. But in the case of GANs or similar you might have multiple.
 
@@ -303,19 +360,21 @@ class LateFusionModule(LightningModule):
 
         :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
         """
-        optimizer = self.optimizer_factory(params=self.parameters())
-        if self.scheduler_factory is not None:
-            scheduler = self.scheduler_factory(optimizer=optimizer)
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "monitor": self.hparams.key_metric,
-                    "interval": "epoch",
-                    "frequency": 1,
-                },
-            }
-        return {"optimizer": optimizer}
+        task_optimizer = self.optimizer_factory(params=self.model.task_parameters())
+        domain_optimizer = self.domain_optimizer_factory(params=self.model.domain_parameters())
+
+        self._task_scheduler = (
+            self.scheduler_factory(optimizer=task_optimizer)
+            if self.scheduler_factory is not None 
+            else None
+        )
+        self._domain_scheduler = (
+            self.domain_scheduler_factory(optimizer=domain_optimizer)
+            if self.domain_scheduler_factory is not None
+            else None
+        )
+
+        return [task_optimizer, domain_optimizer]
 
 
 if __name__ == "__main__":

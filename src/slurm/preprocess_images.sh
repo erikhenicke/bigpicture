@@ -3,8 +3,8 @@
 #SBATCH --nodelist=gaia4,gaia5
 #SBATCH --job-name=preprocess_fmow
 #SBATCH --nodes=1
-#SBATCH --output=slurm/preprocess_fmow.%j.out
-#SBATCH --error=slurm/preprocess_fmow.%j.err
+#SBATCH --output=log/slurm/preprocess_fmow.%j.out
+#SBATCH --error=log/slurm/preprocess_fmow.%j.err
 
 
 if [[ "$(hostname)" == "gaia4" ]]; then

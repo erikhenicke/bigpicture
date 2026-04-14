@@ -27,6 +27,11 @@ class Branch(nn.Module):
     def _adapt_input_channels(self, in_channels: int) -> None:
         pass
 
+    @property
+    @abstractmethod
+    def out_dim(self) -> int:
+        pass
+
 
 class DenseNetBranch(Branch):
     def __init__(self, in_channels=3, image_net=True):
@@ -38,6 +43,10 @@ class DenseNetBranch(Branch):
         # Adaptive average pooling sets kernel size and stride automatically, with (1, 1) global average pooling is applied to each feature map.
         out = nn.functional.adaptive_avg_pool2d(out, (1, 1))
         return torch.flatten(out, 1)
+
+    @property
+    def out_dim(self) -> int:
+        return self.model.classifier.in_features
 
     def _get_model(self, image_net=True):
         from torchvision.models import densenet121
@@ -79,6 +88,10 @@ class DeitBranch(Branch):
     def forward(self, x):
         tokens = self.model.vit(x).last_hidden_state
         return tokens[:, 0, :]
+
+    @property
+    def out_dim(self) -> int:
+        return self.model.config.hidden_size
 
     def _get_model(self, image_net=True):
         from transformers import ViTForImageClassification, ViTConfig

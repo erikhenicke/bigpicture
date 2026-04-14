@@ -5,7 +5,8 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 import wandb
 
 from models.components.branches import DeitBranch, DualBranch
@@ -99,12 +100,16 @@ def make_model() -> LateFusionModule:
         factor=LR_DECAY,
         patience=PLATEAU_PATIENCE,
     )
+    domain_optimizer_factory = partial(Adam, lr=LR * 0.1, weight_decay=0.0)
+    domain_scheduler_factory = partial(StepLR, step_size=1, gamma=0.96)
 
     model = LateFusionModule(
         branches=branches,
         fusion=fusion,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
+        domain_optimizer=domain_optimizer_factory,
+        domain_scheduler=domain_scheduler_factory,
         num_labels=NUM_CLASSES,
         region_index=0,
         ece_n_bins=ECE_N_BINS,

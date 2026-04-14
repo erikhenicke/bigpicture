@@ -3,8 +3,8 @@
 #SBATCH --job-name=compute_stats
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=slurm/compute_stats.%j.out
-#SBATCH --error=slurm/compute_stats.%j.err
+#SBATCH --output=log/slurm/compute_stats.%j.out
+#SBATCH --error=log/slurm/compute_stats.%j.err
 
 # Your commands go here
 cd /home/henicke/git/bigpicture
