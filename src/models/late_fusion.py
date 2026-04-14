@@ -154,13 +154,13 @@ class LateFusionModule(LightningModule):
 
         result = self._shared_forward(x)
         task_logits = result["task_logits"]
-        domain_logits_detached = result["domain_logits_detached"]
+        domain_logits = result["domain_logits"]
         task_loss = self.task_criterion(task_logits, y)
-        domain_loss = self.domain_criterion(domain_logits_detached, regions)
+        domain_loss = self.domain_criterion(domain_logits, regions)
         total_loss = task_loss + self.hparams.domain_loss_alpha * domain_loss
 
         task_preds = torch.argmax(task_logits, dim=1)
-        domain_preds = torch.argmax(domain_logits_detached, dim=1)
+        domain_preds = torch.argmax(domain_logits, dim=1)
 
         task_optimizer, domain_optimizer = self.optimizers()
 
@@ -172,6 +172,7 @@ class LateFusionModule(LightningModule):
 
         domain_optimizer.zero_grad()
         self.toggle_optimizer(domain_optimizer)
+        domain_logits_detached = result["domain_logits_detached"]
         domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
         self.manual_backward(domain_loss_head)
         domain_optimizer.step()

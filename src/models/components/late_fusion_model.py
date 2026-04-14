@@ -24,6 +24,7 @@ class LateFusionModel(nn.Module):
         fused = self.fusion(hr_branch_out, lr_branch_out)
         return {
             "task_logits": self.task_classifier(fused),
+            "domain_logits": self.domain_classifier(lr_branch_out),
             "domain_logits_detached": self.domain_classifier(lr_branch_out.detach())
         } 
     
@@ -38,13 +39,14 @@ class D3GModel(LateFusionModel):
     def __init__(self, branches: DualBranch, fusion: D3GFusion, num_labels: int, domain_num_labels: int):
         super().__init__(branches, fusion, num_labels, domain_num_labels)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Dict[str, torch.Tensor]):
         """
         TODO: If training, consistency loss. If not training, use all heads and average.    
         """
-        hr_branch_out, lr_branch_out = self.branches(x["rgb"], x["landsat"])
+        hr_branch_out, lr_branch_out = self.branches(x)
         fused = self.fusion(hr_branch_out, lr_branch_out)
         return {
             "task_logits": self.task_classifier(fused), 
+            "domain_logits": self.domain_classifier(lr_branch_out),
             "domain_logits_detached": self.domain_classifier(lr_branch_out.detach())
         }
