@@ -116,7 +116,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         scheduler=scheduler_factory,
         domain_optimizer=domain_optimizer_factory,
         domain_scheduler=domain_scheduler_factory,
-        num_task_labels=cfg.num_labels,
+        num_task_labels=cfg.num_task_labels,
         num_domain_labels=cfg.num_domain_labels,
         domain_index=cfg.domain_index,
         ece_n_bins=cfg.trainer.ece_n_bins,

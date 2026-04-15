@@ -1,4 +1,3 @@
-num_labels: 62
 landsat_in_channels: 6
 hr_image_net: true
 lr_image_net: false

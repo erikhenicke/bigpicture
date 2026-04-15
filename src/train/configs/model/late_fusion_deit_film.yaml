@@ -1,14 +1,14 @@
 landsat_in_channels: 6
 hr_image_net: true
-lr_image_net: false
+lr_image_net: true
 
 hr_encoder:
-  _target_: models.components.branches.DenseNetBranch
+  _target_: models.components.branches.DeitBranch
   in_channels: 3
   image_net: ${model.hr_image_net}
 
 lr_encoder:
-  _target_: models.components.branches.DenseNetBranch
+  _target_: models.components.branches.DeitBranch
   in_channels: ${model.landsat_in_channels}
   image_net: ${model.lr_image_net}
 
@@ -17,10 +17,10 @@ branches:
   landsat_channels: ${model.landsat_in_channels}
 
 fusion:
-  _target_: models.components.fusion.ConcatFusion
-  hr_dim: 1024
-  lr_dim: 1024
-  out_dim: 1024
+  _target_: models.components.fusion.FilmFusion
+  hr_dim: 192
+  lr_dim: 192
+  out_dim: 192 
 
 model:
   _target_: models.components.late_fusion_model.LateFusionModel
