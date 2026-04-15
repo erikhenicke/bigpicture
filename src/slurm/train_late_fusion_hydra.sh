@@ -9,4 +9,4 @@
 #SBATCH --gres=gpu:1
 
 cd /home/henicke/git/bigpicture
-uv run --env-file .env src/train/run_experiment_lightning_hydra.py +experiment=train_multi_deit_d3g_like
+uv run --env-file .env src/train/run_experiment_lightning_hydra.py experiment=train_multi_deit_d3g_like
