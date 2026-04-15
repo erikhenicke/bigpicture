@@ -8,7 +8,7 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 
-from models.components.late_fusion_model import LateFusionModel, D3GModel
+from models.components.late_fusion_model import LateFusionModel 
 from models.utils import make_eval_state, extract_region_names, update_eval_metrics, compute_final_eval_metrics
 
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}

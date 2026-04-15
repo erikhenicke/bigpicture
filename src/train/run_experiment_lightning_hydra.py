@@ -123,7 +123,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         val_loader_names=list(cfg.data.val_loader_names),
         test_loader_names=list(cfg.data.test_loader_names),
         key_metric=cfg.trainer.monitor_metric,
-        compile=cfg.model.compile,
+        compile=cfg.trainer.compile,
     )
 
 
