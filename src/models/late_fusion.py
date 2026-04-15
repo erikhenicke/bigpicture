@@ -197,7 +197,7 @@ class LateFusionModule(LightningModule):
         domain_optimizer.zero_grad()
         self.toggle_optimizer(domain_optimizer)
         domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
-        self.manual_backward(domain_loss_head)
+        self.manual_backward(domain_loss_head, retain_graph=True)  # Keep the forward graph for the subsequent task backward pass in this training step.
         domain_optimizer.step()
         self.untoggle_optimizer(domain_optimizer)
 
