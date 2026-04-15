@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - override /model: late_fusion_deit_d3g
+  - override /optim: adam_plateau
+
+run_name: train-multi-deit-d3g-like
+
+trainer:
+  max_epochs: 50
+
+data:
+  batch_size: 384
+  frac: 1.0
+  augment_train: true
+
+model:
+  hr_image_net: true
+  lr_image_net: true
+  d3g_loss_coeff: 0.5
+
+optim:
+  optimizer:
+    lr: 1.0e-4
+  scheduler:
+    factor: 0.5
+    patience: 5

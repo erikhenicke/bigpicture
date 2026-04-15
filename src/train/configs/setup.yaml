@@ -1,18 +1,23 @@
 defaults:
   - data: fmow_multiscale
-  - model: late_fusion_deit
+  - model: late_fusion_deit_both
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow
   - checkpoint: default
+  - optional experiment: null
   - _self_
+
+num_task_labels: 62
+num_domain_labels: 6
+domain_index: 0
 
 seed: 111
 
 run_name: late-fusion-lightning-hydra-test
 
 wandb:
-  run_name: ${run_name}-${now:%y-%m-%d}
+  run_name: ${run_name}-${now:%y-%m-%d-%H-%M-%S}
 
 hydra:
   run:

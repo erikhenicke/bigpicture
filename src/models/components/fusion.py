@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 from abc import abstractmethod
 
-from models.components.domain_relations import D3GRelation
-
 class Fusion(nn.Module):
     def __init__(self, hr_dim, lr_dim, out_dim): 
         super().__init__()
@@ -25,7 +23,6 @@ class ConcatFusion(Fusion):
         super().__init__(hr_dim, lr_dim, out_dim)
 
         self.intermediate_dim = (hr_dim + lr_dim) // 2
-    
 
         self.fusion = nn.Sequential(
             nn.Linear(hr_dim + lr_dim, self.intermediate_dim),
@@ -36,8 +33,8 @@ class ConcatFusion(Fusion):
             nn.Dropout(0.1),
         )
 
-    def forward(self, lr_features: torch.Tensor, hr_features: torch.Tensor) -> torch.Tensor:
-        concatenated = torch.cat([lr_features, hr_features], dim=1)
+    def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
+        concatenated = torch.cat([hr_features, lr_features], dim=1)
         return self.fusion(concatenated)
 
 
@@ -74,24 +71,5 @@ class FilmFusion(Fusion):
             nn.Dropout(0.1),
         )
 
-    def forward(self, lr_features: torch.Tensor, hr_features: torch.Tensor) -> torch.Tensor:
+    def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
         return self.fusion(hr_features, lr_features)
-
-
-class D3GFusion(Fusion):
-    """TODO: Under construction"""
-    def __init__(self, hr_dim, lr_dim, out_dim, beta, lr_encoder):
-        super().__init__(hr_dim, lr_dim, out_dim)
-
-        self.d3g_relation = D3GRelation(beta, 256, lr_encoder)
-        self.fusion = nn.Sequential(
-            nn.Linear(hr_dim + lr_dim, out_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-        )
-
-    def forward(self, lr_features: torch.Tensor, hr_features: torch.Tensor) -> torch.Tensor:
-        d3g_weights = self.d3g_relation(hr_features, lr_features, torch.tensor(0., device=lr_features.device))
-        weighted_hr = d3g_weights * hr_features.unsqueeze(1)  # batch_size x 1 x hr_dim
-        concatenated = torch.cat([weighted_hr.squeeze(1), lr_features], dim=1)
-        return self.fusion(concatenated)

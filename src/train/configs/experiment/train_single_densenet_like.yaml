@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - override /optim: adam_step
+
+run_name: train-single-densenet-like
+
+trainer:
+  max_epochs: 50
+
+data:
+  batch_size: 64
+  frac: 1.0
+  augment_train: true
+
+model:
+  hr_image_net: true
+  lr_image_net: false
+
+optim:
+  optimizer:
+    lr: 1.0e-4
+  scheduler:
+    gamma: 0.96

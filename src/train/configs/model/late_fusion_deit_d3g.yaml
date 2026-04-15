@@ -1,32 +1,38 @@
 num_labels: 62
 landsat_in_channels: 6
+hr_image_net: true
+lr_image_net: true
 
 hr_encoder:
   _target_: models.components.branches.DeitBranch
   in_channels: 3
-  image_net: true
+  image_net: ${model.hr_image_net}
 
 lr_encoder:
   _target_: models.components.branches.DeitBranch
-  in_channels: 6
-  image_net: true
+  in_channels: ${model.landsat_in_channels}
+  image_net: ${model.lr_image_net}
 
 branches:
   _target_: models.components.branches.DualBranch
   landsat_channels: ${model.landsat_in_channels}
 
 fusion:
-  _target_: models.components.fusion.ConcatFusion
+  _target_: models.components.fusion.D3GFusion
   hr_dim: 192
   lr_dim: 192
   out_dim: 256
+  beta: 0.5
 
 model:
-  _target_: models.components.late_fusion_model.LateFusionModel
+  _target_: models.components.late_fusion_model.D3GModel
 
-region_index: 0
-domain_num_labels: 5
-domain_loss_alpha: 0.2
+domain_index: 0
+domain_num_labels: 6
+enable_domain_head: true
+domain_loss_coeff: 0.2
+d3g_loss_coeff: 0.5
+pred_domain_for_d3g: true
 domain_optimizer_lr_factor: 0.1
 domain_optimizer_weight_decay: 0.0
 domain_scheduler_gamma: 0.96

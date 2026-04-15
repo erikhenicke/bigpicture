@@ -7,6 +7,7 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
+import torch
 from torch.utils.data import DataLoader
 import wandb
 
@@ -14,6 +15,13 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 from models.late_fusion import LateFusionModule
 from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
 
+def _has_device_tensor_cores() -> bool:
+    """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
+    if not torch.cuda.is_available():
+        return False
+    device = torch.device("cuda")
+    major, _ = torch.cuda.get_device_capability(device)
+    return major >= 7
 
 def _resolve_preprocessed_dir(cfg: DictConfig) -> str | None:
     return resolve_preprocessed_dir(cfg.data.preprocessed_dir_default, cfg.data.preprocessed_dir_gaia)
@@ -58,25 +66,49 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
 
 
 def make_model(cfg: DictConfig) -> LateFusionModule:
+
     hr_encoder = instantiate(cfg.model.hr_encoder)
     lr_encoder = instantiate(cfg.model.lr_encoder)
     branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
-    fusion = instantiate(cfg.model.fusion)
-    late_fusion_model = instantiate(
-        cfg.model.model,
-        branches=branches,
-        fusion=fusion,
-        num_labels=cfg.model.num_labels,
-        domain_num_labels=cfg.model.domain_num_labels,
-    )
+    model_target = cfg.model.model.get("_target_", "")
+    if model_target.endswith("D3GModel"):
+        late_fusion_model = instantiate(
+            cfg.model.model,
+            branches=branches,
+            num_task_labels=cfg.num_task_labels,
+            num_domain_labels=cfg.num_domain_labels,
+            enable_domain_head=cfg.model.enable_domain_head,
+            domain_loss_coeff=cfg.model.domain_loss_coeff,
+            learnable_relation_coeff=cfg.model.fusion.learnable_relation_coeff,
+            consistency_loss_coeff=cfg.model.fusion.d3g_loss_coeff,
+            pred_domain_for_d3g=cfg.model.fusion.pred_domain_for_d3g,
+        )
+    else:
+        fusion = instantiate(cfg.model.fusion)
+        late_fusion_model = instantiate(
+            cfg.model.model,
+            branches=branches,
+            fusion=fusion,
+            num_task_labels=cfg.num_task_labels,
+            num_domain_labels=cfg.num_domain_labels,
+            enable_domain_head=cfg.model.enable_domain_head,
+            domain_loss_coeff=cfg.model.domain_loss_coeff,
+        )
 
     optimizer_factory = instantiate(cfg.optim.optimizer)
-    scheduler_factory = instantiate(cfg.optim.scheduler)
-    domain_optimizer_factory = instantiate(
-        cfg.optim.domain_optimizer,
-        lr=cfg.optim.optimizer.lr * cfg.model.domain_optimizer_lr_factor,
-    )
-    domain_scheduler_factory = instantiate(cfg.optim.domain_scheduler)
+    scheduler_factory = instantiate(cfg.optim.scheduler) if cfg.optim.scheduler is not None else None
+    domain_optimizer_factory = None
+    domain_scheduler_factory = None
+    if cfg.model.enable_domain_head:
+        domain_optimizer_factory = instantiate(
+            cfg.optim.domain_optimizer,
+            lr=cfg.optim.optimizer.lr * cfg.model.domain_optimizer_lr_factor,
+        )
+        domain_scheduler_factory = (
+            instantiate(cfg.optim.domain_scheduler)
+            if cfg.optim.domain_scheduler is not None
+            else None
+        )
 
     return LateFusionModule(
         model=late_fusion_model,
@@ -84,21 +116,23 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         scheduler=scheduler_factory,
         domain_optimizer=domain_optimizer_factory,
         domain_scheduler=domain_scheduler_factory,
-        num_labels=cfg.model.num_labels,
-        domain_num_labels=cfg.model.domain_num_labels,
-        region_index=cfg.model.region_index,
-        domain_loss_alpha=cfg.model.domain_loss_alpha,
-        ece_n_bins=cfg.model.ece_n_bins,
+        num_task_labels=cfg.model.num_labels,
+        num_domain_labels=cfg.model.domain_num_labels,
+        domain_index=cfg.model.domain_index,
+        ece_n_bins=cfg.trainer.ece_n_bins,
         val_loader_names=list(cfg.data.val_loader_names),
         test_loader_names=list(cfg.data.test_loader_names),
-        key_metric=cfg.model.monitor_metric,
+        key_metric=cfg.trainer.monitor_metric,
         compile=cfg.model.compile,
     )
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="run_experiment_lightning")
+@hydra.main(version_base=None, config_path="configs", config_name="setup")
 def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
     seed_everything(cfg.seed, workers=True)
+
+    if _has_device_tensor_cores():
+        torch.set_float32_matmul_precision("medium")
 
     wandb.login()
     wandb_logger = WandbLogger(
@@ -113,7 +147,7 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}",
-        monitor=cfg.model.monitor_metric,
+        monitor=cfg.trainer.monitor_metric,
         mode="max",
         save_top_k=1,
         save_last=True,

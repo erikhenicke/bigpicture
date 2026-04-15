@@ -1,0 +1,39 @@
+num_labels: 62
+landsat_in_channels: 6
+hr_image_net: false
+lr_image_net: false
+
+hr_encoder:
+  _target_: models.components.branches.DeitBranch
+  in_channels: 3
+  image_net: ${model.hr_image_net}
+
+lr_encoder:
+  _target_: models.components.branches.DeitBranch
+  in_channels: ${model.landsat_in_channels}
+  image_net: ${model.lr_image_net}
+
+branches:
+  _target_: models.components.branches.DualBranch
+  landsat_channels: ${model.landsat_in_channels}
+
+fusion:
+  _target_: models.components.fusion.ConcatFusion
+  hr_dim: 192
+  lr_dim: 192
+  out_dim: 256
+
+model:
+  _target_: models.components.late_fusion_model.LateFusionModel
+
+domain_index: 0
+domain_num_labels: 6
+enable_domain_head: true
+domain_loss_coeff: 0.2
+domain_optimizer_lr_factor: 0.1
+domain_optimizer_weight_decay: 0.0
+domain_scheduler_gamma: 0.96
+domain_scheduler_step_size: 1
+ece_n_bins: 10
+monitor_metric: val/val-od-worst-group-task-acc
+compile: false

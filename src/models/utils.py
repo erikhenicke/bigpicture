@@ -7,8 +7,6 @@ from torchmetrics.classification import MulticlassCalibrationError
 
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
 
-# TODO: Maybe make entropy metrics computation general instead of task specific
-
 def make_eval_state() -> Dict[str, Any]:
     """
     Create a new evaluation state dictionary for tracking metrics.

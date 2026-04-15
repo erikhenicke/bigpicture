@@ -8,7 +8,7 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 
-from models.components.late_fusion_model import LateFusionModel
+from models.components.late_fusion_model import LateFusionModel, D3GModel
 from models.utils import make_eval_state, extract_region_names, update_eval_metrics, compute_final_eval_metrics
 
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
@@ -24,10 +24,9 @@ class LateFusionModule(LightningModule):
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,
         domain_scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
-        num_labels: int = 62,
-        domain_num_labels: int = 5,
-        region_index: int = 0,
-        domain_loss_alpha: float = 0.2,
+        num_task_labels: int = 62,
+        num_domain_labels: int = 6,
+        domain_index: int = 0,
         ece_n_bins: int = 10,
         val_loader_names: List[str] = ["val"],
         test_loader_names: List[str] = ["test"], 
@@ -55,14 +54,26 @@ class LateFusionModule(LightningModule):
 
         self.model = model
 
+        self.use_domain_objective = self.model.supports_domain_objective() 
+        if self.use_domain_objective:
+            self.domain_loss_coeff = self.model.domain_loss_coeff
+
+        self.use_d3g_objective = self.model.supports_d3g_objective()
+        if self.use_d3g_objective:
+            self.d3g_loss_coeff = self.model.consistency_loss_coeff 
+
         self.task_criterion = nn.CrossEntropyLoss()
         self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none")
         self.domain_criterion = nn.CrossEntropyLoss()
 
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_labels)
         self.train_task_loss = MeanMetric()
-        self.train_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.domain_num_labels)
-        self.train_domain_loss = MeanMetric()
+        self.train_domain_acc = (
+            Accuracy(task="multiclass", num_classes=self.hparams.domain_num_labels)
+            if self.use_domain_objective
+            else None
+        )
+        self.train_domain_loss = MeanMetric() if self.use_domain_objective else None
         self.train_total_loss = MeanMetric()
         self.val_acc_best = MaxMetric()
 
@@ -98,28 +109,45 @@ class LateFusionModule(LightningModule):
         self._domain_scheduler = None
 
         self.automatic_optimization = False
+        self._force_train_mode()
+
+    def _force_train_mode(self) -> None:
+        """Force the full module tree into train mode."""
+        self.train()
+        self.model.train()
 
 
-    def forward(self, x: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(
+        self,
+        x: Dict[str, torch.Tensor],
+        region_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Perform a forward pass through the model.
 
         :param x: A dict of images.
         :return: A tensor of logits.
         """
-        return self._shared_forward(x)["task_logits"]
+        return self._shared_forward(x, region_ids=region_ids)["task_logits"]
+    
 
-    def _shared_forward(self, x: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-       return self.model(x)
-        
+    def _shared_forward(
+        self,
+        x: Dict[str, torch.Tensor],
+        region_ids: Optional[torch.Tensor] = None,
+    ) -> Dict[str, torch.Tensor]:
+        return self.model(x, region_ids=region_ids)
+
 
     def on_train_start(self) -> None:
         """Lightning hook that is called when training begins."""
-        self.train()
         self.val_acc_best.reset()
         self.train_task_loss.reset()
-        self.train_domain_loss.reset()
         self.train_task_acc.reset()
-        self.train_domain_acc.reset()
+        if self.train_domain_loss is not None:
+            self.train_domain_loss.reset()
+        if self.train_domain_acc is not None:
+            self.train_domain_acc.reset()
+
 
     def model_step(
         self, batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
@@ -133,11 +161,55 @@ class LateFusionModule(LightningModule):
             - A tensor of predictions.
             - A tensor of target labels.
         """
-        x, y = batch[0], batch[1]
-        logits = self.forward(x)
+        x, y, metadata = batch
+        regions = metadata[:, self.hparams.region_index].long()
+        logits = self.forward(x, region_ids=regions)
         loss = self.task_criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
         return loss, preds, logits
+    
+
+    def get_domain_loss(self, result: Dict[str, torch.Tensor], regions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        domain_logits = result.get("domain_logits")
+        if domain_logits is None:
+            raise RuntimeError("Domain objective is enabled but model outputs are missing 'domain_logits'.")
+        domain_loss = self.domain_criterion(domain_logits, regions)
+        domain_preds = torch.argmax(domain_logits, dim=1)
+        return domain_loss, domain_preds
+    
+
+    def log_domain_metrics(self, domain_loss: torch.Tensor, domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+        self.train_domain_loss(domain_loss)
+        self.log("train/train-domain-loss", self.train_domain_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.train_domain_acc(domain_preds, regions)
+        self.log("train/train-domain-acc", self.train_domain_acc, on_step=False, on_epoch=True, prog_bar=False)
+    
+    
+    def task_optimizer_step(self, task_optimizer: torch.optim.Optimizer, task_loss: torch.Tensor) -> None:    
+        task_optimizer.zero_grad()
+        self.toggle_optimizer(task_optimizer)
+        self.manual_backward(task_loss)
+        task_optimizer.step()
+        self.untoggle_optimizer(task_optimizer)
+
+
+    def domain_optimizer_step(self, domain_optimizer: torch.optim.Optimizer, domain_logits_detached: torch.Tensor, regions: torch.Tensor) -> None:
+        domain_optimizer.zero_grad()
+        self.toggle_optimizer(domain_optimizer)
+        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
+        self.manual_backward(domain_loss_head)
+        domain_optimizer.step()
+        self.untoggle_optimizer(domain_optimizer)
+
+
+    def log_task_metrics(self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor, total_loss: torch.Tensor) -> None:
+        self.train_task_loss(task_loss)
+        self.train_task_acc(task_preds, y)
+        self.train_total_loss(total_loss)
+        self.log("train/train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/train-total-loss", self.train_total_loss, on_step=False, on_epoch=True, prog_bar=True)
+
 
     def training_step(
         self, batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor], batch_idx: int
@@ -149,54 +221,41 @@ class LateFusionModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
+        assert all([module.training for module in self.model.modules()]), "Model is not in training mode during training step!"
+
         x, y, metadata = batch
         regions = metadata[:, self.hparams.region_index].long()
 
-        result = self._shared_forward(x)
+        result = self._shared_forward(x, region_ids=regions)
         task_logits = result["task_logits"]
-        domain_logits = result["domain_logits"]
         task_loss = self.task_criterion(task_logits, y)
-        domain_loss = self.domain_criterion(domain_logits, regions)
-        total_loss = task_loss + self.hparams.domain_loss_alpha * domain_loss
-
         task_preds = torch.argmax(task_logits, dim=1)
-        domain_preds = torch.argmax(domain_logits, dim=1)
 
-        task_optimizer, domain_optimizer = self.optimizers()
+        optimizers = self.optimizers()
+        total_loss = task_loss
 
-        task_optimizer.zero_grad()
-        self.toggle_optimizer(task_optimizer)
-        self.manual_backward(total_loss)
-        task_optimizer.step()
-        self.untoggle_optimizer(task_optimizer)
+        if self.use_domain_objective:
+            domain_loss, domain_preds = self.get_domain_loss(result, regions)
+            self.log_domain_metrics(domain_loss, domain_preds, regions)
+            self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
+            total_loss = total_loss + self.domain_loss_coeff * domain_loss
 
-        domain_optimizer.zero_grad()
-        self.toggle_optimizer(domain_optimizer)
-        domain_logits_detached = result["domain_logits_detached"]
-        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
-        self.manual_backward(domain_loss_head)
-        domain_optimizer.step()
-        self.untoggle_optimizer(domain_optimizer)
+        if self.use_d3g_objective:
+            d3g_consistency_loss = self.task_criterion(result["rel_logits"], y)
+            total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
 
-        # update and log metrics
-        self.train_task_loss(task_loss)
-        self.train_task_acc(task_preds, y)
-        self.train_domain_loss(domain_loss)
-        self.train_domain_acc(domain_preds, regions)
-        self.train_total_loss(total_loss)
-        self.log("train/train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/train-domain-loss", self.train_domain_loss, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("train/train-domain-acc", self.train_domain_acc, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("train/train-total-loss", self.train_total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.task_optimizer_step(optimizers[0], total_loss)
+        self.log_task_metrics(task_loss, task_preds, y, total_loss)
 
         # return loss or backpropagation will fail
         return total_loss
+
 
     def on_train_epoch_end(self) -> None:
         """Lightning hook that is called when a training epoch ends."""
         if self._domain_scheduler is not None:
             self._domain_scheduler.step()
+
 
     def on_validation_epoch_start(self) -> None:
         """Lightning hook that is called at the beginning of a validation epoch.
@@ -213,6 +272,7 @@ class LateFusionModule(LightningModule):
         for metric in self.val_ece_metrics:
             metric.reset()
         self._val_region_names = extract_region_names(val_dataloaders)
+
 
     def validation_step(
         self,
@@ -248,6 +308,7 @@ class LateFusionModule(LightningModule):
             self.hparams.region_index
         )
 
+
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
         all_metrics: Dict[str, float] = {}
@@ -276,6 +337,7 @@ class LateFusionModule(LightningModule):
                 else:
                     self._task_scheduler.step()
 
+
     def on_test_epoch_start(self) -> None:
         """Lightning hook that is called at the beginning of a test epoch.
         
@@ -291,6 +353,7 @@ class LateFusionModule(LightningModule):
         for metric in self.test_ece_metrics:
             metric.reset()
         self._test_region_names = extract_region_names(test_dataloaders)
+
 
     def test_step(
         self,
@@ -326,6 +389,7 @@ class LateFusionModule(LightningModule):
             self.hparams.region_index
         )
 
+
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
         for idx, state in self._test_state.items():
@@ -340,6 +404,7 @@ class LateFusionModule(LightningModule):
             for key, value in metrics.items():
                 self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
 
+
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
         test, or predict.
@@ -352,6 +417,7 @@ class LateFusionModule(LightningModule):
         if self.hparams.compile and stage == "fit":
             self.model = torch.compile(self.model)
 
+
     def configure_optimizers(self) -> Any:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
         Normally you'd need one. But in the case of GANs or similar you might have multiple.
@@ -362,20 +428,30 @@ class LateFusionModule(LightningModule):
         :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
         """
         task_optimizer = self.optimizer_factory(params=self.model.task_parameters())
-        domain_optimizer = self.domain_optimizer_factory(params=self.model.domain_parameters())
 
         self._task_scheduler = (
             self.scheduler_factory(optimizer=task_optimizer)
             if self.scheduler_factory is not None 
             else None
         )
-        self._domain_scheduler = (
-            self.domain_scheduler_factory(optimizer=domain_optimizer)
-            if self.domain_scheduler_factory is not None
-            else None
-        )
 
-        return [task_optimizer, domain_optimizer]
+        optimizers = [task_optimizer]
+        self._domain_scheduler = None
+        if self.use_domain_objective:
+            if self.domain_optimizer_factory is None:
+                raise ValueError("Domain objective is enabled, but no domain optimizer factory was provided.")
+            domain_parameters = self.model.domain_parameters()
+            if len(domain_parameters) == 0:
+                raise ValueError("Domain objective is enabled, but the model does not expose domain parameters.")
+            domain_optimizer = self.domain_optimizer_factory(params=domain_parameters)
+            optimizers.append(domain_optimizer)
+            self._domain_scheduler = (
+                self.domain_scheduler_factory(optimizer=domain_optimizer)
+                if self.domain_scheduler_factory is not None
+                else None
+            )
+
+        return optimizers
 
 
 if __name__ == "__main__":

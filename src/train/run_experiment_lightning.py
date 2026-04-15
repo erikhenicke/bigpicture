@@ -11,6 +11,7 @@ import wandb
 
 from models.components.branches import DeitBranch, DualBranch
 from models.components.fusion import ConcatFusion
+from models.components.late_fusion_model import LateFusionModel
 from models.late_fusion import LateFusionModule
 from train.utils import (
     make_multiscale_dataset,
@@ -103,22 +104,27 @@ def make_model() -> LateFusionModule:
     domain_optimizer_factory = partial(Adam, lr=LR * 0.1, weight_decay=0.0)
     domain_scheduler_factory = partial(StepLR, step_size=1, gamma=0.96)
 
-    model = LateFusionModule(
+    model = LateFusionModel(
         branches=branches,
         fusion=fusion,
+        num_labels=NUM_CLASSES,
+        domain_num_labels=6,
+    )
+
+    return LateFusionModule(
+        model=model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
         domain_optimizer=domain_optimizer_factory,
         domain_scheduler=domain_scheduler_factory,
-        num_labels=NUM_CLASSES,
-        region_index=0,
+        num_task_labels=NUM_CLASSES,
+        domain_index=0,
         ece_n_bins=ECE_N_BINS,
         val_loader_names=["val-od", "val-id"],
         test_loader_names=["test-od", "test-id"],
         key_metric=MONITOR_METRIC,
         compile=False,
     )
-    return model
 
 
 def run_experiment_lightning() -> None:
