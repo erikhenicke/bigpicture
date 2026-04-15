@@ -66,10 +66,10 @@ class LateFusionModule(LightningModule):
         self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none")
         self.domain_criterion = nn.CrossEntropyLoss()
 
-        self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_labels)
+        self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_task_labels)
         self.train_task_loss = MeanMetric()
         self.train_domain_acc = (
-            Accuracy(task="multiclass", num_classes=self.hparams.domain_num_labels)
+            Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels)
             if self.use_domain_objective
             else None
         )
@@ -83,7 +83,7 @@ class LateFusionModule(LightningModule):
         self.val_ece_metrics = nn.ModuleList(
             [
                 MulticlassCalibrationError(
-                    num_classes=self.hparams.num_labels,
+                    num_classes=self.hparams.num_task_labels,
                     n_bins=self.hparams.ece_n_bins,
                     norm="l1",
                 )
@@ -93,7 +93,7 @@ class LateFusionModule(LightningModule):
         self.test_ece_metrics = nn.ModuleList(
             [
                 MulticlassCalibrationError(
-                    num_classes=self.hparams.num_labels,
+                    num_classes=self.hparams.num_task_labels,
                     n_bins=self.hparams.ece_n_bins,
                     norm="l1",
                 )
