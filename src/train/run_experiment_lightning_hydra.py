@@ -79,9 +79,9 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             num_domain_labels=cfg.num_domain_labels,
             enable_domain_head=cfg.model.enable_domain_head,
             domain_loss_coeff=cfg.model.domain_loss_coeff,
-            learnable_relation_coeff=cfg.model.fusion.learnable_relation_coeff,
-            consistency_loss_coeff=cfg.model.fusion.d3g_loss_coeff,
-            pred_domain_for_d3g=cfg.model.fusion.pred_domain_for_d3g,
+            learnable_relation_coeff=cfg.model.learnable_relation_coeff,
+            consistency_loss_coeff=cfg.model.d3g_loss_coeff,
+            pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
         )
     else:
         fusion = instantiate(cfg.model.fusion)
