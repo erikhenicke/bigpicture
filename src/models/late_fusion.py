@@ -193,7 +193,19 @@ class LateFusionModule(LightningModule):
         self.untoggle_optimizer(task_optimizer)
 
 
-    def domain_optimizer_step(self, domain_optimizer: torch.optim.Optimizer, domain_logits_detached: torch.Tensor, regions: torch.Tensor) -> None:
+    def domain_optimizer_step(
+        self,
+        domain_optimizer: torch.optim.Optimizer,
+        x: Dict[str, torch.Tensor],
+        regions: torch.Tensor,
+    ) -> None:
+
+        # TODO: Performance optimization possible?
+        # Build an independent graph for the domain-head-only update.
+        with torch.no_grad():
+            _, lr_features = self.model.branches(x)
+
+        domain_logits_detached = self.model.domain_classifier(lr_features.detach())
         domain_optimizer.zero_grad()
         self.toggle_optimizer(domain_optimizer)
         domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
@@ -245,7 +257,7 @@ class LateFusionModule(LightningModule):
 
         self.task_optimizer_step(optimizers[0], total_loss)
         if self.use_domain_objective:
-            self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
+            self.domain_optimizer_step(optimizers[1], x, regions)
         self.log_task_metrics(task_loss, task_preds, y, total_loss)
 
         # return loss or backpropagation will fail
