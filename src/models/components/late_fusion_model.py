@@ -22,10 +22,10 @@ class LateFusionModel(nn.Module):
 
         self.branches: DualBranch = branches
         self.fusion = fusion
+        self.domain_loss_coeff = domain_loss_coeff
         self.task_classifier: Optional[nn.Linear] = None
         if self.fusion is not None:
             self.task_classifier = nn.Linear(self.fusion.out_dim, num_labels)
-            self.domain_loss_coeff = domain_loss_coeff
         self.enable_domain_head = enable_domain_head
         self.domain_classifier: Optional[nn.Linear] = None
         if self.enable_domain_head:
