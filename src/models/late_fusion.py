@@ -197,7 +197,7 @@ class LateFusionModule(LightningModule):
         domain_optimizer.zero_grad()
         self.toggle_optimizer(domain_optimizer)
         domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
-        self.manual_backward(domain_loss_head, retain_graph=True)  # Keep the forward graph for the subsequent task backward pass in this training step.
+        self.manual_backward(domain_loss_head)
         domain_optimizer.step()
         self.untoggle_optimizer(domain_optimizer)
 
@@ -237,7 +237,6 @@ class LateFusionModule(LightningModule):
         if self.use_domain_objective:
             domain_loss, domain_preds = self.get_domain_loss(result, regions)
             self.log_domain_metrics(domain_loss, domain_preds, regions)
-            self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
             total_loss = total_loss + self.domain_loss_coeff * domain_loss
 
         if self.use_d3g_objective:
@@ -245,6 +244,8 @@ class LateFusionModule(LightningModule):
             total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
 
         self.task_optimizer_step(optimizers[0], total_loss)
+        if self.use_domain_objective:
+            self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
         self.log_task_metrics(task_loss, task_preds, y, total_loss)
 
         # return loss or backpropagation will fail
