@@ -162,7 +162,7 @@ class LateFusionModule(LightningModule):
             - A tensor of target labels.
         """
         x, y, metadata = batch
-        regions = metadata[:, self.hparams.region_index].long()
+        regions = metadata[:, self.hparams.domain_index].long()
         logits = self.forward(x, region_ids=regions)
         loss = self.task_criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -224,7 +224,7 @@ class LateFusionModule(LightningModule):
         assert all([module.training for module in self.model.modules()]), "Model is not in training mode during training step!"
 
         x, y, metadata = batch
-        regions = metadata[:, self.hparams.region_index].long()
+        regions = metadata[:, self.hparams.domain_index].long()
 
         result = self._shared_forward(x, region_ids=regions)
         task_logits = result["task_logits"]
@@ -305,7 +305,7 @@ class LateFusionModule(LightningModule):
             task_preds,
             y,
             metadata,
-            self.hparams.region_index
+            self.hparams.domain_index
         )
 
 
@@ -386,7 +386,7 @@ class LateFusionModule(LightningModule):
             task_preds,
             y,
             metadata,
-            self.hparams.region_index
+            self.hparams.domain_index
         )
 
 
