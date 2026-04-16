@@ -13,8 +13,8 @@ data:
   frac: 1.0
   augment_train: true
 
-model:
-  hr_image_net: true
+
+
   lr_image_net: true
   d3g_loss_coeff: 0.5
 

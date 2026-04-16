@@ -252,12 +252,12 @@ class LateFusionModule(LightningModule):
             self.log("train/d3g-consistency-loss", d3g_consistency_loss, on_step=False, on_epoch=True, prog_bar=False)
             total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
 
-        self.task_optimizer_step(
-            optimizers[0] if isinstance(optimizers, list) else optimizers, 
-            total_loss
-            )
         if self.use_domain_objective:
             self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
+        self.task_optimizer_step(
+            optimizers[0] if isinstance(optimizers, list) else optimizers,
+            total_loss,
+        )
         self.log_task_metrics(task_loss, task_preds, y, total_loss)
 
         # return loss or backpropagation will fail

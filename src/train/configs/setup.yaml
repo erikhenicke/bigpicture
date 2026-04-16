@@ -1,4 +1,5 @@
 defaults:
+  - _self_
   - data: fmow_multiscale
   - model: late_fusion_deit_both
   - optim: adamw_plateau
@@ -6,7 +7,6 @@ defaults:
   - wandb: fmow
   - checkpoint: default
   - optional experiment: null
-  - _self_
 
 num_task_labels: 62
 num_domain_labels: 6
