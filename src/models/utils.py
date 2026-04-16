@@ -5,7 +5,7 @@ import torch
 from torchmetrics.classification import MulticlassCalibrationError
 
 
-FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
+REGIONS = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania", 5: "Other"}
 
 def make_eval_state() -> Dict[str, Any]:
     """
@@ -97,7 +97,7 @@ def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str])
     targets = torch.cat(state["domain_targets"])
     metrics: Dict[str, float] = {}
     for rid, name in enumerate(region_names):
-        if name not in FIVE_REGIONS:
+        if name not in REGIONS.values():
             continue
         mask = targets == rid
         if mask.sum() == 0:
@@ -116,7 +116,7 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     per_region_task_loss: Dict[str, float] = {}
     for rid, rid_total in state["region_total"].items():
         region_name = region_names[rid]
-        if rid_total == 0 or region_name not in FIVE_REGIONS:
+        if rid_total == 0 or region_name not in REGIONS.values():
             continue
         per_region_task_acc[region_name] = state["task_region_correct"][rid] / rid_total
         per_region_task_loss[region_name] = state["task_region_loss_sum"][rid] / rid_total

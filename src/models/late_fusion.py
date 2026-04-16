@@ -2,16 +2,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from lightning import LightningModule
+from lightning.pytorch.loggers import WandbLogger
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
+import wandb
 
 from models.components.late_fusion_model import LateFusionModel 
-from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_domain_metrics, compute_final_eval_metrics
-
-FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
+from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_domain_metrics, compute_final_eval_metrics, REGIONS
 
 
 class LateFusionModule(LightningModule):
@@ -278,20 +278,13 @@ class LateFusionModule(LightningModule):
     ) -> None:
         logger = self.logger
         if isinstance(logger, list):
-            logger = next((l for l in logger if hasattr(l, "experiment")), None)
-        if logger is None or not hasattr(logger, "experiment"):
-            return
-        try:
-            import wandb
-        except ImportError:
-            return
-        class_names = region_names if region_names else [str(i) for i in range(self.hparams.num_domain_labels)]
+            logger = next((log for log in logger if isinstance(log, WandbLogger)), None)
         logger.experiment.log(
             {label: wandb.plot.confusion_matrix(
                 probs=None,
                 y_true=targets.tolist(),
                 preds=preds.tolist(),
-                class_names=class_names,
+                class_names=region_names,
             )},
             commit=False,
         )
@@ -300,17 +293,16 @@ class LateFusionModule(LightningModule):
         """Lightning hook that is called when a training epoch ends."""
         if self._domain_scheduler is not None:
             self._domain_scheduler.step()
-        if self.use_domain_objective and self._train_domain_preds:
+        if self.use_domain_objective:
             per_class = self.train_domain_acc.compute()
-            region_names = self._val_region_names.get(0, [])
             for rid, acc in enumerate(per_class):
-                name = region_names[rid].lower() if rid < len(region_names) else str(rid)
+                name = REGIONS[rid].lower()
                 self.log(f"train/train-domain-acc-{name}", acc)
             self.log("train/train-domain-acc", per_class.mean())
             self.train_domain_acc.reset()
             preds = torch.cat(self._train_domain_preds)
             targets = torch.cat(self._train_domain_targets)
-            self._log_domain_confusion_matrix(preds, targets, "train/domain-confusion-matrix", region_names)
+            self._log_domain_confusion_matrix(preds, targets, "train/domain-confusion-matrix", list(REGIONS.values()))
             self._train_domain_preds = []
             self._train_domain_targets = []
 
@@ -392,7 +384,7 @@ class LateFusionModule(LightningModule):
                 preds = torch.cat(state["domain_preds"])
                 targets = torch.cat(state["domain_targets"])
                 self._log_domain_confusion_matrix(
-                    preds, targets, f"val/{loader_name}-domain-confusion-matrix", region_names
+                    preds, targets, f"val/{loader_name}-domain-confusion-matrix", list(REGIONS.values())
                 )
 
         for key, value in all_metrics.items():
@@ -465,7 +457,7 @@ class LateFusionModule(LightningModule):
             metadata,
             self.hparams.domain_index,
         )
-        if self.use_domain_objective and "domain_logits" in result:
+        if self.use_domain_objective:
             domain_preds = result["domain_logits"].argmax(dim=1)
             update_domain_metrics(self._test_state[dataloader_idx], domain_preds, regions)
 
