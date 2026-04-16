@@ -201,12 +201,12 @@ class LateFusionModule(LightningModule):
         domain_logits_detached: torch.Tensor,
         regions: torch.Tensor,
     ) -> None:
+        # No toggle needed: domain_logits_detached is computed from lr_features.detach(),
+        # so its graph is isolated to domain_classifier weights — task params are unreachable.
         domain_optimizer.zero_grad()
-        self.toggle_optimizer(domain_optimizer)
         domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
         self.manual_backward(domain_loss_head)
         domain_optimizer.step()
-        self.untoggle_optimizer(domain_optimizer)
 
 
     def log_task_metrics(self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor, total_loss: torch.Tensor) -> None:
