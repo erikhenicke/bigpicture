@@ -195,17 +195,20 @@ class LateFusionModule(LightningModule):
         self.untoggle_optimizer(task_optimizer)
 
 
-    def domain_optimizer_step(
+    def domain_backward(
         self,
         domain_optimizer: torch.optim.Optimizer,
         domain_logits_detached: torch.Tensor,
         regions: torch.Tensor,
     ) -> None:
+        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
+        self.manual_backward(domain_loss_head)
+
+
+    def domain_optimizer_step(self, domain_optimizer: torch.optim.Optimizer) -> None:
         # No toggle needed: domain_logits_detached is computed from lr_features.detach(),
         # so its graph is isolated to domain_classifier weights — task params are unreachable.
         domain_optimizer.zero_grad()
-        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
-        self.manual_backward(domain_loss_head)
         domain_optimizer.step()
 
 
@@ -253,11 +256,14 @@ class LateFusionModule(LightningModule):
             total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
 
         if self.use_domain_objective:
-            self.domain_optimizer_step(optimizers[1], result["domain_logits_detached"], regions)
+            self.domain_backward(optimizers[1], result["domain_logits_detached"], regions)
         self.task_optimizer_step(
             optimizers[0] if isinstance(optimizers, list) else optimizers,
             total_loss,
         )
+        if self.use_domain_objective:
+            self.domain_optimizer_step(optimizers[1])
+
         self.log_task_metrics(task_loss, task_preds, y, total_loss)
 
         # return loss or backpropagation will fail
