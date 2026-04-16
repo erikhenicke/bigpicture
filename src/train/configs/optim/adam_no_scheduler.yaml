@@ -16,3 +16,5 @@ domain_scheduler:
   _partial_: true
   step_size: 1
   gamma: 0.96
+
+domain_optimizer_lr_factor: 0.1

@@ -1,5 +1,6 @@
 # @package _global_
 defaults:
+  - override /model: late_fusion_densenet_hr
   - override /optim: adam_step
 
 run_name: train-multi-densenet-hr-like

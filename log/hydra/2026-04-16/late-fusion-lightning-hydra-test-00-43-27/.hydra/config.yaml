@@ -43,10 +43,7 @@ model:
   d3g_loss_coeff: 0.5
   pred_domain_for_d3g: true
   domain_optimizer_lr_factor: 0.1
-  domain_optimizer_weight_decay: 0.0
-  domain_scheduler_gamma: 0.96
-  domain_scheduler_step_size: 1
-optim:
+      optim:
   optimizer:
     _target_: torch.optim.Adam
     _partial_: true

@@ -13,8 +13,8 @@ class LateFusionModel(nn.Module):
         self,
         branches: DualBranch,
         fusion: Optional[Fusion],
-        num_labels: int,
-        domain_num_labels: int,
+        num_task_labels: int,
+        num_domain_labels: int,
         enable_domain_head: bool = True,
         domain_loss_coeff: float = 0.5,
     ):
@@ -25,11 +25,11 @@ class LateFusionModel(nn.Module):
         self.domain_loss_coeff = domain_loss_coeff
         self.task_classifier: Optional[nn.Linear] = None
         if self.fusion is not None:
-            self.task_classifier = nn.Linear(self.fusion.out_dim, num_labels)
+            self.task_classifier = nn.Linear(self.fusion.out_dim, num_task_labels)
         self.enable_domain_head = enable_domain_head
         self.domain_classifier: Optional[nn.Linear] = None
         if self.enable_domain_head:
-            self.domain_classifier = nn.Linear(branches.lr_encoder.out_dim, domain_num_labels)
+            self.domain_classifier = nn.Linear(branches.lr_encoder.out_dim, num_domain_labels)
 
     def supports_domain_objective(self) -> bool:
         return self.enable_domain_head and self.domain_classifier is not None
@@ -82,8 +82,8 @@ class D3GModel(LateFusionModel):
         super().__init__(
             branches=branches,
             fusion=None,
-            num_labels=num_task_labels,
-            domain_num_labels=num_domain_labels,
+            num_task_labels=num_task_labels,
+            num_domain_labels=num_domain_labels,
             enable_domain_head=enable_domain_head,
             domain_loss_coeff=domain_loss_coeff,
         )

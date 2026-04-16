@@ -5,7 +5,7 @@ import hydra
 from hydra.utils import instantiate
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import DictConfig, OmegaConf
 import torch
 from torch.utils.data import DataLoader
@@ -102,7 +102,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
     if cfg.model.enable_domain_head:
         domain_optimizer_factory = instantiate(
             cfg.optim.domain_optimizer,
-            lr=cfg.optim.optimizer.lr * cfg.model.domain_optimizer_lr_factor,
+            lr=cfg.optim.optimizer.lr * cfg.optim.domain_optimizer_lr_factor,
         )
         domain_scheduler_factory = (
             instantiate(cfg.optim.domain_scheduler)
@@ -134,6 +134,8 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
     if _has_device_tensor_cores():
         torch.set_float32_matmul_precision("medium")
 
+    default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
+
     wandb.login()
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
@@ -141,6 +143,7 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
         log_model=cfg.wandb.log_model,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
+    csv_logger = CSVLogger(save_dir=default_root_dir, name=None)
 
     train_loader, val_loaders, test_loaders = make_data_loaders(cfg)
     model = make_model(cfg)
@@ -154,12 +157,11 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
         filename="late-fusion-epoch{epoch:02d}",
     )
 
-    default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
     trainer = Trainer(
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         max_epochs=cfg.trainer.max_epochs,
-        logger=wandb_logger,
+        logger=[wandb_logger, csv_logger],
         callbacks=[checkpoint_callback, LearningRateMonitor(logging_interval="epoch")],
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         default_root_dir=default_root_dir,
