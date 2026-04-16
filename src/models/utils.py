@@ -5,7 +5,7 @@ import torch
 from torchmetrics.classification import MulticlassCalibrationError
 
 
-FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
+REGIONS = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania", 5: "Other"}
 
 def make_eval_state() -> Dict[str, Any]:
     """
@@ -21,6 +21,8 @@ def make_eval_state() -> Dict[str, Any]:
         "task_entropy_incorrect": 0.0,
         "task_region_correct": defaultdict(int),
         "task_region_loss_sum": defaultdict(float),
+        "domain_preds": [],
+        "domain_targets": [],
     }
 
 def extract_region_names(dataloaders: List[torch.utils.data.DataLoader]) -> Dict[int, List[str]]:
@@ -85,6 +87,26 @@ def update_task_region_metrics(
         state["task_region_correct"][rid_int] += int((correct_mask & mask).sum().item())
         state["task_region_loss_sum"][rid_int] += float(per_sample_loss[mask].sum().item())
 
+def update_domain_metrics(state: Dict[str, Any], domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    state["domain_preds"].append(domain_preds.cpu())
+    state["domain_targets"].append(regions.cpu())
+
+
+def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    preds = torch.cat(state["domain_preds"])
+    targets = torch.cat(state["domain_targets"])
+    metrics: Dict[str, float] = {}
+    for rid, name in enumerate(region_names):
+        if name not in REGIONS.values():
+            continue
+        mask = targets == rid
+        if mask.sum() == 0:
+            continue
+        metrics[f"domain-acc-{name.lower()}"] = (preds[mask] == targets[mask]).float().mean().item()
+    metrics["domain-acc"] = (preds == targets).float().mean().item()
+    return metrics
+
+
 def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
     """
     Compute the final task-specific region metrics from the state dictionary.
@@ -94,7 +116,7 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     per_region_task_loss: Dict[str, float] = {}
     for rid, rid_total in state["region_total"].items():
         region_name = region_names[rid]
-        if rid_total == 0 or region_name not in FIVE_REGIONS:
+        if rid_total == 0 or region_name not in REGIONS.values():
             continue
         per_region_task_acc[region_name] = state["task_region_correct"][rid] / rid_total
         per_region_task_loss[region_name] = state["task_region_loss_sum"][rid] / rid_total
@@ -183,8 +205,12 @@ def compute_final_eval_metrics(
     Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
     """
 
-    metrics = {
+    metrics = {}
+    metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
-    }
+    }) 
+    metrics.update({
+        f"{loader_name}-{k}": v for k, v in compute_final_domain_metrics(state, region_names).items()
+    })
 
     return metrics
