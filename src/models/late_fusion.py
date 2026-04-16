@@ -149,10 +149,10 @@ class LateFusionModule(LightningModule):
         if self.use_domain_objective:
             self.train_domain_loss.reset()
             self.train_domain_acc.reset()
+            self._train_domain_preds = []
+            self._train_domain_targets = []
         if self.use_d3g_objective:
             self.train_consistency_loss.reset()
-        self._train_domain_preds = []
-        self._train_domain_targets = []
 
 
     def model_step(

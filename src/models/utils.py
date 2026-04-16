@@ -93,8 +93,6 @@ def update_domain_metrics(state: Dict[str, Any], domain_preds: torch.Tensor, reg
 
 
 def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
-    if not state["domain_preds"]:
-        return {}
     preds = torch.cat(state["domain_preds"])
     targets = torch.cat(state["domain_targets"])
     metrics: Dict[str, float] = {}
@@ -207,9 +205,12 @@ def compute_final_eval_metrics(
     Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
     """
 
-    metrics = {
+    metrics = {}
+    metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
-    }
-    domain_metrics = compute_final_domain_metrics(state, region_names)
-    metrics.update({f"{loader_name}-{k}": v for k, v in domain_metrics.items()})
+    }) 
+    metrics.update({
+        f"{loader_name}-{k}": v for k, v in compute_final_domain_metrics(state, region_names).items()
+    })
+
     return metrics
