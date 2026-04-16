@@ -111,14 +111,15 @@ hydra:
   overrides:
     hydra:
     - hydra.mode=RUN
-    task: []
+    task:
+    - experiment=train_multi_deit_d3g
   job:
     name: run_experiment_lightning_hydra
     chdir: null
-    override_dirname: ''
+    override_dirname: experiment=train_multi_deit_d3g
     id: ???
     num: ???
-    config_name: run_experiment_lightning
+    config_name: setup
     env_set: {}
     env_copy: []
     config:
@@ -140,13 +141,14 @@ hydra:
     - path: ''
       schema: structured
       provider: schema
-    output_dir: /home/henicke/git/bigpicture/log/hydra/2026-04-14/late-fusion-lightning-hydra-test-19-06-09
+    output_dir: /home/henicke/git/bigpicture/log/hydra/2026-04-16/late-fusion-lightning-hydra-test-00-43-27
     choices:
+      experiment: train_multi_deit_d3g
       checkpoint: default
       wandb: fmow
       trainer: default
-      optim: adamw_plateau
-      model: late_fusion_deit
+      optim: adam_plateau
+      model: late_fusion_deit_d3g
       data: fmow_multiscale
       hydra/env: default
       hydra/callbacks: null

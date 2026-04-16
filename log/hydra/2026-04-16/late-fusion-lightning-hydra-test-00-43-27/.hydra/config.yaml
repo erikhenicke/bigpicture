@@ -3,9 +3,9 @@ data:
   landsat_dir: /home/datasets4/FMoW_LandSat
   preprocessed_dir_default: null
   preprocessed_dir_gaia: /data/henicke/FMoW_LandSat
-  batch_size: 32
+  batch_size: 384
   num_workers: 4
-  frac: 0.01
+  frac: 1.0
   augment_train: true
   train_split: train
   val_splits:
@@ -21,41 +21,36 @@ data:
   - test-od
   - test-id
 model:
-  num_labels: 62
   landsat_in_channels: 6
+  hr_image_net: true
+  lr_image_net: true
   hr_encoder:
     _target_: models.components.branches.DeitBranch
     in_channels: 3
-    image_net: true
+    image_net: ${model.hr_image_net}
   lr_encoder:
     _target_: models.components.branches.DeitBranch
-    in_channels: 6
-    image_net: true
+    in_channels: ${model.landsat_in_channels}
+    image_net: ${model.lr_image_net}
   branches:
     _target_: models.components.branches.DualBranch
     landsat_channels: ${model.landsat_in_channels}
-  fusion:
-    _target_: models.components.fusion.ConcatFusion
-    hr_dim: 192
-    lr_dim: 192
-    out_dim: 256
   model:
-    _target_: models.components.late_fusion_model.LateFusionModel
-  region_index: 0
-  domain_num_labels: 5
-  domain_loss_alpha: 0.2
+    _target_: models.components.late_fusion_model.D3GModel
+  enable_domain_head: true
+  domain_loss_coeff: 0.2
+  learnable_relation_coeff: 0.8
+  d3g_loss_coeff: 0.5
+  pred_domain_for_d3g: true
   domain_optimizer_lr_factor: 0.1
   domain_optimizer_weight_decay: 0.0
   domain_scheduler_gamma: 0.96
   domain_scheduler_step_size: 1
-  ece_n_bins: 10
-  monitor_metric: val/val-od-worst-group-task-acc
-  compile: false
 optim:
   optimizer:
-    _target_: torch.optim.AdamW
+    _target_: torch.optim.Adam
     _partial_: true
-    lr: 5.0e-05
+    lr: 0.0001
     weight_decay: 0.0
   scheduler:
     _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
@@ -75,14 +70,20 @@ optim:
 trainer:
   accelerator: auto
   devices: 1
-  max_epochs: 1
+  max_epochs: 50
   log_every_n_steps: 25
+  ece_n_bins: 10
+  monitor_metric: val/val-od-worst-group-task-acc
+  compile: true
 wandb:
   project: fmow
-  run_name: ${run_name}-${now:%y-%m-%d}
+  run_name: ${run_name}-${now:%y-%m-%d-%H-%M-%S}
   log_model: false
   save_dir: log
 checkpoint:
   checkpoint_dir: log/checkpoints
-seed: 111
 run_name: late-fusion-lightning-hydra-test
+num_task_labels: 62
+num_domain_labels: 6
+domain_index: 0
+seed: 111
