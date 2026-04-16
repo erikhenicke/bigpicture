@@ -124,6 +124,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         test_loader_names=list(cfg.data.test_loader_names),
         key_metric=cfg.trainer.monitor_metric,
         compile=cfg.trainer.compile,
+        label_smoothing=cfg.trainer.label_smoothing,
     )
 
 

@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - override /model: late_fusion_deit_d3g
-  - override /optim: adam_plateau
+  - override /optim: adam_warmup_cosine
 
 run_name: train-multi-deit-d3g
 
@@ -20,7 +20,4 @@ data:
 
 optim:
   optimizer:
-    lr: 1.0e-4
-  scheduler:
-    factor: 0.5
-    patience: 5
+    lr: 2.0e-4

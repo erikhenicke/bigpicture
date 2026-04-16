@@ -1,7 +1,8 @@
 accelerator: auto
 devices: 1
-max_epochs: 50 
+max_epochs: 50
 log_every_n_steps: 25
 ece_n_bins: 10
 monitor_metric: val/val-od-worst-group-task-acc
-compile: false 
+compile: false
+label_smoothing: 0.1

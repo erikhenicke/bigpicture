@@ -32,6 +32,7 @@ class LateFusionModule(LightningModule):
         test_loader_names: List[str] = ["test"], 
         key_metric: str = "val/val-od-worst-group-task-acc",
         compile: bool = False,
+        label_smoothing: float = 0.0,
     ) -> None:
         """Initialize a `LateFusionModule`.
 
@@ -62,8 +63,8 @@ class LateFusionModule(LightningModule):
         if self.use_d3g_objective:
             self.d3g_loss_coeff = self.model.consistency_loss_coeff 
 
-        self.task_criterion = nn.CrossEntropyLoss()
-        self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none")
+        self.task_criterion = nn.CrossEntropyLoss(label_smoothing=self.hparams.label_smoothing)
+        self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none", label_smoothing=self.hparams.label_smoothing)
         self.domain_criterion = nn.CrossEntropyLoss()
 
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_task_labels)
@@ -297,20 +298,15 @@ class LateFusionModule(LightningModule):
 
     def on_train_epoch_end(self) -> None:
         """Lightning hook that is called when a training epoch ends."""
-        if self._domain_scheduler is not None:
-            self._domain_scheduler.step()
         if self.use_domain_objective:
             per_class = self.train_domain_acc.compute()
             for rid, acc in enumerate(per_class):
                 name = REGIONS[rid].lower()
                 self.log(f"train/train-domain-acc-{name}", acc)
             self.log("train/train-domain-acc", per_class.mean())
-            self.train_domain_acc.reset()
             preds = torch.cat(self._train_domain_preds)
             targets = torch.cat(self._train_domain_targets)
             self._log_domain_confusion_matrix(preds, targets, "train/domain-confusion-matrix", list(REGIONS.values()))
-            self._train_domain_preds = []
-            self._train_domain_targets = []
 
 
     def on_validation_epoch_start(self) -> None:
@@ -400,12 +396,14 @@ class LateFusionModule(LightningModule):
             return
 
         if self._task_scheduler is not None:
-            monitor_value = self.trainer.callback_metrics.get(self.hparams.key_metric)
-            if monitor_value is not None:
-                if isinstance(self._task_scheduler, ReduceLROnPlateau):
+            if isinstance(self._task_scheduler, ReduceLROnPlateau):
+                monitor_value = self.trainer.callback_metrics.get(self.hparams.key_metric)
+                if monitor_value is not None:
                     self._task_scheduler.step(monitor_value.item() if hasattr(monitor_value, "item") else monitor_value)
-                else:
-                    self._task_scheduler.step()
+            else:
+                self._task_scheduler.step()
+        if self._domain_scheduler is not None:
+            self._domain_scheduler.step()
 
 
     def on_test_epoch_start(self) -> None:
