@@ -9,7 +9,7 @@ from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 
 from models.components.late_fusion_model import LateFusionModel 
-from models.utils import make_eval_state, extract_region_names, update_eval_metrics, compute_final_eval_metrics
+from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_domain_metrics, compute_final_eval_metrics
 
 FIVE_REGIONS = {"Europe", "Americas", "Asia", "Africa", "Oceania"}
 
@@ -69,7 +69,7 @@ class LateFusionModule(LightningModule):
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_task_labels)
         self.train_task_loss = MeanMetric()
         self.train_domain_acc = (
-            Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels)
+            Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
             if self.use_domain_objective
             else None
         )
@@ -108,6 +108,8 @@ class LateFusionModule(LightningModule):
         self._test_region_names: Dict[int, List[str]] = {}
         self._task_scheduler = None
         self._domain_scheduler = None
+        self._train_domain_preds: List[torch.Tensor] = []
+        self._train_domain_targets: List[torch.Tensor] = []
 
         self.automatic_optimization = False
         self._force_train_mode()
@@ -149,6 +151,8 @@ class LateFusionModule(LightningModule):
             self.train_domain_acc.reset()
         if self.use_d3g_objective:
             self.train_consistency_loss.reset()
+        self._train_domain_preds = []
+        self._train_domain_targets = []
 
 
     def model_step(
@@ -183,8 +187,9 @@ class LateFusionModule(LightningModule):
     def log_domain_metrics(self, domain_loss: torch.Tensor, domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
         self.train_domain_loss(domain_loss)
         self.log("train/train-domain-loss", self.train_domain_loss, on_step=False, on_epoch=True, prog_bar=False)
-        self.train_domain_acc(domain_preds, regions)
-        self.log("train/train-domain-acc", self.train_domain_acc, on_step=False, on_epoch=True, prog_bar=False)
+        self.train_domain_acc.update(domain_preds, regions)
+        self._train_domain_preds.append(domain_preds.cpu())
+        self._train_domain_targets.append(regions.cpu())
     
     
     def task_optimizer_step(self, task_optimizer: torch.optim.Optimizer, task_loss: torch.Tensor) -> None:    
@@ -264,10 +269,50 @@ class LateFusionModule(LightningModule):
         return total_loss
 
 
+    def _log_domain_confusion_matrix(
+        self,
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        label: str,
+        region_names: List[str],
+    ) -> None:
+        logger = self.logger
+        if isinstance(logger, list):
+            logger = next((l for l in logger if hasattr(l, "experiment")), None)
+        if logger is None or not hasattr(logger, "experiment"):
+            return
+        try:
+            import wandb
+        except ImportError:
+            return
+        class_names = region_names if region_names else [str(i) for i in range(self.hparams.num_domain_labels)]
+        logger.experiment.log(
+            {label: wandb.plot.confusion_matrix(
+                probs=None,
+                y_true=targets.tolist(),
+                preds=preds.tolist(),
+                class_names=class_names,
+            )},
+            commit=False,
+        )
+
     def on_train_epoch_end(self) -> None:
         """Lightning hook that is called when a training epoch ends."""
         if self._domain_scheduler is not None:
             self._domain_scheduler.step()
+        if self.use_domain_objective and self._train_domain_preds:
+            per_class = self.train_domain_acc.compute()
+            region_names = self._val_region_names.get(0, [])
+            for rid, acc in enumerate(per_class):
+                name = region_names[rid].lower() if rid < len(region_names) else str(rid)
+                self.log(f"train/train-domain-acc-{name}", acc)
+            self.log("train/train-domain-acc", per_class.mean())
+            self.train_domain_acc.reset()
+            preds = torch.cat(self._train_domain_preds)
+            targets = torch.cat(self._train_domain_targets)
+            self._log_domain_confusion_matrix(preds, targets, "train/domain-confusion-matrix", region_names)
+            self._train_domain_preds = []
+            self._train_domain_targets = []
 
 
     def on_validation_epoch_start(self) -> None:
@@ -306,8 +351,13 @@ class LateFusionModule(LightningModule):
                 "Provide matching val_loader_names when initializing LateFusionModule."
             )
 
-        y, metadata = batch[1], batch[2]
-        task_loss, task_preds, task_logits = self.model_step(batch)
+        x, y, metadata = batch
+        regions = metadata[:, self.hparams.domain_index].long()
+
+        result = self._shared_forward(x, region_ids=regions)
+        task_logits = result["task_logits"]
+        task_loss = self.task_criterion(task_logits, y)
+        task_preds = torch.argmax(task_logits, dim=1)
 
         update_eval_metrics(
             self._val_state[dataloader_idx],
@@ -318,15 +368,18 @@ class LateFusionModule(LightningModule):
             task_preds,
             y,
             metadata,
-            self.hparams.domain_index
+            self.hparams.domain_index,
         )
+        if self.use_domain_objective and "domain_logits" in result:
+            domain_preds = result["domain_logits"].argmax(dim=1)
+            update_domain_metrics(self._val_state[dataloader_idx], domain_preds, regions)
 
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
         all_metrics: Dict[str, float] = {}
         for idx, state in self._val_state.items():
-            loader_name = self.val_loader_names[idx] 
+            loader_name = self.val_loader_names[idx]
             region_names = self._val_region_names.get(idx, [])
             metrics = compute_final_eval_metrics(
                 state,
@@ -335,6 +388,12 @@ class LateFusionModule(LightningModule):
                 self.val_ece_metrics[idx],
             )
             all_metrics.update({f"val/{k}": v for k, v in metrics.items()})
+            if state["domain_preds"] and not self.trainer.sanity_checking:
+                preds = torch.cat(state["domain_preds"])
+                targets = torch.cat(state["domain_targets"])
+                self._log_domain_confusion_matrix(
+                    preds, targets, f"val/{loader_name}-domain-confusion-matrix", region_names
+                )
 
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -387,8 +446,13 @@ class LateFusionModule(LightningModule):
                 "Provide matching test_loader_names when initializing LateFusionModule."
             )
 
-        task_loss, task_preds, task_logits = self.model_step(batch)
-        y, metadata = batch[1], batch[2]
+        x, y, metadata = batch
+        regions = metadata[:, self.hparams.domain_index].long()
+
+        result = self._shared_forward(x, region_ids=regions)
+        task_logits = result["task_logits"]
+        task_loss = self.task_criterion(task_logits, y)
+        task_preds = torch.argmax(task_logits, dim=1)
 
         update_eval_metrics(
             self._test_state[dataloader_idx],
@@ -399,14 +463,17 @@ class LateFusionModule(LightningModule):
             task_preds,
             y,
             metadata,
-            self.hparams.domain_index
+            self.hparams.domain_index,
         )
+        if self.use_domain_objective and "domain_logits" in result:
+            domain_preds = result["domain_logits"].argmax(dim=1)
+            update_domain_metrics(self._test_state[dataloader_idx], domain_preds, regions)
 
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
         for idx, state in self._test_state.items():
-            loader_name = self.test_loader_names[idx] 
+            loader_name = self.test_loader_names[idx]
             region_names = self._test_region_names.get(idx, [])
             metrics = compute_final_eval_metrics(
                 state,
@@ -416,6 +483,12 @@ class LateFusionModule(LightningModule):
             )
             for key, value in metrics.items():
                 self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            if state["domain_preds"]:
+                preds = torch.cat(state["domain_preds"])
+                targets = torch.cat(state["domain_targets"])
+                self._log_domain_confusion_matrix(
+                    preds, targets, f"test/{loader_name}-domain-confusion-matrix", region_names
+                )
 
 
     def setup(self, stage: str) -> None:

@@ -21,6 +21,8 @@ def make_eval_state() -> Dict[str, Any]:
         "task_entropy_incorrect": 0.0,
         "task_region_correct": defaultdict(int),
         "task_region_loss_sum": defaultdict(float),
+        "domain_preds": [],
+        "domain_targets": [],
     }
 
 def extract_region_names(dataloaders: List[torch.utils.data.DataLoader]) -> Dict[int, List[str]]:
@@ -84,6 +86,28 @@ def update_task_region_metrics(
         state["region_total"][rid_int] += int(mask.sum().item())
         state["task_region_correct"][rid_int] += int((correct_mask & mask).sum().item())
         state["task_region_loss_sum"][rid_int] += float(per_sample_loss[mask].sum().item())
+
+def update_domain_metrics(state: Dict[str, Any], domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    state["domain_preds"].append(domain_preds.cpu())
+    state["domain_targets"].append(regions.cpu())
+
+
+def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    if not state["domain_preds"]:
+        return {}
+    preds = torch.cat(state["domain_preds"])
+    targets = torch.cat(state["domain_targets"])
+    metrics: Dict[str, float] = {}
+    for rid, name in enumerate(region_names):
+        if name not in FIVE_REGIONS:
+            continue
+        mask = targets == rid
+        if mask.sum() == 0:
+            continue
+        metrics[f"domain-acc-{name.lower()}"] = (preds[mask] == targets[mask]).float().mean().item()
+    metrics["domain-acc"] = (preds == targets).float().mean().item()
+    return metrics
+
 
 def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
     """
@@ -186,5 +210,6 @@ def compute_final_eval_metrics(
     metrics = {
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
     }
-
+    domain_metrics = compute_final_domain_metrics(state, region_names)
+    metrics.update({f"{loader_name}-{k}": v for k, v in domain_metrics.items()})
     return metrics
