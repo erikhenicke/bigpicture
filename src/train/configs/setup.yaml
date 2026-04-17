@@ -11,6 +11,7 @@ defaults:
 num_task_labels: 62
 num_domain_labels: 6
 domain_index: 0
+checkpoint_dir: log/checkpoints
 
 seed: 111
 num_reruns: 3 

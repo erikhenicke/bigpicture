@@ -148,7 +148,8 @@ def _run_once(
     seed_everything(cfg.seed + run_idx, workers=True)
 
     run_name = f"{cfg.wandb.run_name}-run{run_idx}"
-    checkpoint_dir = f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}/run{run_idx}"
+    checkpoint_dir = f"{cfg.checkpoint_dir}/{cfg.wandb.run_name}/run{run_idx}"
+    print(f"Starting run {run_idx} with checkpoint dir: {checkpoint_dir}")
 
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
