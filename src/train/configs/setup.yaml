@@ -1,11 +1,11 @@
 defaults:
-  - _self_
   - data: fmow_multiscale
   - model: deit_both
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow
   - optional experiment: null
+  - _self_
 
 num_task_labels: 62
 num_domain_labels: 6
