@@ -6,4 +6,4 @@ ece_n_bins: 10
 monitor_metric: val/val-od-worst-group-task-acc
 best_run_metric: test/test-od-worst-group-task-acc
 compile: false
-label_smoothing: 0.1
+label_smoothing: 0.0
