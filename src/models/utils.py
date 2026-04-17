@@ -199,6 +199,7 @@ def compute_final_eval_metrics(
     loader_name: str,
     region_names: List[str],
     ece_metric: MulticlassCalibrationError,
+    use_domain_objective: bool = False,
 ) -> Dict[str, float]:
     """Compute final metrics for the evaluation phase.
     
@@ -209,8 +210,9 @@ def compute_final_eval_metrics(
     metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
     }) 
-    metrics.update({
-        f"{loader_name}-{k}": v for k, v in compute_final_domain_metrics(state, region_names).items()
-    })
+    if use_domain_objective:
+        metrics.update({
+            f"{loader_name}-{k}": v for k, v in compute_final_domain_metrics(state, region_names).items()
+        })
 
     return metrics

@@ -26,7 +26,7 @@ def _load_raw_landsat(landsat_path):
     return torch.from_numpy(landsat_np)
 
 
-def compute_untransformed_stats(
+def compute_stats(
     fmow_dir="data",
     landsat_dir="data",
     output_json=None,
@@ -88,8 +88,8 @@ def compute_untransformed_stats(
                     pbar.update(1)
                     continue
 
-                rgb_stats.add_all(rgb.reshape(-1, 3))
-                landsat_stats.add_all(landsat.reshape(-1, 6))
+                rgb_stats.add_all(rgb.permute(1, 2, 0).reshape(-1, 3))
+                landsat_stats.add_all(landsat.permute(1, 2, 0).reshape(-1, 6))
 
                 processed += 1
             except Exception as e:
@@ -144,17 +144,6 @@ def compute_untransformed_stats(
     return stats
 
 
-def compute_transformed_stats(
-    fmow_dir="data",
-    landsat_dir="data",
-    output_json=None,
-):
-    return compute_untransformed_stats(
-        fmow_dir=fmow_dir,
-        landsat_dir=landsat_dir,
-        output_json=output_json,
-    )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -181,7 +170,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    compute_untransformed_stats(
+    compute_stats(
         fmow_dir=args.fmow_dir,
         landsat_dir=args.landsat_dir,
         output_json=args.output_json,

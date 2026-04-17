@@ -177,7 +177,7 @@ class LateFusionModule(LightningModule):
     
 
     def get_domain_loss(self, result: Dict[str, torch.Tensor], regions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        domain_logits = result.get("domain_logits")
+        domain_logits = result["domain_logits"]
         if domain_logits is None:
             raise RuntimeError("Domain objective is enabled but model outputs are missing 'domain_logits'.")
         domain_loss = self.domain_criterion(domain_logits, regions)
@@ -364,7 +364,7 @@ class LateFusionModule(LightningModule):
             metadata,
             self.hparams.domain_index,
         )
-        if self.use_domain_objective and "domain_logits" in result:
+        if self.use_domain_objective:
             domain_preds = result["domain_logits"].argmax(dim=1)
             update_domain_metrics(self._val_state[dataloader_idx], domain_preds, regions)
 
@@ -380,6 +380,7 @@ class LateFusionModule(LightningModule):
                 loader_name,
                 region_names,
                 self.val_ece_metrics[idx],
+                self.use_domain_objective,
             )
             all_metrics.update({f"val/{k}": v for k, v in metrics.items()})
             if state["domain_preds"] and not self.trainer.sanity_checking:
@@ -476,6 +477,7 @@ class LateFusionModule(LightningModule):
                 loader_name,
                 region_names,
                 self.test_ece_metrics[idx],
+                self.use_domain_objective,
             )
             for key, value in metrics.items():
                 self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)

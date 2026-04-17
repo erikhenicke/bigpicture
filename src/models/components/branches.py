@@ -141,6 +141,43 @@ class DeitBranch(Branch):
         self.model.vit.config.num_channels = in_channels
 
 
+class TimmBranch(Branch):
+    """Generic branch backed by a ``timm`` model.
+
+    ``timm.create_model`` handles multi-channel stems natively via ``in_chans``,
+    so this branch does not need to surgically rewrite the first conv like
+    ``DenseNetBranch`` / ``DeitBranch`` do. Works for both ``efficientformerv2_s1``
+    and ``tf_efficientnetv2_b1`` (and most other timm backbones).
+    """
+
+    def __init__(self, model_name: str, in_channels: int = 3, image_net: bool = True):
+        super().__init__(in_channels=in_channels, model_name=model_name, image_net=image_net)
+
+    def forward(self, x):
+        return self.model(x)
+
+    @property
+    def out_dim(self) -> int:
+        return self.model.num_features
+
+    def _get_model(self, model_name: str, image_net: bool = True) -> nn.Module:
+        import timm
+
+        return timm.create_model(
+            model_name,
+            pretrained=image_net,
+            in_chans=self.in_channels,
+            num_classes=0,
+            global_pool="avg",
+        )
+
+    def _adapt_input_channels(self, in_channels: int) -> None:
+        # timm has already built the stem with the requested in_chans and
+        # copied pretrained weights (averaging / repeating as needed), so the
+        # base-class hook has nothing left to do.
+        return
+
+
 class DualBranch(nn.Module):
     def __init__(self, hr_encoder: Branch, lr_encoder: Branch, landsat_channels: int = 6):
         super().__init__()

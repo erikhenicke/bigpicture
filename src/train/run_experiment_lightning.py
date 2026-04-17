@@ -11,7 +11,7 @@ import wandb
 
 from models.components.branches import DeitBranch, DualBranch
 from models.components.fusion import ConcatFusion
-from models.components.late_fusion_model import LateFusionModel
+from models.components.fusion_model import LateFusionModel
 from models.late_fusion import LateFusionModule
 from train.utils import (
     make_multiscale_dataset,
