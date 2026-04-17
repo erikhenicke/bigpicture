@@ -111,7 +111,7 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     """
     Compute the final task-specific region metrics from the state dictionary.
     """
-    worst_group_acc = 1.0
+    worst_group_task_acc = 1.0
     per_region_task_acc: Dict[str, float] = {}
     per_region_task_loss: Dict[str, float] = {}
     for rid, rid_total in state["region_total"].items():
@@ -120,7 +120,7 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
             continue
         per_region_task_acc[region_name] = state["task_region_correct"][rid] / rid_total
         per_region_task_loss[region_name] = state["task_region_loss_sum"][rid] / rid_total
-        if per_region_task_acc[region_name] < worst_group_acc:
+        if per_region_task_acc[region_name] < worst_group_task_acc:
             worst_group_task_acc = per_region_task_acc[region_name]
      
     return {
