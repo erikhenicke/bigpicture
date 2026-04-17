@@ -11,6 +11,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from models.components.branches import DeitBranch, DualBranch
 from models.components.fusion import ConcatFusion
+from models.components.fusion_model import LateFusionModel
 from models.late_fusion import LateFusionModule
 from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir as resolve_platform_preprocessed_dir
 
@@ -18,7 +19,8 @@ from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve
 PROJECT_NAME = "fmow"
 RUN_NAME = "late-fusion-lightning-eval"
 SEED = 111
-NUM_CLASSES = 62
+NUM_TASK_LABELS = 62
+NUM_DOMAIN_LABELS = 6
 BATCH_SIZE = 32
 FRAC = 1.0
 LANDSAT_IN_CHANNELS = 6
@@ -28,7 +30,7 @@ WEIGHT_DECAY = 0.0
 LR_DECAY = 0.5
 PLATEAU_PATIENCE = 5
 ECE_N_BINS = 10
-MONITOR_METRIC = "val-od-worst-group-task-acc"
+MONITOR_METRIC = "val/val-od-worst-group-task-acc"
 
 
 def make_data_loaders(
@@ -70,6 +72,14 @@ def make_model() -> LateFusionModule:
 
     fusion = ConcatFusion(hr_dim=192, lr_dim=192, out_dim=256)
 
+    model = LateFusionModel(
+        branches=branches,
+        fusion=fusion,
+        num_task_labels=NUM_TASK_LABELS,
+        num_domain_labels=NUM_DOMAIN_LABELS,
+        enable_domain_head=False,
+    )
+
     optimizer_factory = partial(AdamW, lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler_factory = partial(
         ReduceLROnPlateau,
@@ -79,11 +89,11 @@ def make_model() -> LateFusionModule:
     )
 
     return LateFusionModule(
-        branches=branches,
-        fusion=fusion,
+        model=model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
-        num_task_labels=NUM_CLASSES,
+        num_task_labels=NUM_TASK_LABELS,
+        num_domain_labels=NUM_DOMAIN_LABELS,
         domain_index=0,
         ece_n_bins=ECE_N_BINS,
         val_loader_names=["val-od", "val-id"],
@@ -97,17 +107,9 @@ def load_model_from_checkpoint(checkpoint_path: str) -> LateFusionModule:
     model_template = make_model()
     return LateFusionModule.load_from_checkpoint(
         checkpoint_path,
-        branches=model_template.branches,
-        fusion=model_template.fusion,
+        model=model_template.model,
         optimizer=model_template.optimizer_factory,
         scheduler=model_template.scheduler_factory,
-        num_labels=model_template.hparams.num_labels,
-        region_index=model_template.hparams.region_index,
-        ece_n_bins=model_template.hparams.ece_n_bins,
-        val_loader_names=list(model_template.val_loader_names),
-        test_loader_names=list(model_template.test_loader_names),
-        key_metric=model_template.hparams.key_metric,
-        compile=False,
         map_location="cpu",
     )
 

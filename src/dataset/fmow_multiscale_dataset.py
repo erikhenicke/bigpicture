@@ -94,19 +94,15 @@ class FMoWMultiScaleDataset(WILDSDataset):
  
 
     def get_default_transform_rgb(self):
-        """Default transform for RGB images (Inception normalization)"""
+        """Default transform for RGB images."""
         return transforms.Compose(
             [
                 # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
                 transforms.ToImage(),
                 transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(
-                    # Normalize to [-1, 1] range
-                    mean=[0.5, 0.5, 0.5],
-                    std=[0.5, 0.5, 0.5]
-                    # Normalize to Imagenet mean/std range
-                    # mean=[0.485, 0.456, 0.406],
-                    # std=[0.229, 0.224, 0.225]
+                    mean=[0.4155880808830261, 0.41815927624702454, 0.3903605341911316],
+                    std=[0.24812281131744385, 0.24405813217163086, 0.2482403963804245],
                 )
             ]
         )
@@ -116,32 +112,24 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Default transform for Landsat images.
 
         See https://developers.google.com/earth-engine/datasets/catalog/landsat/ for scaling info.
+        GeoTIFFs store reflectance values directly; stats computed over the full dataset.
+
+        # Theoretical scaling from raw DN (0–65353) to reflectance:
+        # landsat_scale = 2.75e-05; landsat_offset = -0.2
+        # lower = 0 * landsat_scale + landsat_offset = -0.2
+        # upper = 65353 * landsat_scale + landsat_offset ≈ 1.597
+        # mean = (upper + lower) / 2 ≈ 0.699; std = (upper - lower) / 2 ≈ 0.899
         """
-        landsat_scale = 2.75e-05
-        landsat_offset = -0.2
-        landsat_min = 0 
-        landsat_max = 65353
-        lower = (landsat_min * landsat_scale + landsat_offset) 
-        upper = (landsat_max * landsat_scale + landsat_offset) 
-        # Normalize to [-1, 1] range 
-        std = (upper - lower) / 2 
-        mean = (upper + lower) / 2
-        # # Normalize to [0, 1] range
-        # std = (upper - lower)
-        # mean = lower
         return transforms.Compose(
             [
                 transforms.Normalize(
-                    mean=[mean] * 6,
-                    std=[std] * 6
+                    mean=[0.06259285658597946, 0.0880340114235878, 0.09441816806793213,
+                          0.2327403724193573, 0.19073842465877533, 0.12976829707622528],
+                    std=[0.039894334971904755, 0.049978554248809814, 0.0687960833311081,
+                         0.092967689037323, 0.09390033036470413, 0.0819208025932312],
                 ),
-                # # Normalize to Imagenet mean/std range for pretrained usage (only for first 3 bands, rest are left as is)
-                # transforms.Normalize(
-                #     mean=[0.485, 0.456, 0.406, 0, 0, 0],
-                #     std=[0.229, 0.224, 0.225, 1, 1, 1]
-                # )
             ]
-        )  
+        )
 
     def _apply_augmentation(self, rgb_img: torch.Tensor, landsat_img: torch.Tensor):
         """

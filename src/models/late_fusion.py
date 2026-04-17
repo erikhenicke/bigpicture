@@ -303,9 +303,9 @@ class LateFusionModule(LightningModule):
             for rid, acc in enumerate(per_class):
                 name = REGIONS[rid].lower()
                 self.log(f"train/train-domain-acc-{name}", acc)
-            self.log("train/train-domain-acc", per_class.mean())
             preds = torch.cat(self._train_domain_preds)
             targets = torch.cat(self._train_domain_targets)
+            self.log("train/train-domain-acc", (preds == targets).float().mean())
             self._log_domain_confusion_matrix(preds, targets, "train/domain-confusion-matrix", list(REGIONS.values()))
 
 
