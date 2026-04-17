@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from typing import List, Tuple
 
@@ -138,29 +139,31 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
     )
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="setup")
-def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
-    seed_everything(cfg.seed, workers=True)
+def _run_once(
+    cfg: DictConfig,
+    run_idx: int,
+    default_root_dir: str,
+) -> tuple[list[dict], str]:
+    """Run one training + test pass. Returns (test_results, checkpoint_dir)."""
+    seed_everything(cfg.seed + run_idx, workers=True)
 
-    if _has_device_tensor_cores():
-        torch.set_float32_matmul_precision("medium")
+    run_name = f"{cfg.wandb.run_name}-run{run_idx}"
+    checkpoint_dir = f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}/run{run_idx}"
 
-    default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
-
-    wandb.login()
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
-        name=cfg.wandb.run_name,
+        name=run_name,
+        group=cfg.wandb.run_name,
         log_model=cfg.wandb.log_model,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
-    csv_logger = CSVLogger(save_dir=default_root_dir, name=None)
+    csv_logger = CSVLogger(save_dir=default_root_dir, name=f"run{run_idx}")
 
     train_loader, val_loaders, test_loaders = make_data_loaders(cfg)
     model = make_model(cfg)
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath=f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}",
+        dirpath=checkpoint_dir,
         monitor=cfg.trainer.monitor_metric,
         mode="max",
         save_top_k=1,
@@ -179,8 +182,47 @@ def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
     )
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loaders)
-    trainer.test(model=model, dataloaders=test_loaders, ckpt_path="best")
+    test_results = trainer.test(model=model, dataloaders=test_loaders, ckpt_path="best")
+
+    wandb.finish()
+
+    return test_results, checkpoint_dir
+
+
+def _best_run_score(test_results: list[dict], metric: str) -> float:
+    for result_dict in test_results:
+        if metric in result_dict:
+            return result_dict[metric]
+    raise ValueError(f"Metric '{metric}' not found in test results: {test_results}")
+
+
+@hydra.main(version_base=None, config_path="configs", config_name="setup")
+def run_experiment(cfg: DictConfig) -> None:
+    if _has_device_tensor_cores():
+        torch.set_float32_matmul_precision("medium")
+
+    default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
+
+    wandb.login()
+
+    num_reruns = cfg.get("num_reruns", 1)
+    best_run_metric = cfg.trainer.get("best_run_metric", "test/test-od-worst-group-task-acc")
+
+    run_results: list[tuple[float, str]] = []
+    for run_idx in range(num_reruns):
+        test_results, checkpoint_dir = _run_once(cfg, run_idx, default_root_dir)
+        score = _best_run_score(test_results, best_run_metric)
+        run_results.append((score, checkpoint_dir))
+        print(f"Run {run_idx}: {best_run_metric} = {score:.4f}")
+
+    if num_reruns > 1:
+        best_score, best_dir = max(run_results, key=lambda x: x[0])
+        print(f"\nBest run: {best_dir} ({best_run_metric} = {best_score:.4f})")
+        for score, ckpt_dir in run_results:
+            if ckpt_dir != best_dir:
+                shutil.rmtree(ckpt_dir, ignore_errors=True)
+                print(f"Deleted checkpoints: {ckpt_dir}")
 
 
 if __name__ == "__main__":
-    run_experiment_lightning_hydra()
+    run_experiment()
