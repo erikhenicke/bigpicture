@@ -19,3 +19,5 @@ runs:
     job_name: train_densenet_d3g_without_domain
     overrides:
       model.enable_domain_head: false 
+      model.pred_domain_for_d3g: false 
+

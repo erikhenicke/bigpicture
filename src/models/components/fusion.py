@@ -64,12 +64,12 @@ class FilmFusion(Fusion):
 
         self.film = FiLM(hr_dim, lr_dim)
 
-        self.fusion = nn.Sequential(
-            self.film,
+        self.projection = nn.Sequential(
             nn.Linear(hr_dim, out_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
         )
 
     def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
-        return self.fusion(hr_features, lr_features)
+        film_features = self.film(hr_features, lr_features)
+        return self.projection(film_features)
