@@ -19,7 +19,7 @@ runs:
   - experiment: train_densenet_d3g
     job_name: train_densenet_d3g_without_domain
     overrides:
-      run_name: ${job_name}
+      run_name: train_densenet_d3g_without_domain
       model.enable_domain_head: false 
       model.pred_domain_for_d3g: false 
 
