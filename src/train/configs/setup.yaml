@@ -15,9 +15,6 @@ num_reruns: 3
 
 run_name: late-fusion
 
-wandb:
-  run_name: ${run_name}-${now:%y-%m-%d-%H-%M-%S}
-
 hydra:
   run:
     dir: log/runs/${now:%Y-%m-%d}/${run_name}-${now:%H-%M-%S}

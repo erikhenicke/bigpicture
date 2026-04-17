@@ -1,4 +1,5 @@
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
@@ -143,17 +144,18 @@ def _run_once(
     cfg: DictConfig,
     run_idx: int,
     default_root_dir: str,
+    wandb_group: str,
 ) -> tuple[list[dict], str]:
     """Run one training + test pass. Returns (test_results, checkpoint_dir)."""
     seed_everything(cfg.seed + run_idx, workers=True)
 
-    run_name = f"{cfg.wandb.run_name}-run{run_idx}"
+    run_name = f"{wandb_group}-run{run_idx}"
     checkpoint_dir = f"{default_root_dir}/checkpoints/run{run_idx}"
 
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
         name=run_name,
-        group=cfg.wandb.run_name,
+        group=wandb_group,
         log_model=cfg.wandb.log_model,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
@@ -205,12 +207,15 @@ def run_experiment(cfg: DictConfig) -> None:
 
     wandb.login()
 
+    timestamp = datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+    wandb_group = f"{cfg.run_name}-{timestamp}"
+
     num_reruns = cfg.get("num_reruns", 1)
     best_run_metric = cfg.trainer.get("best_run_metric", "test/test-od-worst-group-task-acc")
 
     run_results: list[tuple[float, str]] = []
     for run_idx in range(num_reruns):
-        test_results, checkpoint_dir = _run_once(cfg, run_idx, default_root_dir)
+        test_results, checkpoint_dir = _run_once(cfg, run_idx, default_root_dir, wandb_group)
         score = _best_run_score(test_results, best_run_metric)
         run_results.append((score, checkpoint_dir))
         print(f"Run {run_idx}: {best_run_metric} = {score:.4f}")
