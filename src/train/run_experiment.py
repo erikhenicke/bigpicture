@@ -1,610 +1,186 @@
-from collections import defaultdict
-import tempfile
+from pathlib import Path
+from typing import List, Tuple
 
+import hydra
+from hydra.utils import instantiate
+from lightning import Trainer, seed_everything
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from omegaconf import DictConfig, OmegaConf
 import torch
 from torch.utils.data import DataLoader
-from torch.optim import Adam, AdamW, SGD
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
-from torch.nn import CrossEntropyLoss
-from torchmetrics.classification import MulticlassCalibrationError
-from tqdm import tqdm
 import wandb
 
+from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
+from models.late_fusion import LateFusionModule
 from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
 
-# To compute per-region metrics, the region-id is retrieved from sample metadata at index 0 (_metadata_array in FMoWDataset class).
-REGION_INDEX = 0
-FIVE_REGIONS = {'Europe', 'Americas', 'Asia', 'Africa', 'Oceania'}
-NUM_REGIONS = 6
-NUM_CLASSES = 62
-SGD_MOMENTUM = 0.9
-DATA_LOADER_COLLATE_FN = collate_multiscale
-DATA_LOADER_NUM_WORKERS = 4
+def _has_device_tensor_cores() -> bool:
+    """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
+    if not torch.cuda.is_available():
+        return False
+    device = torch.device("cuda")
+    major, _ = torch.cuda.get_device_capability(device)
+    return major >= 7
+
+def _resolve_preprocessed_dir(cfg: DictConfig) -> str | None:
+    return resolve_preprocessed_dir(cfg.data.preprocessed_dir_default, cfg.data.preprocessed_dir_gaia)
 
 
-def make_data_loaders(train_split, val_splits, test_splits, speaking_names, config):
-    preprocessed_dir = resolve_preprocessed_dir(None)
-
-    dataset_augment = make_multiscale_dataset(preprocessed_dir=preprocessed_dir, augment=config.data_augmentation)
-    dataset = make_multiscale_dataset(preprocessed_dir=preprocessed_dir)
-
-    return (
-        make_multiscale_loader(
-            dataset_augment,
-            train_split,
-            frac=config.frac,
-            batch_size=config.batch_size,
-            num_workers=DATA_LOADER_NUM_WORKERS,
-            shuffle=True,
-        ),
-        {
-            speaking_names[split]: make_multiscale_loader(
-                dataset,
-                split,
-                frac=config.frac,
-                batch_size=config.batch_size,
-                num_workers=DATA_LOADER_NUM_WORKERS,
-            )
-            for split in val_splits
-        },
-        {
-            speaking_names[split]: make_multiscale_loader(
-                dataset,
-                split,
-                frac=config.frac,
-                batch_size=config.batch_size,
-                num_workers=DATA_LOADER_NUM_WORKERS,
-            )
-            for split in test_splits
-        },
-    )
-
-def make_model(config: dict, device: str):
-    print(f'Initializing {config.model_type} model...')
-    if config.model_type == 'single-deit':
-        from models.single_scale_deit import SingleScaleDeiT
-        model = SingleScaleDeiT(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
-    elif config.model_type == 'single-deit-landsat':
-        from models.single_scale_deit_landsat import SingleScaleDeiTLandsat
-        model = SingleScaleDeiTLandsat(
-            num_labels=NUM_CLASSES,
-            in_channels=config.landsat_in_channels,
-            image_net=(config.image_net != 'none'),
-        )
-    elif config.model_type == 'multi-deit':
-        from models.multi_scale_deit import MultiScaleDeiT
-        model = MultiScaleDeiT(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
-    elif config.model_type == 'multi-deit-cross-attn':
-        from models.multi_scale_deit_cross_attention import MultiScaleDeiTCrossFusion
-        model = MultiScaleDeiTCrossFusion(
-            num_labels=NUM_CLASSES, 
-            in_channels=config.landsat_in_channels, 
-            image_net=config.image_net, 
-            cross_attn_depths=config.cross_attention_depths,
-            num_regions=NUM_REGIONS,
-            region_aux_enabled=config.region_aux_enabled,
-        )
-    elif config.model_type == 'multi-deit-satclip':
-        from models.multi_scale_deit_satclip import MultiScaleDeiTSatCLIP
-        model = MultiScaleDeiTSatCLIP(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels)
-    elif config.model_type == 'single-densenet':
-        from models.single_scale_dense_net_121 import SingleScaleDenseNet121
-        model = SingleScaleDenseNet121(num_labels=NUM_CLASSES, image_net=(config.image_net != 'none'))
-    else:
-        from models.multi_scale_dense_net_121 import MultiScaleDenseNet121
-        model = MultiScaleDenseNet121(num_labels=NUM_CLASSES, in_channels=config.landsat_in_channels, image_net=config.image_net)
-    
-    return model.to(device)
-
-def make_optimizer(model, config):
-    # For multi-deit-cross-attn with region aux, create separate optimizers
-    if config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled:
-        # Main optimizer: backbone + fusion + main classifier (exclude region_classifier)
-        main_params = []
-        for name, p in model.named_parameters():
-            if not name.startswith('region_classifier.') and p.requires_grad:
-                main_params.append(p)
-
-        region_params = [p for p in model.region_classifier.parameters() if p.requires_grad]
-        
-        if config.optimizer == 'adamw':
-            optimizer_main = AdamW(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-            optimizer_region = AdamW(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay)
-        elif config.optimizer == 'adam':
-            optimizer_main = Adam(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-            optimizer_region = Adam(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay)
-        else:
-            optimizer_main = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-            optimizer_region = SGD(region_params, lr=config.region_aux_lr, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-
-        optimizer = {'main': optimizer_main, 'region': optimizer_region}
-        
-        scheduler = None
-        if config.learning_rate_scheduler == 'plateau':
-            scheduler = ReduceLROnPlateau(
-                optimizer_main,
-                mode='max',
-                factor=config.learning_rate_decay,
-                patience=config.plateau_patience,
-            )
-        elif config.learning_rate_scheduler == 'step':
-            scheduler = StepLR(optimizer_main, step_size=1, gamma=config.learning_rate_decay)
-    else:
-        main_params = [p for p in model.parameters() if p.requires_grad]
-
-        # Standard single optimizer
-        if config.optimizer == 'adamw':
-            optimizer = AdamW(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-        elif config.optimizer == 'adam':
-            optimizer = Adam(main_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-        else:
-            optimizer = SGD(main_params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=SGD_MOMENTUM)
-        
-        scheduler = None
-        if config.learning_rate_scheduler == 'plateau':
-            scheduler = ReduceLROnPlateau(
-                optimizer,
-                mode='max',
-                factor=config.learning_rate_decay,
-                patience=config.plateau_patience,
-            )
-        elif config.learning_rate_scheduler == 'step':
-            scheduler = StepLR(optimizer, step_size=1, gamma=config.learning_rate_decay)
-
-    return optimizer, scheduler
-
-def print_setup_summary(model, data_loaders, optimizer, criterion):
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f'\nTotal of model parameters: {total_params:,}')
-    print('\nData loaders:')
-    for name, loader in data_loaders.items():
-        print(f'{name}: {len(loader.dataset)} samples')
-    
-    if isinstance(optimizer, dict):
-        print(f'\nOptimizer (main): {optimizer["main"].__class__.__name__}')
-        print(f'Optimizer (region): {optimizer["region"].__class__.__name__}')
-    else:
-        print(f'\nOptimizer: {optimizer.__class__.__name__}')
-    print(f'Criterion: {criterion.__class__.__name__}')
-
-def make_training_context(config: dict, device: str):
-    val_splits = ['val', 'id_val']
-    test_splits = ['test', 'id_test']
-    speaking_names = {'train': 'train', 'val': 'val-od', 'id_val': 'val-id', 'test': 'test-od', 'id_test': 'test-id'}
-
-    train_loader, val_loaders, test_loaders = make_data_loaders(train_split='train', val_splits=val_splits, test_splits=test_splits, speaking_names=speaking_names, config=config)
-    model = make_model(config, device)
-    optimizer, scheduler = make_optimizer(model, config)
-    criterion = CrossEntropyLoss()
-    
-    # Separate criterion for region classification
-    criterion_region = CrossEntropyLoss() if config.region_aux_enabled else None
-
-    print_setup_summary(model, {'train': train_loader, **val_loaders, **test_loaders}, optimizer, criterion)
-
-    return {
-        'model': model,
-        'train_loader': train_loader,
-        'val_loaders': val_loaders,
-        'test_loaders': test_loaders,
-        'optimizer': optimizer,
-        'scheduler': scheduler,
-        'criterion': criterion,
-        'criterion_region': criterion_region,
-        'device': device,
-        'config': config,
-    }
-
-def train_batch(x, y, metadata, context):
-    model = context['model']
-    optimizer = context['optimizer']
-    criterion = context['criterion']
-    criterion_region = context.get('criterion_region')
-    device = context['device']
-    config = context['config']
-
-    model.train()
-
-    x = {k: v.to(device) for k, v in x.items()}
-    y = y.to(device)
-    
-    # Check if region aux is enabled for this model
-    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
-    
-    if region_aux_enabled:
-        # Two separate backward passes
-        region_y = metadata[:, REGION_INDEX].to(device)
-        
-        # Forward pass (single forward, returns both logits)
-        outputs = model(x, return_aux=True)
-        class_logits = outputs['class_logits']
-        region_logits = outputs['region_logits']
-        
-        # Backward pass 1: Main classification task
-        optimizer['main'].zero_grad()
-        loss_main = criterion(class_logits, y)
-        loss_main.backward()
-        optimizer['main'].step()
-        
-        # Backward pass 2: Region classification task (only updates region_classifier)
-        optimizer['region'].zero_grad()
-        loss_region = criterion_region(region_logits, region_y)
-        loss_region.backward()
-        optimizer['region'].step()
-        
-        # Compute metrics
-        preds = torch.argmax(class_logits, dim=1)
-        correct = (preds == y).sum().item()
-        
-        region_preds = torch.argmax(region_logits, dim=1)
-        region_correct = (region_preds == region_y).sum().item()
-        
-        total = y.size(0)
-        
-        return {
-            'loss': loss_main.item(),
-            'acc': correct / total,
-            'region_loss': loss_region.item(),
-            'region_acc': region_correct / total,
-        }
-    else:
-        # Standard single backward pass
-        optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
-
-        preds = torch.argmax(logits, dim=1)
-        correct = (preds == y).sum().item()
-        total = y.size(0)
-
-        return {'loss': loss.item(), 'acc': correct / total}
-
-def train_log(metrics, epoch_progress):
-    log_dict = {
-        'train_loss': metrics['loss'], 
-        'train_acc': metrics['acc'], 
-        'epoch': epoch_progress
-    }
-    if 'region_loss' in metrics:
-        log_dict['train_region_loss'] = metrics['region_loss']
-        log_dict['train_region_acc'] = metrics['region_acc']
-    wandb.log(log_dict)
-
-def train_epoch(context, epoch):
-    train_loader = context['train_loader']
-    for batch_ct, batch in enumerate(tqdm(train_loader, desc='Training')):
-        x, y, metadata = batch
-        metrics = train_batch(x, y, metadata, context)
-
-        # Log to Weights & Biases
-        if batch_ct % 25 == 0:
-            epoch_progress = epoch + (batch_ct / len(train_loader))
-            train_log(metrics, epoch_progress)
-
-def _get_region_names(dataloader):
-    dataset = dataloader.dataset
-    base_dataset = getattr(dataset, 'dataset', dataset)
-    metadata_map = getattr(base_dataset, '_metadata_map', None)
-    if metadata_map and 'region' in metadata_map:
-        return list(metadata_map['region'])
-    return []
-
-def evaluate_batch(x, y, metadata, context, calibration_metric=None):
-    model = context['model']
-    criterion = context['criterion']
-    criterion_region = context.get('criterion_region')
-    device = context['device']
-    config = context['config']
-
-    model.eval()
-    x = {k: v.to(device) for k, v in x.items()}
-    y = y.to(device)
-    region_ids = metadata[:, REGION_INDEX].to(device)
-    
-    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
-
-    with torch.no_grad():
-        if region_aux_enabled:
-            outputs = model(x, return_aux=True)
-            logits = outputs['class_logits']
-            region_logits = outputs['region_logits']
-            
-            # Region classification metrics
-            loss_region = criterion_region(region_logits, region_ids)
-            region_preds = torch.argmax(region_logits, dim=1)
-            region_correct_count = (region_preds == region_ids).sum().item()
-        else:
-            logits = model(x)
-            loss_region = None
-            region_correct_count = 0
-            
-        probs = torch.softmax(logits, dim=1)
-        loss = criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        correct_mask = (preds == y)
-        correct = correct_mask.sum().item()
-        entropy = -(probs * torch.log(probs.clamp_min(0e-12))).sum(dim=1)
-        entropy_correct = entropy[correct_mask].sum().item()
-        entropy_incorrect = entropy[~correct_mask].sum().item()
-
-        if calibration_metric is not None:
-            calibration_metric.update(probs, y)
-
-    region_correct = defaultdict(int)
-    region_total = defaultdict(int)
-    for rid in torch.unique(region_ids):
-        rid_int = rid.item()
-        mask = region_ids == rid
-        region_total[rid_int] += mask.sum().item()
-        region_correct[rid_int] += (correct_mask & mask).sum().item()
-
-    return (
-        loss.item(),
-        correct,
-        region_correct,
-        region_total,
-        entropy_correct,
-        entropy_incorrect,
-        loss_region.item() if loss_region is not None else 0.0,
-        region_correct_count,
+def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, shuffle: bool) -> DataLoader:
+    return make_multiscale_loader(
+        dataset,
+        split=split,
+        frac=cfg.data.frac,
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        shuffle=shuffle,
     )
 
 
-def log_model_artifact(model, artifact_name, metadata, optimizer, epoch, config, aliases=None, save_full_checkpoint=False):
-    artifact = wandb.Artifact(artifact_name, type='model')
-    if metadata:
-        artifact.metadata.update(metadata)
+def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
+    preprocessed_dir = _resolve_preprocessed_dir(cfg)
 
-    if save_full_checkpoint:
-        # Handle dict optimizer (region aux) or single optimizer
-        if isinstance(optimizer, dict):
-            optimizer_state = {
-                'main': optimizer['main'].state_dict(),
-                'region': optimizer['region'].state_dict(),
-            }
-        else:
-            optimizer_state = optimizer.state_dict()
-            
-        payload = {
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer_state,
-            'epoch': epoch,
-            'config': dict(config),
-        }
-        file_name = 'checkpoint.pt'
-    else:
-        payload = model.state_dict()
-        file_name = 'model_state_dict.pt'
-
-    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pt') as tmp_file:
-        torch.save(payload, tmp_file.name)
-        artifact.add_file(tmp_file.name, name=file_name)
-    wandb.log_artifact(artifact, aliases=aliases)
-
-
-def evaluate(loader, loader_name, context, config):
-    val_loss = 0
-    val_correct = 0
-    val_total = 0
-    val_entropy_correct = 0
-    val_entropy_incorrect = 0 
-    val_region_loss = 0
-    val_region_correct = 0
-    region_correct_total = defaultdict(int)
-    region_total_total = defaultdict(int)
-    region_names = _get_region_names(loader)
-    ece_metric = MulticlassCalibrationError(
-        num_classes=NUM_CLASSES,
-        n_bins=config.ece_n_bins,
-        norm='l1'
-    ).to(context['device'])
-
-    for batch in tqdm(loader, desc='Evaluating'):
-        x, y, metadata = batch
-        (
-            loss,
-            correct,
-            region_correct,
-            region_total,
-            entropy_correct,
-            entropy_incorrect,
-            region_loss,
-            region_correct_count,
-        ) = evaluate_batch(
-            x, y, metadata, context, calibration_metric=ece_metric
-        )
-        val_loss += loss
-        val_entropy_correct += entropy_correct
-        val_entropy_incorrect += entropy_incorrect 
-        val_correct += correct
-        val_total += y.size(0)
-        val_region_loss += region_loss
-        val_region_correct += region_correct_count
-
-        for rid, count in region_total.items():
-            region_total_total[rid] += count
-        for rid, count in region_correct.items():
-            region_correct_total[rid] += count
-    
-    val_loss /= len(loader)
-    val_acc = val_correct / val_total
-    val_ece = ece_metric.compute().item()
-    val_entropy_correct /= val_correct if val_correct > 0 else 1
-    val_entropy_incorrect /= (val_total - val_correct) if (val_total - val_correct) > 0 else 1
-
-    per_region_acc = {}
-    for rid, total in region_total_total.items():
-        if total == 0:
-            continue
-        name = region_names[rid] if rid < len(region_names) else str(rid)
-        per_region_acc[name] = region_correct_total[rid] / total
-
-    filtered_acc = [acc for name, acc in per_region_acc.items() if name in FIVE_REGIONS]
-    worst_group_acc = min(filtered_acc) if filtered_acc else 0.0
-
-    metrics = {
-        f'{loader_name}-loss': val_loss,
-        f'{loader_name}-acc': val_acc,
-        f'{loader_name}-worst-group-acc': worst_group_acc,
-        f'{loader_name}-ece': val_ece,
-        f'{loader_name}-entropy-correct': val_entropy_correct,
-        f'{loader_name}-entropy-incorrect': val_entropy_incorrect,
-    }
-    
-    # Add region classification metrics if enabled
-    region_aux_enabled = config.model_type == 'multi-deit-cross-attn' and config.region_aux_enabled
-    if region_aux_enabled:
-        val_region_loss /= len(loader)
-        val_region_acc = val_region_correct / val_total
-        metrics[f'{loader_name}-region-loss'] = val_region_loss
-        metrics[f'{loader_name}-region-acc'] = val_region_acc
-    
-    for name, acc in per_region_acc.items():
-        metrics[f'{loader_name}-region-{name.lower()}-acc'] = acc
-
-    return metrics 
-
-
-def evaluate_loaders(loaders, context, config):
-    metrics = {} 
-    for loader_name, loader in loaders.items():
-        metrics.update(evaluate(
-        loader,
-        loader_name,
-        context,
-        config,
-        ))
-    return metrics
-
-def train(context, config):
-    
-    best_worst_group_acc = 0
-    scheduler = context['scheduler']
-    optimizer = context['optimizer']
-    if wandb.run is None:
-        raise RuntimeError('Expected an active wandb run before training starts.')
-    run_artifact_name = f'run-{wandb.run.name}'
-
-    for epoch in tqdm(range(config.epochs), desc='Epochs'):
-        train_epoch(context, epoch)
-
-        val_metrics = evaluate_loaders(context['val_loaders'], context, config)
-        val_metrics.update({'epoch': epoch + 1})
-
-        if scheduler is not None:
-            if config.learning_rate_scheduler == 'plateau':
-                scheduler.step(val_metrics['val-od-worst-group-acc'])
-            else:
-                scheduler.step()
-
-        wandb.log(val_metrics)
-
-        is_best = False
-        # Track best worst group accuracy on val-od split
-        if val_metrics['val-od-worst-group-acc'] > best_worst_group_acc:
-            is_best = True
-            best_worst_group_acc = val_metrics['val-od-worst-group-acc']
-            test_metrics = evaluate_loaders(context['test_loaders'], context, config) 
-
-            log_model_artifact(
-                context['model'],
-                artifact_name=run_artifact_name,
-                aliases=['best', f'checkpoint-epoch-{epoch+1}'],
-                metadata={
-                    **val_metrics, 
-                    **test_metrics, 
-                    'epoch': epoch+1,
-                    'checkpoint_type': 'best',
-                },
-                optimizer=optimizer,
-                epoch=epoch+1,
-                config=config,
-            )
-            print(f'Logged best model with worst-group-acc: {best_worst_group_acc:.4f}')
-        
-        # Save checkpoint every 5 epochs
-        if not is_best and (epoch + 1) % 5 == 0:
-            log_model_artifact(
-                context['model'],
-                artifact_name=run_artifact_name,
-                aliases=[f'checkpoint-epoch-{epoch+1}'],
-                metadata={'epoch': epoch+1, 'checkpoint_type': 'periodic'},
-                optimizer=optimizer,
-                epoch=epoch,
-                config=config,
-            )
-            print(f'Logged checkpoint at epoch {epoch + 1}')
-    
-    # Save final model
-    log_model_artifact(
-        context['model'],
-        artifact_name=run_artifact_name,
-        aliases=['final'],
-        metadata={'total_epochs': config.epochs, 'checkpoint_type': 'final'},
-        optimizer=optimizer,
-        epoch=config.epochs,
-        config=config,
-        save_full_checkpoint=True,
+    dataset_train = make_multiscale_dataset(
+        fmow_dir=cfg.data.fmow_dir,
+        landsat_dir=cfg.data.landsat_dir,
+        preprocessed_dir=preprocessed_dir,
+        augment=cfg.data.augment_train,
     )
-    print('Logged final model')
+    dataset_eval = make_multiscale_dataset(
+        fmow_dir=cfg.data.fmow_dir,
+        landsat_dir=cfg.data.landsat_dir,
+        preprocessed_dir=preprocessed_dir,
+    )
+
+    train_loader = _make_loader(dataset_train, split=cfg.data.train_split, cfg=cfg, shuffle=True)
+    val_loaders = [
+        _make_loader(dataset_eval, split=split, cfg=cfg, shuffle=False)
+        for split in cfg.data.val_splits
+    ]
+    test_loaders = [
+        _make_loader(dataset_eval, split=split, cfg=cfg, shuffle=False)
+        for split in cfg.data.test_splits
+    ]
+    return train_loader, val_loaders, test_loaders
 
 
+def make_model(cfg: DictConfig) -> LateFusionModule:
 
-def run_experiment(args):
-    """ 
-    Run experiment with specified model type.
-    
-    Args:
-        args: Contains 
-            model_type: 'single' or 'multi'
-            num_epochs: Number of training epochs
-            batch_size: Batch size
-            frac: Fraction of data to use (for quick experiments, use 0.1)
-    """
+    model_target = cfg.model.model.get("_target_", "")
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
+    if model_target.endswith("SingleBranchModel"):
+        hr_encoder = instantiate(cfg.model.hr_encoder)
+        model = instantiate(
+            cfg.model.model,
+            encoder=hr_encoder,
+            num_task_labels=cfg.num_task_labels,
+            num_domain_labels=cfg.num_domain_labels,
+        )
+    else:
+        hr_encoder = instantiate(cfg.model.hr_encoder)
+        lr_encoder = instantiate(cfg.model.lr_encoder)
+        branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
+        if model_target.endswith("D3GModel"):
+            model = instantiate(
+                cfg.model.model,
+                branches=branches,
+                num_task_labels=cfg.num_task_labels,
+                num_domain_labels=cfg.num_domain_labels,
+                enable_domain_head=cfg.model.enable_domain_head,
+                domain_loss_coeff=cfg.model.domain_loss_coeff,
+                learnable_relation_coeff=cfg.model.learnable_relation_coeff,
+                consistency_loss_coeff=cfg.model.d3g_loss_coeff,
+                pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
+            )
+        else:
+            fusion = instantiate(cfg.model.fusion)
+            model = instantiate(
+                cfg.model.model,
+                branches=branches,
+                fusion=fusion,
+                num_task_labels=cfg.num_task_labels,
+                num_domain_labels=cfg.num_domain_labels,
+                enable_domain_head=cfg.model.enable_domain_head,
+                domain_loss_coeff=cfg.model.domain_loss_coeff,
+            )
 
-    run_name = f'{args.model_type}-init-{args.image_net}-{args.optimizer}-{args.learning_rate:.0e}-{datetime.now().strftime("%m-%d")}'.replace('.', '_')
+    optimizer_factory = instantiate(cfg.optim.optimizer)
+    scheduler_factory = instantiate(cfg.optim.scheduler) if cfg.optim.scheduler is not None else None
+    domain_optimizer_factory = None
+    domain_scheduler_factory = None
+    if cfg.model.enable_domain_head:
+        domain_optimizer_factory = instantiate(
+            cfg.optim.domain_optimizer,
+            lr=cfg.optim.optimizer.lr * cfg.optim.domain_optimizer_lr_factor,
+        )
+        domain_scheduler_factory = (
+            instantiate(cfg.optim.domain_scheduler)
+            if cfg.optim.domain_scheduler is not None
+            else None
+        )
 
-    with wandb.init(project='fmow', name=run_name, config=args):
-        config = wandb.config
-        training_context = make_training_context(config, device)
-        train(training_context, config)
+    return LateFusionModule(
+        model=model,
+        optimizer=optimizer_factory,
+        scheduler=scheduler_factory,
+        domain_optimizer=domain_optimizer_factory,
+        domain_scheduler=domain_scheduler_factory,
+        num_task_labels=cfg.num_task_labels,
+        num_domain_labels=cfg.num_domain_labels,
+        domain_index=cfg.domain_index,
+        ece_n_bins=cfg.trainer.ece_n_bins,
+        val_loader_names=list(cfg.data.val_loader_names),
+        test_loader_names=list(cfg.data.test_loader_names),
+        key_metric=cfg.trainer.monitor_metric,
+        compile=cfg.trainer.compile,
+        label_smoothing=cfg.trainer.label_smoothing,
+    )
 
-if __name__ == '__main__':
-    import argparse
-    from datetime import datetime
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='single-deit', choices=['single-deit', 'single-deit-landsat', 'multi-deit', 'multi-deit-cross-attn', 'multi-deit-satclip', 'single-densenet', 'multi-densenet'])
-    parser.add_argument('--image_net', type=str, default='both', choices=['both', 'hr', 'none'], help='Whether to initialize multi-scale branches with ImageNet pre-trained weights')
-    parser.add_argument('--landsat_in_channels', type=int, default=6, help='Number of input channels for Landsat data (default: 6)')
-    parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--frac', type=float, default=1.0, help='Fraction of data to use')
-    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam', 'sgd'])
-    parser.add_argument('--learning_rate', type=float, default=5e-5)
-    parser.add_argument('--learning_rate_scheduler', type=str, default='none', choices=['none', 'step', 'plateau'])
-    parser.add_argument('--learning_rate_decay', type=float, default=1.0)
-    parser.add_argument('--plateau_patience', type=int, default=5, help='Number of epochs with no improvement after which learning rate will be reduced')
-    parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--ece_n_bins', type=int, default=10, help='Number of bins for ECE (Expected Calibration Error)')
-    parser.add_argument('--data_augmentation', action='store_true', default=False, help='Whether to apply data augmentation (random horizontal and vertical flips)')
-    parser.add_argument('--cross_attention_depths', type=int, nargs='+', default=None, help='List of layer indices at which to apply cross-attention (only for multi-deit-cross-attn model)')
-    parser.add_argument('--region_aux_enabled', action='store_true', default=False, help='Enable auxiliary region classification task on LR encoder CLS token (multi-deit-cross-attn only)')
-    parser.add_argument('--region_aux_lr', type=float, default=1e-4, help='Learning rate for region classifier head (default: 1e-3)')
-    args = parser.parse_args()
+
+@hydra.main(version_base=None, config_path="configs", config_name="setup")
+def run_experiment_lightning_hydra(cfg: DictConfig) -> None:
+    seed_everything(cfg.seed, workers=True)
+
+    if _has_device_tensor_cores():
+        torch.set_float32_matmul_precision("medium")
+
+    default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
 
     wandb.login()
-    
-    print('='*50)
-    print(f'Running {args.model_type.upper()} model experiment')
-    print('='*50)
-    
-    run_experiment(args)
-    
-    print('\n' + '='*50)
-    print('EXPERIMENT COMPLETE')
-    print('='*50)
+    wandb_logger = WandbLogger(
+        project=cfg.wandb.project,
+        name=cfg.wandb.run_name,
+        log_model=cfg.wandb.log_model,
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+    csv_logger = CSVLogger(save_dir=default_root_dir, name=None)
+
+    train_loader, val_loaders, test_loaders = make_data_loaders(cfg)
+    model = make_model(cfg)
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=f"{cfg.checkpoint.checkpoint_dir}/{cfg.wandb.run_name}",
+        monitor=cfg.trainer.monitor_metric,
+        mode="max",
+        save_top_k=1,
+        save_last=True,
+        filename="late-fusion-epoch{epoch:02d}",
+    )
+
+    trainer = Trainer(
+        accelerator=cfg.trainer.accelerator,
+        devices=cfg.trainer.devices,
+        max_epochs=cfg.trainer.max_epochs,
+        logger=[wandb_logger, csv_logger],
+        callbacks=[checkpoint_callback, LearningRateMonitor(logging_interval="epoch")],
+        log_every_n_steps=cfg.trainer.log_every_n_steps,
+        default_root_dir=default_root_dir,
+    )
+
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loaders)
+    trainer.test(model=model, dataloaders=test_loaders, ckpt_path="best")
+
+
+if __name__ == "__main__":
+    run_experiment_lightning_hydra()
