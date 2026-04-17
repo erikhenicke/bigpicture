@@ -36,7 +36,7 @@ model:
     _target_: models.components.branches.DualBranch
     landsat_channels: ${model.landsat_in_channels}
   model:
-    _target_: models.components.late_fusion_model.D3GModel
+    _target_: models.components.fusion_model.D3GModel
   enable_domain_head: true
   domain_loss_coeff: 0.2
   learnable_relation_coeff: 0.8
