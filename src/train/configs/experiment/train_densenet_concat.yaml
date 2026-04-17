@@ -1,9 +1,8 @@
 # @package _global_
 defaults:
   - override /model: densenet_both
-  - override /optim: adamw_warmup_cosine
+  - override /optim: adam_warmup_cosine
 
 run_name: train-densenet-concat
 
-data:
-  batch_size: 64
+

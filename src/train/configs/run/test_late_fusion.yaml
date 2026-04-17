@@ -5,21 +5,110 @@ slurm:
   gpus: 1
 
 global_overrides:
-  data.frac: 0.01 
-  trainer.max_epochs: 5
-  data.batch_size: 5
+  data.frac: 1.0 
+  trainer.max_epochs: 50
+  data.batch_size: 64
 
 runs:
-  - experiment: train_densenet_baseline 
+  # ---------------- Baselines (HR-only, 3 backbones) ----------------
+  - experiment: train_densenet_baseline
+    overrides:
+      trainer.label_smoothing: 0.0
   - experiment: train_efficientformer_baseline
   - experiment: train_efficientnet_baseline
+
+  # ---------------- Label-smoothing ablation (DenseNet baseline) ----
+  - experiment: train_densenet_baseline
+    job_name: train_densenet_baseline_ls_0.1
+    overrides:
+      run_name: train_densenet_baseline_ls_0.1
+      trainer.label_smoothing: 0.1
+  - experiment: train_densenet_baseline
+    job_name: train_densenet_baseline_ls_0.2
+    overrides:
+      run_name: train_densenet_baseline_ls_0.2
+      trainer.label_smoothing: 0.2
+
+  # ---------------- Fusion variants (DenseNet dual-branch) ----------
   - experiment: train_densenet_concat
   - experiment: train_densenet_film
   - experiment: train_densenet_d3g
+
+  # ---------------- Concat: domain-classification ablation ----------
+  # 2x2 grid over (domain_loss_coeff, domain_optimizer_lr_factor) + without
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_no_domain
+    overrides:
+      run_name: train_densenet_concat_no_domain
+      model.enable_domain_head: false
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dloss_0.1_lrf_0.1
+    overrides:
+      run_name: train_densenet_concat_dloss_0.1_lrf_0.1
+      model.domain_loss_coeff: 0.1
+      optim.domain_optimizer_lr_factor: 0.1
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dloss_0.1_lrf_1.0
+    overrides:
+      run_name: train_densenet_concat_dloss_0.1_lrf_1.0
+      model.domain_loss_coeff: 0.1
+      optim.domain_optimizer_lr_factor: 1.0
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dloss_0.5_lrf_0.1
+    overrides:
+      run_name: train_densenet_concat_dloss_0.5_lrf_0.1
+      model.domain_loss_coeff: 0.5
+      optim.domain_optimizer_lr_factor: 0.1
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dloss_0.5_lrf_1.0
+    overrides:
+      run_name: train_densenet_concat_dloss_0.5_lrf_1.0
+      model.domain_loss_coeff: 0.5
+      optim.domain_optimizer_lr_factor: 1.0
+
+  # ---------------- Concat: fusion out-dim sweep --------------------
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dim_256
+    overrides:
+      run_name: train_densenet_concat_dim_256
+      model.fusion.out_dim: 256
+  - experiment: train_densenet_concat
+    job_name: train_densenet_concat_dim_512
+    overrides:
+      run_name: train_densenet_concat_dim_512
+      model.fusion.out_dim: 512
+
+  # ---------------- D3G: hyperparameter study (2x2 grid) ------------
+  # Vary learnable_relation_coeff x d3g_loss_coeff (defaults: 0.8, 0.5)
+  - experiment: train_densenet_d3g
+    job_name: train_densenet_d3g_rel_0.4_d3g_0.3
+    overrides:
+      run_name: train_densenet_d3g_rel_0.4_d3g_0.3
+      model.learnable_relation_coeff: 0.4
+      model.d3g_loss_coeff: 0.3
+  - experiment: train_densenet_d3g
+    job_name: train_densenet_d3g_rel_0.4_d3g_0.8
+    overrides:
+      run_name: train_densenet_d3g_rel_0.4_d3g_0.8
+      model.learnable_relation_coeff: 0.4
+      model.d3g_loss_coeff: 0.8
+  - experiment: train_densenet_d3g
+    job_name: train_densenet_d3g_rel_1.0_d3g_0.3
+    overrides:
+      run_name: train_densenet_d3g_rel_1.0_d3g_0.3
+      model.learnable_relation_coeff: 1.0
+      model.d3g_loss_coeff: 0.3
+  - experiment: train_densenet_d3g
+    job_name: train_densenet_d3g_rel_1.0_d3g_0.8
+    overrides:
+      run_name: train_densenet_d3g_rel_1.0_d3g_0.8
+      model.learnable_relation_coeff: 1.0
+      model.d3g_loss_coeff: 0.8
+
+  # ---------------- D3G: without domain head ------------------------
   - experiment: train_densenet_d3g
     job_name: train_densenet_d3g_without_domain
     overrides:
       run_name: train_densenet_d3g_without_domain
-      model.enable_domain_head: false 
-      model.pred_domain_for_d3g: false 
-
+      model.enable_domain_head: false
+      model.pred_domain_for_d3g: false
