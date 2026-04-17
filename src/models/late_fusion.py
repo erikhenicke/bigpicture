@@ -10,7 +10,7 @@ from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 import wandb
 
-from models.components.late_fusion_model import LateFusionModel 
+from models.components.fusion_model import SingleBranchModel, LateFusionModel
 from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_domain_metrics, compute_final_eval_metrics, REGIONS
 
 
@@ -19,7 +19,7 @@ class LateFusionModule(LightningModule):
 
     def __init__(
         self,
-        model: LateFusionModel,
+        model: LateFusionModel | SingleBranchModel,
         optimizer: Callable[..., torch.optim.Optimizer],
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,

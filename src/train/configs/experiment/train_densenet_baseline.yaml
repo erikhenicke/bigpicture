@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /model: densenet_baseline
+  - override /optim: adam_cosine
+
+run_name: train-densenet-baseline
+
+trainer:
+  max_epochs: 50
+
+data:
+  batch_size: 64
+  frac: 1.0
+  augment_train: true

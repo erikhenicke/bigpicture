@@ -1,0 +1,20 @@
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-4
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  T_max: ${trainer.max_epochs}
+  eta_min: 1.0e-6
+
+domain_optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  weight_decay: 0.0
+
+domain_scheduler: null
+
+domain_optimizer_lr_factor: 0.1

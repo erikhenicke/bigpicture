@@ -1,9 +1,9 @@
 # @package _global_
 defaults:
   - override /model: densenet_both
-  - override /optim: adam_step
+  - override /optim: adam_warmup_cosine
 
-run_name: train-multi-densenet-both-like
+run_name: train-densenet-concat
 
 trainer:
   max_epochs: 50
@@ -16,9 +16,3 @@ data:
 model:
   hr_image_net: true
   lr_image_net: true
-
-optim:
-  optimizer:
-    lr: 1.0e-4
-  scheduler:
-    gamma: 0.96

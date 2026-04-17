@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /model: densenet_d3g
+  - override /optim: adam_warmup_cosine
+
+run_name: train-densenet-d3g
+
+trainer:
+  max_epochs: 50
+
+data:
+  batch_size: 64
+  frac: 1.0
+  augment_train: true

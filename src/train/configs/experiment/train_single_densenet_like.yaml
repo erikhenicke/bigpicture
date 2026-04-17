@@ -1,7 +1,7 @@
 # @package _global_
 # TODO implement single branch 
 defaults:
-  - override /model: late_fusion_densenet
+  - override /model: densenet
   - override /optim: adam_step
 
 run_name: train-single-densenet-like

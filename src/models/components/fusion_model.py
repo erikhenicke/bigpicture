@@ -3,9 +3,36 @@ from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 
-from models.components.branches import DualBranch
+from models.components.branches import Branch, DualBranch
 from models.components.fusion import Fusion
 from models.components.domain_relations import D3GRelation
+
+
+class SingleBranchModel(nn.Module):
+    """HR-only baseline: single encoder + task classifier, no fusion, no domain head."""
+
+    def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
+        super().__init__()
+        self.encoder = encoder
+        self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
+        self.domain_loss_coeff = 0.0
+        self.enable_domain_head = False
+        self.domain_classifier = None
+
+    def supports_domain_objective(self) -> bool:
+        return False
+
+    def supports_d3g_objective(self) -> bool:
+        return False
+
+    def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        return {"task_logits": self.task_classifier(self.encoder(x["rgb"]))}
+
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+
+    def domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
 
 
 class LateFusionModel(nn.Module):

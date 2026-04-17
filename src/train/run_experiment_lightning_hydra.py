@@ -67,33 +67,43 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
 
 def make_model(cfg: DictConfig) -> LateFusionModule:
 
-    hr_encoder = instantiate(cfg.model.hr_encoder)
-    lr_encoder = instantiate(cfg.model.lr_encoder)
-    branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
     model_target = cfg.model.model.get("_target_", "")
-    if model_target.endswith("D3GModel"):
-        late_fusion_model = instantiate(
+
+    if model_target.endswith("SingleBranchModel"):
+        hr_encoder = instantiate(cfg.model.hr_encoder)
+        model = instantiate(
             cfg.model.model,
-            branches=branches,
+            encoder=hr_encoder,
             num_task_labels=cfg.num_task_labels,
             num_domain_labels=cfg.num_domain_labels,
-            enable_domain_head=cfg.model.enable_domain_head,
-            domain_loss_coeff=cfg.model.domain_loss_coeff,
-            learnable_relation_coeff=cfg.model.learnable_relation_coeff,
-            consistency_loss_coeff=cfg.model.d3g_loss_coeff,
-            pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
         )
     else:
-        fusion = instantiate(cfg.model.fusion)
-        late_fusion_model = instantiate(
-            cfg.model.model,
-            branches=branches,
-            fusion=fusion,
-            num_task_labels=cfg.num_task_labels,
-            num_domain_labels=cfg.num_domain_labels,
-            enable_domain_head=cfg.model.enable_domain_head,
-            domain_loss_coeff=cfg.model.domain_loss_coeff,
-        )
+        hr_encoder = instantiate(cfg.model.hr_encoder)
+        lr_encoder = instantiate(cfg.model.lr_encoder)
+        branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
+        if model_target.endswith("D3GModel"):
+            model = instantiate(
+                cfg.model.model,
+                branches=branches,
+                num_task_labels=cfg.num_task_labels,
+                num_domain_labels=cfg.num_domain_labels,
+                enable_domain_head=cfg.model.enable_domain_head,
+                domain_loss_coeff=cfg.model.domain_loss_coeff,
+                learnable_relation_coeff=cfg.model.learnable_relation_coeff,
+                consistency_loss_coeff=cfg.model.d3g_loss_coeff,
+                pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
+            )
+        else:
+            fusion = instantiate(cfg.model.fusion)
+            model = instantiate(
+                cfg.model.model,
+                branches=branches,
+                fusion=fusion,
+                num_task_labels=cfg.num_task_labels,
+                num_domain_labels=cfg.num_domain_labels,
+                enable_domain_head=cfg.model.enable_domain_head,
+                domain_loss_coeff=cfg.model.domain_loss_coeff,
+            )
 
     optimizer_factory = instantiate(cfg.optim.optimizer)
     scheduler_factory = instantiate(cfg.optim.scheduler) if cfg.optim.scheduler is not None else None
@@ -111,7 +121,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         )
 
     return LateFusionModule(
-        model=late_fusion_model,
+        model=model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
         domain_optimizer=domain_optimizer_factory,
