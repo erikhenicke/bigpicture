@@ -22,7 +22,7 @@ SCRIPT_TEMPLATE = """\
 #SBATCH --error=log/slurm/{job_name}.%j.err
 #SBATCH --gres=gpu:{gpus}
 cd {repo_root}
-uv run --env-file .env src/train/run_experiment_lightning_hydra.py {args}
+uv run --env-file .env src/train/run_experiment.py {args}
 """
 
 
