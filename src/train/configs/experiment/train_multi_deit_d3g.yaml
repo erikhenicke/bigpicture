@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - override /model: deit_d3g
-  - override /optim: adam_warmup_cosine
+  - override /optim: adamw_warmup_cosine
 
 run_name: train-multi-deit-d3g
 
