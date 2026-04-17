@@ -1,0 +1,21 @@
+slurm:
+  partition: robolab
+  nodelist: gaia4,gaia5
+  cpus_per_task: 4
+  gpus: 1
+
+global_overrides:
+  data.frac: 0.01 
+  trainer.max_epochs: 5
+
+runs:
+  - experiment: train_densenet_baseline 
+  - experiment: train_efficientformer_baseline
+  - experiment: train_efficientnet_baseline
+  - experiment: train_densenet_concat
+  - experiment: train_densenet_film
+  - experiment: train_densenet_d3g
+  - experiment: train_densenet_d3g
+    job_name: train_densenet_d3g_without_domain
+    overrides:
+      model.enable_domain_head: false 

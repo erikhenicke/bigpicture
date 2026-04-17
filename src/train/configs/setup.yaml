@@ -14,7 +14,7 @@ domain_index: 0
 
 seed: 111
 
-run_name: late-fusion-lightning-hydra-test
+run_name: late-fusion
 
 wandb:
   run_name: ${run_name}-${now:%y-%m-%d-%H-%M-%S}

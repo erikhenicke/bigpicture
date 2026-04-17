@@ -5,10 +5,5 @@ defaults:
 
 run_name: train-densenet-film
 
-trainer:
-  max_epochs: 50
-
 data:
   batch_size: 64
-  frac: 1.0
-  augment_train: true

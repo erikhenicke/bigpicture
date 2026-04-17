@@ -3,9 +3,9 @@ landsat_dir: /home/datasets4/FMoW_LandSat
 preprocessed_dir_default: null
 preprocessed_dir_gaia: /data/henicke/FMoW_LandSat
 
-batch_size: 32
+batch_size: 64
 num_workers: 4
-frac: 0.01
+frac: 1.0 
 augment_train: true
 
 train_split: train
