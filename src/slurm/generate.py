@@ -17,17 +17,18 @@ SCRIPT_TEMPLATE = """\
 #SBATCH --nodelist={nodelist}
 #SBATCH --job-name={job_name}
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --cpus-per-gpu={cpus_per_gpu}
 #SBATCH --output=log/slurm/{job_name}.%j.out
 #SBATCH --error=log/slurm/{job_name}.%j.err
 #SBATCH --gres=gpu:{gpus}
 cd {repo_root}
-uv run --env-file .env src/train/run_experiment.py {args}
+NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+uv run --env-file .env src/train/run_experiment.py trainer.devices=$NUM_GPUS {args}
 """
 
 
-def build_override_args(global_overrides: dict, run_overrides: dict) -> str:
-    merged = {**global_overrides, **(run_overrides or {})}
+def build_override_args(global_overrides: dict, run_overrides: dict, run_name: str) -> str:
+    merged = {**global_overrides, "run_name": run_name, **(run_overrides or {})}
     return " ".join(f"{k}={v}" for k, v in merged.items())
 
 
@@ -38,37 +39,35 @@ def generate(run_yaml: Path) -> list[Path]:
     slurm = cfg.get("slurm", {})
     partition = slurm.get("partition", "robolab")
     nodelist = slurm.get("nodelist", "gaia4,gaia5")
-    cpus_per_task = slurm.get("cpus_per_task", 4)
+    cpus_per_gpu = slurm.get("cpus_per_gpu", 4)
     gpus = slurm.get("gpus", 1)
 
     global_overrides = cfg.get("global_overrides", {})
-    runs = cfg.get("runs", [])
-    if not runs:
-        print(f"No runs defined in {run_yaml}", file=sys.stderr)
+    experiments = cfg.get("experiments", {})
+    if not experiments:
+        print(f"No experiments defined in {run_yaml}", file=sys.stderr)
         sys.exit(1)
 
     out_dir = SLURM_DIR / run_yaml.stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
     generated = []
-    for run in runs:
-        experiment = run.get("experiment")
-        if not experiment:
-            print("Each run must specify an 'experiment' key", file=sys.stderr)
+    for key, exp in experiments.items():
+        model = exp.get("model")
+        if not model:
+            print(f"Experiment '{key}' must specify a 'model' key.", file=sys.stderr)
             sys.exit(1)
 
-        run_overrides = run.get("overrides", {})
-        override_args = build_override_args(global_overrides, run_overrides)
-        args = f"experiment={experiment}"
-        if override_args:
-            args += f" {override_args}"
+        job_name = f"train_{key}"
+        run_overrides = exp.get("overrides", {})
+        override_args = build_override_args(global_overrides, run_overrides, job_name)
+        args = f"model={model} {override_args}"
 
-        job_name = run.get("job_name", experiment)
         script = SCRIPT_TEMPLATE.format(
             partition=partition,
             nodelist=nodelist,
             job_name=job_name,
-            cpus_per_task=cpus_per_task,
+            cpus_per_gpu=cpus_per_gpu,
             gpus=gpus,
             repo_root=REPO_ROOT,
             args=args,

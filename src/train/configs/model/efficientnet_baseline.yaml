@@ -1,10 +1,16 @@
-hr_encoder:
-  _target_: models.components.branches.TimmBranch
-  model_name: tf_efficientnetv2_b1
-  in_channels: 3
-  image_net: true
-
+# @package _global_
 model:
-  _target_: models.components.fusion_model.SingleBranchModel
+  hr_encoder:
+    _target_: models.components.branches.TimmBranch
+    model_name: tf_efficientnetv2_b1
+    in_channels: 3
+    image_net: true
 
-enable_domain_head: false
+  model:
+    _target_: models.components.fusion_model.SingleBranchModel
+
+  enable_domain_head: false
+
+run_name: train-efficientnet-baseline
+data:
+  batch_size: 128

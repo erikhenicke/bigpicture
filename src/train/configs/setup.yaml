@@ -5,7 +5,6 @@ defaults:
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow
-  - optional experiment: null
 
 num_task_labels: 62
 num_domain_labels: 6

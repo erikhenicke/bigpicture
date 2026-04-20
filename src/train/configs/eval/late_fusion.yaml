@@ -1,0 +1,59 @@
+summary_metrics:
+  - test/test-od-worst-group-task-acc
+
+primary_metrics:
+  - test/test-od-task-acc
+  - test/test-id-task-acc
+  - test/test-od-worst-group-task-acc
+
+groups:
+  - name: Backbone
+    runs:
+      - densenet_baseline
+      - efficientformer_baseline
+      - efficientnet_baseline
+
+  - name: Label-smoothing ablation
+    runs:
+      - densenet_baseline
+      - densenet_baseline_ls_0_1
+      - densenet_baseline_ls_0_2
+    additional_metrics:
+      - test/test-od-task-ece
+
+  - name: Fusion
+    runs:
+      - densenet_baseline
+      - densenet_concat
+      - densenet_film
+      - densenet_d3g
+
+  - name: Concat Domain Classification
+    runs:
+      - densenet_concat
+      - densenet_concat_no_domain
+      - densenet_concat_dloss_0_1_lrf_0_1
+      - densenet_concat_dloss_0_1_lrf_1_0
+      - densenet_concat_dloss_0_5_lrf_0_1
+      - densenet_concat_dloss_0_5_lrf_1_0
+    additional_metrics:
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-oceania-task-acc
+
+  - name: Concat Fusion Out-Dim
+    runs:
+      - densenet_concat
+      - densenet_concat_dim_256
+      - densenet_concat_dim_512
+
+  - name: D3G Hyperparameter Study
+    runs:
+      - densenet_d3g
+      - densenet_d3g_no_domain
+      - densenet_d3g_rel_0_2_d3g_0_2
+      - densenet_d3g_rel_0_2_d3g_0_8
+      - densenet_d3g_rel_0_5_d3g_0_2
+      - densenet_d3g_rel_0_5_d3g_0_8

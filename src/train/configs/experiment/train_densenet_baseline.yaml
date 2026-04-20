@@ -1,8 +1,0 @@
-# @package _global_
-defaults:
-  - override /model: densenet_baseline
-  - override /optim: adam_warmup_cosine
-
-run_name: train-densenet-baseline
-
-

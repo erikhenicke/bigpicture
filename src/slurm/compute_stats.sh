@@ -8,5 +8,5 @@
 
 # Your commands go here
 cd /home/henicke/git/bigpicture
-uv run --env-file .env src/dataset_creation/compute_stats.py --fmow-dir=/home/henicke/data --landsat-dir=/home/datasets4/FMoW_LandSat --output-json=stats.json
+uv run --env-file .env src/dataset_creation/compute_stats.py --fmow-dir=/home/henicke/data --landsat-dir=/home/datasets4/FMoW_LandSat --output-json=log/stats.json
 
