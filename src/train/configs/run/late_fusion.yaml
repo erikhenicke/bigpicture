@@ -1,8 +1,6 @@
 slurm:
   partition: robolab
-  nodelist: gaia4,gaia5
   cpus_per_gpu: 4
-  gpus: 1
 
 global_overrides:
   data.frac: 1.0
@@ -13,60 +11,73 @@ experiments:
   # ---------------- Baselines (HR-only, 3 backbones) ----------------
   densenet_baseline:
     model: densenet_baseline
+    load: 1
 
   efficientformer_baseline:
     model: efficientformer_baseline
+    load: 1
 
   efficientnet_baseline:
     model: efficientnet_baseline
+    load: 1
 
   # ---------------- Label-smoothing ablation (DenseNet baseline) ----
   densenet_baseline_ls_0_1:
     model: densenet_baseline
+    load: 1
     overrides:
       trainer.label_smoothing: 0.1
 
   densenet_baseline_ls_0_2:
     model: densenet_baseline
+    load: 1
     overrides:
       trainer.label_smoothing: 0.2
 
   # ---------------- Fusion variants (DenseNet dual-branch) ----------
   densenet_concat:
     model: densenet_concat
+    load: 2
 
   densenet_film:
     model: densenet_film
+    load: 2
 
   densenet_d3g:
     model: densenet_d3g
+    load: 2
 
   # ---------------- Concat: domain-classification ablation ----------
   densenet_concat_no_domain:
     model: densenet_concat
+    load: 2
     overrides:
       model.enable_domain_head: false
 
   densenet_concat_dloss_0_1_lrf_0_1:
     model: densenet_concat
+    load: 2
     overrides:
       model.domain_loss_coeff: 0.1
       optim.domain_optimizer_lr_factor: 0.1
 
   densenet_concat_dloss_0_1_lrf_1_0:
     model: densenet_concat
+    load: 2
     overrides:
       model.domain_loss_coeff: 0.1
       optim.domain_optimizer_lr_factor: 1.0
 
   densenet_concat_dloss_0_5_lrf_0_1:
     model: densenet_concat
+    load: 2
     overrides:
       model.domain_loss_coeff: 0.5
       optim.domain_optimizer_lr_factor: 0.1
 
   densenet_concat_dloss_0_5_lrf_1_0:
     model: densenet_concat
+    load: 2
     overrides:
       model.domain_loss_coeff: 0.5
       optim.domain_optimizer_lr_factor: 1.0
@@ -74,35 +85,41 @@ experiments:
   # ---------------- Concat: fusion out-dim sweep --------------------
   densenet_concat_dim_256:
     model: densenet_concat
+    load: 2
     overrides:
       model.fusion.out_dim: 256
 
   densenet_concat_dim_512:
     model: densenet_concat
+    load: 2
     overrides:
       model.fusion.out_dim: 512
 
   # ---------------- D3G: hyperparameter study (2x2 grid) ------------
   densenet_d3g_rel_0_2_d3g_0_2:
     model: densenet_d3g
+    load: 2
     overrides:
       model.learnable_relation_coeff: 0.2
       model.d3g_loss_coeff: 0.2
 
   densenet_d3g_rel_0_2_d3g_0_8:
     model: densenet_d3g
+    load: 2
     overrides:
       model.learnable_relation_coeff: 0.2
       model.d3g_loss_coeff: 0.8
 
   densenet_d3g_rel_0_5_d3g_0_2:
     model: densenet_d3g
+    load: 2
     overrides:
       model.learnable_relation_coeff: 0.5
       model.d3g_loss_coeff: 0.2
 
   densenet_d3g_rel_0_5_d3g_0_8:
     model: densenet_d3g
+    load: 2
     overrides:
       model.learnable_relation_coeff: 0.5
       model.d3g_loss_coeff: 0.8
@@ -110,7 +127,7 @@ experiments:
   # ---------------- D3G: without domain head ------------------------
   densenet_d3g_no_domain:
     model: densenet_d3g
+    load: 2
     overrides:
       model.enable_domain_head: false
       model.pred_domain_for_d3g: false
-
