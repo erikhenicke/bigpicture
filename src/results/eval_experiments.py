@@ -82,13 +82,13 @@ def format_experiment_name(exp_key: str) -> str:
     return name
 
 
-def format_metric_name(metric: str, ignore_task_prefix: bool) -> str:
+def format_metric_name(metric: str, remove_task_prefix: bool) -> str:
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
         metric = metric.removeprefix("val/val-")
 
-    if ignore_task_prefix:
+    if remove_task_prefix:
         metric = metric.replace("task-", "")
     if "region" in metric:
         metric = re.sub(r"region-(.*?-)", r"\1 ", metric)
@@ -135,11 +135,11 @@ def build_group_table(
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
         row: dict = {"Experiment": format_experiment_name(key)}
         for m in metrics:
-            row[format_metric_name(m, ignore_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
+            row[format_metric_name(m, remove_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    metric_cols = [format_metric_name(m, ignore_task_prefix=True) for m in metrics]
+    metric_cols = [format_metric_name(m, remove_task_prefix=True) for m in metrics]
 
     if df[metric_cols].eq("").all().all():
         return False
@@ -158,7 +158,7 @@ def build_summary_table(groups: list[dict], summary_metrics: list[str], output: 
                 seen.add(key)
                 exp_keys.append(key)
 
-    cols = [format_metric_name(m, ignore_task_prefix=True) for m in summary_metrics]
+    cols = [format_metric_name(m, remove_task_prefix=True) for m in summary_metrics]
     rows: list[dict] = []
     for key in exp_keys:
         run_dir = find_run_dir(key)
