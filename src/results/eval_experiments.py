@@ -2,6 +2,7 @@
 """Evaluate experiment groups and generate per-group HTML result tables."""
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -74,18 +75,26 @@ def format_cell(values: list[float], format_percent: bool, latex: bool = False) 
         return f"{mean*100:.2f} {sep} {std*100:.2f}"
     return f"{mean:.4f} {sep} {std:.4f}"
 
+
 def format_experiment_name(exp_key: str) -> str:
-    name = exp_key.replace("_", " ").title()
+    name = re.sub(r"(?<=\d)_(?=\d)", ".", exp_key)
+    name = name.replace("_", " ").title()
     return name
 
 
-def format_metric_name(metric: str) -> str:
+def format_metric_name(metric: str, ignore_task_prefix: bool) -> str:
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
         metric = metric.removeprefix("val/val-")
 
-    metric = metric.replace("_", " ").title().replace("Od", "OD").replace("Id", "ID").replace(" Acc", "")
+    if ignore_task_prefix:
+        metric = metric.replace("task-", "")
+    if "region" in metric:
+        metric = re.sub(r"region-(.*?-)", r"\1 ", metric)
+    metric = metric.replace("-", " ").title().replace("Od", "OD").replace("Id", "ID")
+
+
 
     return metric
 
@@ -124,13 +133,13 @@ def build_group_table(
     for key in exp_keys:
         run_dir = find_run_dir(key)
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
-        row: dict = {"experiment": format_experiment_name(key)}
+        row: dict = {"Experiment": format_experiment_name(key)}
         for m in metrics:
-            row[format_metric_name(m)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
+            row[format_metric_name(m, ignore_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    metric_cols = [format_metric_name(m) for m in metrics]
+    metric_cols = [format_metric_name(m, ignore_task_prefix=True) for m in metrics]
 
     if df[metric_cols].eq("").all().all():
         return False
@@ -149,12 +158,12 @@ def build_summary_table(groups: list[dict], summary_metrics: list[str], output: 
                 seen.add(key)
                 exp_keys.append(key)
 
-    cols = [format_metric_name(m) for m in summary_metrics]
+    cols = [format_metric_name(m, ignore_task_prefix=True) for m in summary_metrics]
     rows: list[dict] = []
     for key in exp_keys:
         run_dir = find_run_dir(key)
         all_values = load_test_metrics(run_dir, summary_metrics) if run_dir else {m: [] for m in summary_metrics}
-        row: dict = {"experiment": f"train_{key}"}
+        row: dict = {"Experiment": format_experiment_name(key)}
         for m, col in zip(summary_metrics, cols):
             row[col] = format_cell(all_values[m], format_percent=m.endswith("acc"), latex=latex)
         first_vals = all_values[summary_metrics[0]]
