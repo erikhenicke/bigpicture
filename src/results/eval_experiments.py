@@ -107,7 +107,7 @@ def format_experiment_name(
     return ", ".join(parts)
 
 
-def format_metric_name(metric: str, remove_task_prefix: bool, remove_acc: bool) -> str:
+def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: bool=True) -> str:
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
@@ -163,11 +163,11 @@ def build_group_table(
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
         row: dict = {"Experiment": format_experiment_name(key, run_experiments, translations, latex=latex)}
         for m in metrics:
-            row[format_metric_name(m, remove_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
+            row[format_metric_name(m)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    metric_cols = [format_metric_name(m, remove_task_prefix=True) for m in metrics]
+    metric_cols = [format_metric_name(m) for m in metrics]
 
     if df[metric_cols].eq("").all().all():
         return False
@@ -193,7 +193,7 @@ def build_summary_table(
                 seen.add(key)
                 exp_keys.append(key)
 
-    cols = [format_metric_name(m, remove_task_prefix=True) for m in summary_metrics]
+    cols = [format_metric_name(m) for m in summary_metrics]
     rows: list[dict] = []
     for key in exp_keys:
         run_dir = find_run_dir(key)
