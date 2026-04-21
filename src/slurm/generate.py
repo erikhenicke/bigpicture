@@ -27,7 +27,7 @@ SCRIPT_TEMPLATE = """\
 #SBATCH --output=log/slurm/{job_name}.%j.out
 #SBATCH --error=log/slurm/{job_name}.%j.err
 cd {repo_root}
-srun uv run --env-file .env src/train/run_experiment.py trainer.devices={gpus} {args}
+srun uv run --env-file .env src/train/run_experiment.py {args}
 """
 
 
