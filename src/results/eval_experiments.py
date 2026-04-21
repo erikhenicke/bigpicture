@@ -20,23 +20,23 @@ LATEX_OUTPUT_DIR = THESIS_ROOT / "results"
 EXPERIMENT_SYMBOLS = {
     "domain_loss_coeff": {
         "plain": "λ_dom",
-        "latex": r"$\lambda_{\text{dom}}$",
+        "latex": r"$\\lambda_{\\text{dom}}$",
     },
     "label_smoothing": {
         "plain": "ε",
-        "latex": r"$\varepsilon$",
+        "latex": r"$\\varepsilon$",
     },
     "d3g_consistency_coeff": {
         "plain": "λ_d3g",
-        "latex": r"$\lambda_{\text{d3g}}$",
+        "latex": r"$\\lambda_{\\text{d3g}}$",
     },
     "domain_lr_factor": {
         "plain": "μ_dom",
-        "latex": r"$\mu_{\text{dom}}$",
+        "latex": r"$\\mu_{\\text{dom}}$",
     },
     "d3g_relation_coeff": {
         "plain": "α_rel",
-        "latex": r"$\alpha_{\text{rel}}$",
+        "latex": r"$\\alpha_{\\text{rel}}$",
     },
 }
 
