@@ -222,10 +222,6 @@ def run_experiment(cfg: DictConfig) -> None:
     if num_reruns > 1:
         best_score, best_dir = max(run_results, key=lambda x: x[0])
         print(f"\nBest run: {best_dir} ({best_run_metric} = {best_score:.4f})")
-        for score, ckpt_dir in run_results:
-            if ckpt_dir != best_dir:
-                shutil.rmtree(ckpt_dir, ignore_errors=True)
-                print(f"Deleted checkpoints: {ckpt_dir}")
 
 
 if __name__ == "__main__":
