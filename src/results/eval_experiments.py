@@ -17,6 +17,37 @@ RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "eval"
 THESIS_ROOT = REPO_ROOT.parent / "thesis"
 LATEX_OUTPUT_DIR = THESIS_ROOT / "results"
 
+EXPERIMENT_SYMBOLS = {
+    "domain_loss_coeff": {
+        "plain": "λ_dom",
+        "latex": r"$\lambda_{\text{dom}}$",
+    },
+    "label_smoothing": {
+        "plain": "ε",
+        "latex": r"$\varepsilon$",
+    },
+    "d3g_consistency_coeff": {
+        "plain": "λ_d3g",
+        "latex": r"$\lambda_{\text{d3g}}$",
+    },
+    "domain_lr_factor": {
+        "plain": "μ_dom",
+        "latex": r"$\mu_{\text{dom}}$",
+    },
+    "d3g_relation_coeff": {
+        "plain": "α_rel",
+        "latex": r"$\alpha_{\text{rel}}$",
+    },
+}
+
+EXPERIMENT_ABBREVIATION_MAP = [
+    (r"\bD3G[\s_-]*Rel\b", "d3g_relation_coeff"),
+    (r"\bDloss\b", "domain_loss_coeff"),
+    (r"\bLs\b", "label_smoothing"),
+    (r"\bLrf\b", "domain_lr_factor"),
+    (r"\bD3G\b", "d3g_consistency_coeff"),
+]
+
 
 def find_run_dir(exp_key: str) -> Path | None:
     """Return the most recent log directory for the given experiment key."""
@@ -76,9 +107,18 @@ def format_cell(values: list[float], format_percent: bool, latex: bool = False) 
     return f"{mean:.4f} {sep} {std:.4f}"
 
 
-def format_experiment_name(exp_key: str) -> str:
+def _replace_experiment_abbreviations(name: str, latex: bool) -> str:
+    symbol_key = "latex" if latex else "plain"
+    for pattern, symbol_name in EXPERIMENT_ABBREVIATION_MAP:
+        replacement = EXPERIMENT_SYMBOLS[symbol_name][symbol_key]
+        name = re.sub(pattern, replacement, name, flags=re.IGNORECASE)
+    return name
+
+
+def format_experiment_name(exp_key: str, latex: bool = False) -> str:
     name = re.sub(r"(?<=\d)_(?=\d)", ".", exp_key)
     name = name.replace("_", " ").title()
+    name = _replace_experiment_abbreviations(name, latex=latex)
     return name
 
 
@@ -133,7 +173,7 @@ def build_group_table(
     for key in exp_keys:
         run_dir = find_run_dir(key)
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
-        row: dict = {"Experiment": format_experiment_name(key)}
+        row: dict = {"Experiment": format_experiment_name(key, latex=latex)}
         for m in metrics:
             row[format_metric_name(m, remove_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
@@ -163,7 +203,7 @@ def build_summary_table(groups: list[dict], summary_metrics: list[str], output: 
     for key in exp_keys:
         run_dir = find_run_dir(key)
         all_values = load_test_metrics(run_dir, summary_metrics) if run_dir else {m: [] for m in summary_metrics}
-        row: dict = {"Experiment": format_experiment_name(key)}
+        row: dict = {"Experiment": format_experiment_name(key, latex=latex)}
         for m, col in zip(summary_metrics, cols):
             row[col] = format_cell(all_values[m], format_percent=m.endswith("acc"), latex=latex)
         first_vals = all_values[summary_metrics[0]]
