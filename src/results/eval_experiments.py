@@ -143,7 +143,7 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool) -> None
         lines += ["\\bottomrule", "\\end{tabular}"]
         output.write_text("\n".join(lines), encoding="utf-8")
     else:
-        gt = GT(df).tab_header(title=title).cols_label(experiment="Experiment")
+        gt = GT(df).tab_header(title=title)
         output.write_text(gt.as_raw_html(), encoding="utf-8")
 
 
