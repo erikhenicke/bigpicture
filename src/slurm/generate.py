@@ -11,10 +11,8 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
 SLURM_DIR = Path(__file__).parent
 
-NODES: dict[str, dict[str, int]] = {
-    "gaia4": {"gpus": 1, "throughput": 1},
-    "gaia5": {"gpus": 2, "throughput": 2},
-}
+NODELIST = "gaia4,gaia5"
+GPUS = 1
 
 SCRIPT_TEMPLATE = """\
 #!/bin/bash
@@ -22,12 +20,14 @@ SCRIPT_TEMPLATE = """\
 #SBATCH --nodelist={nodelist}
 #SBATCH --job-name={job_name}
 #SBATCH --nodes=1
+#SBATCH --ntasks-per-node={gpus}
 #SBATCH --gres=gpu:{gpus}
 #SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem-per-cpu={mem_per_cpu}
 #SBATCH --output=log/slurm/{job_name}.%j.out
 #SBATCH --error=log/slurm/{job_name}.%j.err
 cd {repo_root}
-uv run --env-file .env src/train/run_experiment.py trainer.devices=$SLURM_GPUS_ON_NODE {args}
+srun uv run --env-file .env src/train/run_experiment.py trainer.devices={gpus} {args}
 """
 
 
@@ -36,56 +36,20 @@ def build_override_args(global_overrides: dict, run_overrides: dict, run_name: s
     return " ".join(f"{k}={v}" for k, v in merged.items())
 
 
-def schedule_experiments(experiments: dict) -> dict[str, str]:
-    """LPT heuristic on related machines: sort jobs by load descending, assign each
-    to the node where it would finish earliest (current_time + load / throughput)."""
-    sorted_keys = sorted(
-        experiments.keys(),
-        key=lambda k: experiments[k].get("load", 1),
-        reverse=True,
-    )
-    node_time: dict[str, float] = {name: 0.0 for name in NODES}
-    assignment: dict[str, str] = {}
-    for key in sorted_keys:
-        load = experiments[key].get("load", 1)
-        best_node = min(
-            NODES,
-            key=lambda n: node_time[n] + load / NODES[n]["throughput"],
-        )
-        node_time[best_node] += load / NODES[best_node]["throughput"]
-        assignment[key] = best_node
-    return assignment
-
-
-def print_schedule(experiments: dict, assignment: dict[str, str]) -> None:
-    by_node: dict[str, list[str]] = {name: [] for name in NODES}
-    for key, node in assignment.items():
-        by_node[node].append(key)
-    print("\nLoad balancing:")
-    for node, keys in by_node.items():
-        throughput = NODES[node]["throughput"]
-        total_load = sum(experiments[k].get("load", 1) for k in keys)
-        est_time = total_load / throughput if throughput else 0.0
-        print(f"  {node} (throughput={throughput}, total_load={total_load}, est_time={est_time:.1f}):")
-        for k in keys:
-            print(f"    - {k} (load={experiments[k].get('load', 1)})")
-
-
 def generate(run_yaml: Path) -> list[Path]:
     with run_yaml.open() as f:
         cfg = yaml.safe_load(f)
 
     slurm = cfg.get("slurm", {})
     partition = slurm.get("partition", "robolab")
-    cpus_per_gpu = slurm.get("cpus_per_gpu", 4)
+    cpus_per_task = slurm.get("cpus_per_task", 4)
+    mem_per_cpu = slurm.get("mem_per_cpu", "8G")
 
     global_overrides = cfg.get("global_overrides", {})
     experiments = cfg.get("experiments", {})
     if not experiments:
         print(f"No experiments defined in {run_yaml}", file=sys.stderr)
         sys.exit(1)
-
-    assignment = schedule_experiments(experiments)
 
     out_dir = SLURM_DIR / run_yaml.stem
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -97,9 +61,6 @@ def generate(run_yaml: Path) -> list[Path]:
             print(f"Experiment '{key}' must specify a 'model' key.", file=sys.stderr)
             sys.exit(1)
 
-        node = assignment[key]
-        node_info = NODES[node]
-
         job_name = f"train_{key}"
         run_overrides = exp.get("overrides", {})
         override_args = build_override_args(global_overrides, run_overrides, job_name)
@@ -107,10 +68,11 @@ def generate(run_yaml: Path) -> list[Path]:
 
         script = SCRIPT_TEMPLATE.format(
             partition=partition,
-            nodelist=node,
+            nodelist=NODELIST,
             job_name=job_name,
-            gpus=node_info["gpus"],
-            cpus_per_task=cpus_per_gpu * node_info["gpus"],
+            gpus=GPUS,
+            cpus_per_task=cpus_per_task,
+            mem_per_cpu=mem_per_cpu,
             repo_root=REPO_ROOT,
             args=args,
         )
@@ -119,9 +81,7 @@ def generate(run_yaml: Path) -> list[Path]:
         out_path.write_text(script)
         out_path.chmod(0o755)
         generated.append(out_path)
-        print(f"  wrote {out_path.relative_to(REPO_ROOT)} -> {node}")
-
-    print_schedule(experiments, assignment)
+        print(f"  wrote {out_path.relative_to(REPO_ROOT)}")
 
     return generated
 

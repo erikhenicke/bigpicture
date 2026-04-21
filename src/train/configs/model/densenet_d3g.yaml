@@ -30,4 +30,4 @@ model:
 
 run_name: train-densenet-d3g
 data:
-  batch_size: 96
+  batch_size: 80 

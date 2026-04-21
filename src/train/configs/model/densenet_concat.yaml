@@ -33,4 +33,4 @@ model:
 
 run_name: train-densenet-concat
 data:
-  batch_size: 96
+  batch_size: 80 

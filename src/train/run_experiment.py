@@ -175,7 +175,6 @@ def _run_once(
 
     trainer = Trainer(
         accelerator=cfg.trainer.accelerator,
-        devices=cfg.trainer.devices,
         max_epochs=cfg.trainer.max_epochs,
         logger=[wandb_logger, csv_logger],
         callbacks=[checkpoint_callback, LearningRateMonitor(logging_interval="epoch")],

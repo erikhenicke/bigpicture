@@ -12,4 +12,4 @@ model:
 
 run_name: train-densenet-baseline
 data:
-  batch_size: 128
+  batch_size: 128 
