@@ -102,12 +102,12 @@ def format_experiment_name(
                 parts.append(f"no {label}")
         else:
             val_str = f"{value:g}" if isinstance(value, float) else str(value)
-            parts.append(f"{label}={val_str}")
+            parts.append(f"{label}$={val_str}$" if latex else f"{label}={val_str}")
 
     return ", ".join(parts)
 
 
-def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: bool=True) -> str:
+def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: bool=False, remove_od: bool=True) -> str:
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
@@ -117,6 +117,8 @@ def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: b
         metric = metric.replace("-task", "")
     if remove_acc:
         metric = metric.replace("-acc", "")
+    if remove_od:
+        metric = metric.replace("od", "")
 
     if "region" in metric:
         metric = re.sub(r"-region(-.*?)", r"\1 ", metric)

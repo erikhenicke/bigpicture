@@ -1,8 +1,8 @@
 models:
   densenet_baseline: "DenseNet"
-  densenet_concat: "DenseNet Concat"
-  densenet_film: "DenseNet FiLM"
-  densenet_d3g: "DenseNet D3G"
+  densenet_concat: "Concat"
+  densenet_film: "FiLM"
+  densenet_d3g: "D3G"
   efficientformer_baseline: "EfficientFormer"
   efficientnet_baseline: "EfficientNet"
 
