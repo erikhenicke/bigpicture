@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
-from great_tables import GT
+from great_tables import GT, loc, style
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_RUNS = REPO_ROOT / "log" / "runs"
@@ -127,24 +127,75 @@ def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: b
     return metric
 
 
+METRIC_CHUNK_SIZE = 4
+
+
+def _parse_mean(cell: str) -> float | None:
+    try:
+        return float(str(cell).split()[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str]) -> dict[str, int]:
+    best: dict[str, int] = {}
+    for col in metric_cols:
+        max_val, max_idx = -float("inf"), None
+        for i, cell in enumerate(df[col]):
+            val = _parse_mean(cell)
+            if val is not None and val > max_val:
+                max_val, max_idx = val, i
+        if max_idx is not None:
+            best[col] = max_idx
+    return best
+
+
 def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool) -> None:
-    if latex:
-        cols = list(df.columns)
-        col_fmt = "l" + "r" * (len(cols) - 1)
-        lines = [
-            f"% {title}",
-            f"\\begin{{tabular}}{{{col_fmt}}}",
-            "\\toprule",
-            " & ".join(cols) + " \\\\",
-            "\\midrule",
-        ]
-        for _, row in df.iterrows():
-            lines.append(" & ".join(str(v) for v in row) + " \\\\")
-        lines += ["\\bottomrule", "\\end{tabular}"]
-        output.write_text("\n".join(lines), encoding="utf-8")
+    exp_col = df.columns[0]
+    metric_cols = list(df.columns[1:])
+
+    if len(metric_cols) > METRIC_CHUNK_SIZE:
+        mid = (len(metric_cols) + 1) // 2
+        chunks = [metric_cols[:mid], metric_cols[mid:]]
     else:
-        gt = GT(df).tab_header(title=title)
-        output.write_text(gt.as_raw_html(), encoding="utf-8")
+        chunks = [metric_cols]
+
+    best = _best_row_per_col(df, metric_cols)
+
+    if latex:
+        all_lines = [f"% {title}"]
+        for chunk in chunks:
+            cols = [exp_col] + chunk
+            col_fmt = "l" + "r" * len(chunk)
+            all_lines += [
+                f"\\begin{{tabular}}{{{col_fmt}}}",
+                "\\toprule",
+                " & ".join(cols) + " \\\\",
+                "\\midrule",
+            ]
+            for i, (_, row) in enumerate(df[[exp_col] + chunk].iterrows()):
+                cells = []
+                for col, val in zip(cols, row):
+                    s = str(val)
+                    if col in best and best[col] == i:
+                        s = f"\\textbf{{{s}}}"
+                    cells.append(s)
+                all_lines.append(" & ".join(cells) + " \\\\")
+            all_lines += ["\\bottomrule", "\\end{tabular}", ""]
+        output.write_text("\n".join(all_lines), encoding="utf-8")
+    else:
+        html_parts = []
+        for chunk in chunks:
+            chunk_df = df[[exp_col] + chunk]
+            gt = GT(chunk_df).tab_header(title=title)
+            for col, row_idx in best.items():
+                if col in chunk:
+                    gt = gt.tab_style(
+                        style=style.text(weight="bold"),
+                        locations=loc.body(columns=col, rows=[row_idx]),
+                    )
+            html_parts.append(gt.as_raw_html())
+        output.write_text("\n".join(html_parts), encoding="utf-8")
 
 
 def build_group_table(
