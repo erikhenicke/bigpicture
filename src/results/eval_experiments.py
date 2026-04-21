@@ -13,40 +13,11 @@ from great_tables import GT
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_RUNS = REPO_ROOT / "log" / "runs"
-RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "eval"
+EVAL_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "eval"
+RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
+TRANSLATIONS_FILE = EVAL_CONFIG_DIR / "translations.yaml"
 THESIS_ROOT = REPO_ROOT.parent / "thesis"
 LATEX_OUTPUT_DIR = THESIS_ROOT / "results"
-
-EXPERIMENT_SYMBOLS = {
-    "domain_loss_coeff": {
-        "plain": "λ_dom",
-        "latex": r"$\\lambda_{\\text{dom}}$",
-    },
-    "label_smoothing": {
-        "plain": "ε",
-        "latex": r"$\\varepsilon$",
-    },
-    "d3g_consistency_coeff": {
-        "plain": "λ_d3g",
-        "latex": r"$\\lambda_{\\text{d3g}}$",
-    },
-    "domain_lr_factor": {
-        "plain": "μ_dom",
-        "latex": r"$\\mu_{\\text{dom}}$",
-    },
-    "d3g_relation_coeff": {
-        "plain": "α_rel",
-        "latex": r"$\\alpha_{\\text{rel}}$",
-    },
-}
-
-EXPERIMENT_ABBREVIATION_MAP = [
-    (r"\bD3G[\s_-]*Rel\b", "d3g_relation_coeff"),
-    (r"\bDloss\b", "domain_loss_coeff"),
-    (r"\bLs\b", "label_smoothing"),
-    (r"\bLrf\b", "domain_lr_factor"),
-    (r"\bD3G\b", "d3g_consistency_coeff"),
-]
 
 
 def find_run_dir(exp_key: str) -> Path | None:
@@ -107,34 +78,49 @@ def format_cell(values: list[float], format_percent: bool, latex: bool = False) 
     return f"{mean:.4f} {sep} {std:.4f}"
 
 
-def _replace_experiment_abbreviations(name: str, latex: bool) -> str:
+def format_experiment_name(
+    exp_key: str,
+    run_experiments: dict,
+    translations: dict,
+    latex: bool = False,
+) -> str:
+    exp_def = run_experiments.get(exp_key)
+    if exp_def is None:
+        return exp_key.replace("_", " ").title()
+
     symbol_key = "latex" if latex else "plain"
-    for pattern, symbol_name in EXPERIMENT_ABBREVIATION_MAP:
-        replacement = EXPERIMENT_SYMBOLS[symbol_name][symbol_key]
-        name = re.sub(pattern, replacement, name, flags=re.IGNORECASE)
-    return name
+    model_key = exp_def.get("model", exp_key)
+    base_name = translations["models"].get(model_key, model_key.replace("_", " ").title())
+
+    overrides: dict = exp_def.get("overrides") or {}
+    parts = [base_name]
+    for param_key, value in overrides.items():
+        param_trans = translations["params"].get(param_key)
+        label = param_trans[symbol_key] if param_trans else param_key.split(".")[-1]
+        if isinstance(value, bool):
+            if not value:
+                parts.append(f"no {label}")
+        else:
+            val_str = f"{value:g}" if isinstance(value, float) else str(value)
+            parts.append(f"{label}={val_str}")
+
+    return ", ".join(parts)
 
 
-def format_experiment_name(exp_key: str, latex: bool = False) -> str:
-    name = re.sub(r"(?<=\d)_(?=\d)", ".", exp_key)
-    name = name.replace("_", " ").title()
-    name = _replace_experiment_abbreviations(name, latex=latex)
-    return name
-
-
-def format_metric_name(metric: str, remove_task_prefix: bool) -> str:
+def format_metric_name(metric: str, remove_task_prefix: bool, remove_acc: bool) -> str:
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
         metric = metric.removeprefix("val/val-")
 
     if remove_task_prefix:
-        metric = metric.replace("task-", "")
+        metric = metric.replace("-task", "")
+    if remove_acc:
+        metric = metric.replace("-acc", "")
+
     if "region" in metric:
-        metric = re.sub(r"region-(.*?-)", r"\1 ", metric)
+        metric = re.sub(r"-region(-.*?)", r"\1 ", metric)
     metric = metric.replace("-", " ").title().replace("Od", "OD").replace("Id", "ID")
-
-
 
     return metric
 
@@ -164,6 +150,8 @@ def build_group_table(
     primary_metrics: list[str],
     output: Path,
     latex: bool,
+    run_experiments: dict,
+    translations: dict,
 ) -> bool:
     """Build and write a table for one group. Returns False if skipped."""
     metrics = primary_metrics + group.get("additional_metrics", [])
@@ -173,7 +161,7 @@ def build_group_table(
     for key in exp_keys:
         run_dir = find_run_dir(key)
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
-        row: dict = {"Experiment": format_experiment_name(key, latex=latex)}
+        row: dict = {"Experiment": format_experiment_name(key, run_experiments, translations, latex=latex)}
         for m in metrics:
             row[format_metric_name(m, remove_task_prefix=True)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
@@ -188,7 +176,14 @@ def build_group_table(
     return True
 
 
-def build_summary_table(groups: list[dict], summary_metrics: list[str], output: Path, latex: bool) -> None:
+def build_summary_table(
+    groups: list[dict],
+    summary_metrics: list[str],
+    output: Path,
+    latex: bool,
+    run_experiments: dict,
+    translations: dict,
+) -> None:
     """Build a table ranking all unique experiments by the summary metrics."""
     seen: set[str] = set()
     exp_keys: list[str] = []
@@ -203,7 +198,7 @@ def build_summary_table(groups: list[dict], summary_metrics: list[str], output: 
     for key in exp_keys:
         run_dir = find_run_dir(key)
         all_values = load_test_metrics(run_dir, summary_metrics) if run_dir else {m: [] for m in summary_metrics}
-        row: dict = {"Experiment": format_experiment_name(key, latex=latex)}
+        row: dict = {"Experiment": format_experiment_name(key, run_experiments, translations, latex=latex)}
         for m, col in zip(summary_metrics, cols):
             row[col] = format_cell(all_values[m], format_percent=m.endswith("acc"), latex=latex)
         first_vals = all_values[summary_metrics[0]]
@@ -234,9 +229,9 @@ def main() -> None:
         if not eval_yaml.is_absolute():
             eval_yaml = Path.cwd() / eval_yaml
     else:
-        yamls = sorted(RUN_CONFIG_DIR.glob("*.yaml"))
+        yamls = sorted(EVAL_CONFIG_DIR.glob("*.yaml"))
         if not yamls:
-            print(f"No eval YAML files found in {RUN_CONFIG_DIR}", file=sys.stderr)
+            print(f"No eval YAML files found in {EVAL_CONFIG_DIR}", file=sys.stderr)
             sys.exit(1)
         print("Available eval configs:")
         for i, p in enumerate(yamls):
@@ -251,13 +246,27 @@ def main() -> None:
     with eval_yaml.open() as f:
         cfg = yaml.safe_load(f)
 
+    run_name = eval_yaml.stem
+    run_yaml = RUN_CONFIG_DIR / f"{run_name}.yaml"
+    run_experiments: dict = {}
+    if run_yaml.exists():
+        with run_yaml.open() as f:
+            run_cfg = yaml.safe_load(f)
+        run_experiments = run_cfg.get("experiments", {})
+    else:
+        print(f"Warning: no run config found at {run_yaml}", file=sys.stderr)
+
+    translations: dict = {"models": {}, "params": {}}
+    if TRANSLATIONS_FILE.exists():
+        with TRANSLATIONS_FILE.open() as f:
+            translations = yaml.safe_load(f)
+
     primary_metrics: list[str] = cfg["primary_metrics"]
     summary_metrics: list[str] = cfg.get("summary_metrics", [])
     groups: list[dict] = cfg["groups"]
 
     latex: bool = args.latex
     ext = ".tex" if latex else ".html"
-    run_name = eval_yaml.stem
 
     output_dir = LATEX_OUTPUT_DIR / run_name if latex else REPO_ROOT / "results" / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -265,7 +274,7 @@ def main() -> None:
     for group in groups:
         safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
         output = output_dir / f"{safe_name}{ext}"
-        written = build_group_table(group, primary_metrics, output, latex)
+        written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations)
         if written:
             print(f"  wrote {output}")
         else:
@@ -273,7 +282,7 @@ def main() -> None:
 
     if summary_metrics:
         output = output_dir / f"summary{ext}"
-        build_summary_table(groups, summary_metrics, output, latex)
+        build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations)
         print(f"  wrote {output}")
 
 
