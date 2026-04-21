@@ -137,20 +137,24 @@ def _parse_mean(cell: str) -> float | None:
         return None
 
 
-def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str]) -> dict[str, int]:
+def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict[str, str]) -> dict[str, int]:
     best: dict[str, int] = {}
     for col in metric_cols:
-        max_val, max_idx = -float("inf"), None
+        minimize = directions.get(col, "max") == "min"
+        sentinel = float("inf") if minimize else -float("inf")
+        best_val, best_idx = sentinel, None
         for i, cell in enumerate(df[col]):
             val = _parse_mean(cell)
-            if val is not None and val > max_val:
-                max_val, max_idx = val, i
-        if max_idx is not None:
-            best[col] = max_idx
+            if val is None:
+                continue
+            if (minimize and val < best_val) or (not minimize and val > best_val):
+                best_val, best_idx = val, i
+        if best_idx is not None:
+            best[col] = best_idx
     return best
 
 
-def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool) -> None:
+def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_directions: dict[str, str]) -> None:
     exp_col = df.columns[0]
     metric_cols = list(df.columns[1:])
 
@@ -160,7 +164,7 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool) -> None
     else:
         chunks = [metric_cols]
 
-    best = _best_row_per_col(df, metric_cols)
+    best = _best_row_per_col(df, metric_cols, col_directions)
 
     if latex:
         all_lines = [f"% {title}"]
@@ -205,6 +209,7 @@ def build_group_table(
     latex: bool,
     run_experiments: dict,
     translations: dict,
+    metric_directions: dict[str, str],
 ) -> bool:
     """Build and write a table for one group. Returns False if skipped."""
     metrics = primary_metrics + group.get("additional_metrics", [])
@@ -225,7 +230,8 @@ def build_group_table(
     if df[metric_cols].eq("").all().all():
         return False
 
-    write_table(df, group["name"], output, latex)
+    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in metrics}
+    write_table(df, group["name"], output, latex, col_directions)
     return True
 
 
@@ -236,6 +242,7 @@ def build_summary_table(
     latex: bool,
     run_experiments: dict,
     translations: dict,
+    metric_directions: dict[str, str],
 ) -> None:
     """Build a table ranking all unique experiments by the summary metrics."""
     seen: set[str] = set()
@@ -264,7 +271,8 @@ def build_summary_table(
         .drop(columns="_sort")
         .reset_index(drop=True)
     )
-    write_table(df, "All experiments — summary", output, latex)
+    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in summary_metrics}
+    write_table(df, "All experiments — summary", output, latex, col_directions)
 
 
 def main() -> None:
@@ -317,6 +325,7 @@ def main() -> None:
     primary_metrics: list[str] = cfg["primary_metrics"]
     summary_metrics: list[str] = cfg.get("summary_metrics", [])
     groups: list[dict] = cfg["groups"]
+    metric_directions: dict[str, str] = cfg.get("metric_directions", {})
 
     latex: bool = args.latex
     ext = ".tex" if latex else ".html"
@@ -327,7 +336,7 @@ def main() -> None:
     for group in groups:
         safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
         output = output_dir / f"{safe_name}{ext}"
-        written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations)
+        written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions)
         if written:
             print(f"  wrote {output}")
         else:
@@ -335,7 +344,7 @@ def main() -> None:
 
     if summary_metrics:
         output = output_dir / f"summary{ext}"
-        build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations)
+        build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions)
         print(f"  wrote {output}")
 
 

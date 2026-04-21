@@ -1,3 +1,6 @@
+metric_directions:
+  test/test-od-task-ece: min
+
 summary_metrics:
   - test/test-od-worst-group-task-acc
 
