@@ -81,45 +81,49 @@ experiments:
     overrides:
       model.fusion.out_dim: 512
 
-  # ---------------- D3G: hyperparameter study (2x2 grid) ------------
-  densenet_d3g_rel_0_2_d3g_0_2:
-    model: densenet_d3g
-    overrides:
-      model.learnable_relation_coeff: 0.2
-      model.d3g_loss_coeff: 0.2
-
-  densenet_d3g_rel_0_2_d3g_0_8:
-    model: densenet_d3g
-    overrides:
-      model.learnable_relation_coeff: 0.2
-      model.d3g_loss_coeff: 0.8
-
-  densenet_d3g_rel_0_5_d3g_0_2:
-    model: densenet_d3g
-    overrides:
-      model.learnable_relation_coeff: 0.5
-      model.d3g_loss_coeff: 0.2
-
-  densenet_d3g_rel_0_5_d3g_0_8:
-    model: densenet_d3g
-    overrides:
-      model.learnable_relation_coeff: 0.5
-      model.d3g_loss_coeff: 0.8
-
-  # ---------------- D3G: without domain head ------------------------
+  # ---------------- D3G: hyperparameter study ----------------------
   densenet_d3g_no_domain:
     model: densenet_d3g
     overrides:
       model.enable_domain_head: false
       model.pred_domain_for_d3g: false
 
-  # ---------------- Normalization ablation (DenseNet dual-branch) ----------------
+  densenet_d3g_no_domain_pred:
+    model: densenet_d3g
+    overrides:
+      model.pred_domain_for_d3g: false
+
+  densenet_d3g_rel_0_2_d3g_0_2:
+    model: densenet_d3g
+    overrides:
+      model.learnable_relation_coeff: 0.2
+      model.d3g_loss_coeff: 0.2
+      model.pred_domain_for_d3g: false
+
+  densenet_d3g_rel_0_2_d3g_0_8:
+    model: densenet_d3g
+    overrides:
+      model.learnable_relation_coeff: 0.2
+      model.d3g_loss_coeff: 0.8
+      model.pred_domain_for_d3g: false
+
+  densenet_d3g_rel_0_5_d3g_0_2:
+    model: densenet_d3g
+    overrides:
+      model.learnable_relation_coeff: 0.5
+      model.d3g_loss_coeff: 0.2
+      model.pred_domain_for_d3g: false
+
+  densenet_d3g_rel_0_5_d3g_0_8:
+    model: densenet_d3g
+    overrides:
+      model.learnable_relation_coeff: 0.5
+      model.d3g_loss_coeff: 0.8
+      model.pred_domain_for_d3g: false
+
+  # ---------------- Normalization ablation (DenseNet) ------------------
   densenet_baseline_norm:
     model: densenet_baseline
     overrides:
       data.preprocessed_dir_gaia: /data/henicke/FMoW_LandSat_Norm
   
-  densenet_concat_norm:
-    model: densenet_concat
-    overrides:
-      data.preprocessed_dir_gaia: /data/henicke/FMoW_LandSat_Norm
