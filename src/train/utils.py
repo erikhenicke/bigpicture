@@ -9,14 +9,16 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multi
 
 DEFAULT_FMOW_DIR = "/home/henicke/data"
 DEFAULT_LANDSAT_DIR = "/home/datasets4/FMoW_LandSat"
-DEFAULT_PREPROCESSED_DIR_GAIA = "/data/henicke/FMoW_LandSat"
+DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
 DEFAULT_NUM_WORKERS = 4
 
 
-def resolve_preprocessed_dir(default_dir: str | None, gaia_dir: str | None = DEFAULT_PREPROCESSED_DIR_GAIA) -> str | None:
-    if platform.node() in {"gaia4", "gaia5"}:
-        return gaia_dir
-    return default_dir
+def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str:
+    if platform.node() in {"gaia4", "gaia5", "gaia6"}:
+        return f"/data/henicke/{preprocessed_dir}"
+    elif platform.node() in {"nyx"}:
+        return f"/home/nyx_data1/henicke/{preprocessed_dir}"
+    raise ValueError(f"Unknown host {platform.node()}, cannot resolve preprocessed_dir path.")
 
 
 def make_multiscale_dataset(

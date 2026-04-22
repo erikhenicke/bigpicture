@@ -1,7 +1,6 @@
 fmow_dir: /home/henicke/data
 landsat_dir: /home/datasets4/FMoW_LandSat
-preprocessed_dir_default: null
-preprocessed_dir_gaia: /data/henicke/FMoW_LandSat
+preprocessed_dir: FMoW_LandSat
 
 batch_size: 64
 num_workers: 4

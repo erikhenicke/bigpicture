@@ -125,5 +125,5 @@ experiments:
   densenet_baseline_norm:
     model: densenet_baseline
     overrides:
-      data.preprocessed_dir_gaia: /data/henicke/FMoW_LandSat_Norm
+      data.preprocessed_dir: FMoW_LandSat_Norm
   

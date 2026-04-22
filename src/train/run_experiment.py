@@ -26,7 +26,7 @@ def _has_device_tensor_cores() -> bool:
     return major >= 7
 
 def _resolve_preprocessed_dir(cfg: DictConfig) -> str | None:
-    return resolve_preprocessed_dir(cfg.data.preprocessed_dir_default, cfg.data.preprocessed_dir_gaia)
+    return resolve_preprocessed_dir(cfg.data.preprocessed_dir)
 
 
 def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, shuffle: bool) -> DataLoader:
