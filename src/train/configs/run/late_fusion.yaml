@@ -112,3 +112,14 @@ experiments:
     overrides:
       model.enable_domain_head: false
       model.pred_domain_for_d3g: false
+
+  # ---------------- Normalization ablation (DenseNet dual-branch) ----------------
+  densenet_baseline_norm:
+    model: densenet_baseline
+    overrides:
+      data.preprocessed_dir_gaia: /data/henicke/FMoW_LandSat_Norm
+  
+  densenet_concat_norm:
+    model: densenet_concat
+    overrides:
+      data.preprocessed_dir_gaia: /data/henicke/FMoW_LandSat_Norm

@@ -60,3 +60,10 @@ groups:
       - densenet_d3g_rel_0_2_d3g_0_8
       - densenet_d3g_rel_0_5_d3g_0_2
       - densenet_d3g_rel_0_5_d3g_0_8
+
+  - name: Normalization Ablation
+    runs:
+      - densenet_baseline
+      - densenet_baseline_norm
+      - densenet_concat
+      - densenet_concat_norm

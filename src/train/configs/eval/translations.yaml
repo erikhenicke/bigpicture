@@ -31,3 +31,7 @@ params:
   model.fusion.out_dim:
     plain: "d"
     latex: "$d$"
+  data.preprocessed_dir_gaia:
+    plain: "DS-Norm"
+    latex: "DS-Norm"
+    no_value: true

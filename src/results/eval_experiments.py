@@ -97,9 +97,14 @@ def format_experiment_name(
     for param_key, value in overrides.items():
         param_trans = translations["params"].get(param_key)
         label = param_trans[symbol_key] if param_trans else param_key.split(".")[-1]
+        no_value = param_trans.get("no_value", False)
         if isinstance(value, bool):
             if not value:
                 parts.append(f"no {label}")
+            else:
+                parts.append(label)
+        elif no_value:
+            parts.append(label)
         else:
             val_str = f"{value:g}" if isinstance(value, float) else str(value)
             parts.append(f"{label}$={val_str}$" if latex else f"{label}={val_str}")
