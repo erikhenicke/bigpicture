@@ -14,10 +14,12 @@ DEFAULT_NUM_WORKERS = 4
 
 
 def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str:
-    if platform.node() in {"gaia4", "gaia5", "gaia6"}:
+    if platform.node() in {"gaia4", "gaia5", "gaia6", "gaia7"}:
         return f"/data/henicke/{preprocessed_dir}"
     elif platform.node() in {"nyx"}:
         return f"/home/nyx_data1/henicke/{preprocessed_dir}"
+    elif platform.node() in {"gaia1"}:
+        return f"/users/henicke/{preprocessed_dir}"
     raise ValueError(f"Unknown host {platform.node()}, cannot resolve preprocessed_dir path.")
 
 
