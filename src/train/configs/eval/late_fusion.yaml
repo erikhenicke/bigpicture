@@ -30,6 +30,7 @@ groups:
       - densenet_concat
       - densenet_film
       - densenet_d3g
+      - densenet_geoprior
 
   - name: Concat Domain Classification
     runs:
@@ -65,4 +66,5 @@ groups:
   - name: Normalization Ablation
     runs:
       - densenet_baseline
-      - densenet_baseline_norm
+      - densenet_baseline_image_norm_ds
+      - densenet_baseline_image_norm_imagenet

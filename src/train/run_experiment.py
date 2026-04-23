@@ -25,9 +25,6 @@ def _has_device_tensor_cores() -> bool:
     major, _ = torch.cuda.get_device_capability(device)
     return major >= 7
 
-def _resolve_preprocessed_dir(cfg: DictConfig) -> str | None:
-    return resolve_preprocessed_dir(cfg.data.preprocessed_dir)
-
 
 def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, shuffle: bool) -> DataLoader:
     return make_multiscale_loader(
@@ -41,18 +38,20 @@ def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, sh
 
 
 def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
-    preprocessed_dir = _resolve_preprocessed_dir(cfg)
+    preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
 
     dataset_train = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
         preprocessed_dir=preprocessed_dir,
         augment=cfg.data.augment_train,
+        image_norm=cfg.data.image_norm,
     )
     dataset_eval = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
         preprocessed_dir=preprocessed_dir,
+        image_norm=cfg.data.image_norm,
     )
 
     train_loader = _make_loader(dataset_train, split=cfg.data.train_split, cfg=cfg, shuffle=True)

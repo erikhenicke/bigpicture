@@ -73,3 +73,25 @@ class FilmFusion(Fusion):
     def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
         film_features = self.film(hr_features, lr_features)
         return self.projection(film_features)
+
+
+class GeoPriorFusion(Fusion):
+    def __init__(self, hr_dim, lr_dim, out_dim):
+        super().__init__(hr_dim, lr_dim, out_dim)
+
+        self.hr_projection = nn.Sequential(
+            nn.Linear(hr_dim, out_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+        )
+
+        self.lr_projection = nn.Sequential(
+            nn.Linear(lr_dim, out_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+        )
+
+    def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
+        hr_projected = self.hr_projection(hr_features)
+        lr_projected = self.lr_projection(lr_features)
+        return torch.mul(hr_projected, lr_projected)

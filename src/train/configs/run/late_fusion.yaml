@@ -39,6 +39,9 @@ experiments:
     
   densenet_d3g:
     model: densenet_d3g
+
+  densenet_geoprior:
+    model: densenet_geoprior
     
   # ---------------- Concat: domain-classification ablation ----------
   densenet_concat_no_domain:
@@ -68,6 +71,12 @@ experiments:
     model: densenet_concat
     overrides:
       model.domain_loss_coeff: 0.5
+      optim.domain_optimizer_lr_factor: 1.0
+
+  densenet_concat_dloss_1_0_lrf_1_0:
+    model: densenet_concat
+    overrides:
+      model.domain_loss_coeff: 1.0
       optim.domain_optimizer_lr_factor: 1.0
 
   # ---------------- Concat: fusion out-dim sweep --------------------
@@ -122,8 +131,13 @@ experiments:
       model.pred_domain_for_d3g: false
 
   # ---------------- Normalization ablation (DenseNet) ------------------
-  densenet_baseline_norm:
+  densenet_baseline_image_norm_ds:
     model: densenet_baseline
     overrides:
       data.preprocessed_dir: FMoW_LandSat_Norm
   
+  densenet_baseline_image_norm_imagenet:
+    model: densenet_baseline
+    overrides:
+      data.preprocessed_dir: "null"
+      data.image_norm: imagenet

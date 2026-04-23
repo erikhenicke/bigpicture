@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from models.utils import REGIONS
+
 class IndicatorDomainRelation(nn.Module):
     def __init__(self):
         super().__init__()
@@ -23,7 +25,7 @@ class D3GRelation(nn.Module):
 
         if self.learnable_relation_coeff < 1:
             self.nnet = nn.Sequential(
-                nn.Linear(1, internal_dim // 2),
+                nn.Embedding(len(REGIONS), internal_dim // 2),
                 nn.ReLU(),
                 nn.Linear(internal_dim // 2, internal_dim)
             )
@@ -43,7 +45,7 @@ class D3GRelation(nn.Module):
         if self.learnable_relation_coeff == 1:
             return fixed_relations
 
-        head_ids = head_id.repeat(domain_id.shape[0]).unsqueeze(-1).float()
+        head_ids = head_id.repeat(domain_id.shape[0])
         learned_relations = self.cos(self.weights * self.nnet_latlon(lr_features), self.weights * self.nnet(head_ids)).unsqueeze(-1)
         
         return self.learnable_relation_coeff * fixed_relations + (1. - self.learnable_relation_coeff) * learned_relations

@@ -10,4 +10,4 @@
 
 set -euo pipefail
 
-srun rsync -avh --progress /home/datasets4/FMoW_LandSat/fmow_preprocessed_norm /home/nyx_data1/henicke/FMoW_LandSat_Norm/
+srun rsync -avh --progress gaia5:/data/henicke/FMoW_LandSat/fmow_preprocessed /home/nyx_data1/henicke/FMoW_LandSat

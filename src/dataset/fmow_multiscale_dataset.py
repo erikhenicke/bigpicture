@@ -1,7 +1,5 @@
 from pathlib import Path
-import pandas as pd
 import torch
-from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 from torchvision.transforms import v2 as transforms
@@ -34,6 +32,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         augment=False,  
         hflip_prob=0.5,               
         vflip_prob=0.5,               
+        image_norm="fmow-statistics"
     ):
         """
         Args:
@@ -61,6 +60,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         if preprocessed_dir is not None:
             self.fmow_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "fmow_rgb"
             self.landsat_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "landsat"
+        self.image_norm = image_norm
 
         # Inherit attributes from base dataset
         self._dataset_name = "fmow_multiscale"
@@ -95,17 +95,26 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     def get_default_transform_rgb(self):
         """Default transform for RGB images."""
-        return transforms.Compose(
-            [
-                # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
-                transforms.ToImage(),
-                transforms.ToDtype(torch.float32, scale=True),
-                transforms.Normalize(
-                    mean=[0.4155880808830261, 0.41815927624702454, 0.3903605341911316],
-                    std=[0.24812281131744385, 0.24405813217163086, 0.2482403963804245],
-                )
-            ]
-        )
+        if self.image_norm == "fmow-statistics":
+            return transforms.Compose(
+                [
+                    # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
+                    transforms.ToImage(),
+                    transforms.ToDtype(torch.float32, scale=True),
+                    transforms.Normalize(
+                        mean=[0.4155880808830261, 0.41815927624702454, 0.3903605341911316],
+                        std=[0.24812281131744385, 0.24405813217163086, 0.2482403963804245],
+                    )
+                ]
+            )
+        else:
+            return transforms.Compose(
+                [
+                    transforms.ToImage(),
+                    transforms.ToDtype(torch.float32, scale=True),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ]
+            )
 
     def get_default_transform_landsat(self):
         """
@@ -113,23 +122,31 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         See https://developers.google.com/earth-engine/datasets/catalog/landsat/ for scaling info.
         GeoTIFFs store reflectance values directly; stats computed over the full dataset.
-
-        # Theoretical scaling from raw DN (0–65353) to reflectance:
-        # landsat_scale = 2.75e-05; landsat_offset = -0.2
-        # lower = 0 * landsat_scale + landsat_offset = -0.2
-        # upper = 65353 * landsat_scale + landsat_offset ≈ 1.597
-        # mean = (upper + lower) / 2 ≈ 0.699; std = (upper - lower) / 2 ≈ 0.899
         """
-        return transforms.Compose(
-            [
-                transforms.Normalize(
-                    mean=[0.06259285658597946, 0.0880340114235878, 0.09441816806793213,
-                          0.2327403724193573, 0.19073842465877533, 0.12976829707622528],
-                    std=[0.039894334971904755, 0.049978554248809814, 0.0687960833311081,
-                         0.092967689037323, 0.09390033036470413, 0.0819208025932312],
-                ),
-            ]
-        )
+        if self.image_norm == "fmow-statistics":
+            return transforms.Compose(
+                [
+                    transforms.Normalize(
+                        mean=[0.06259285658597946, 0.0880340114235878, 0.09441816806793213,
+                            0.2327403724193573, 0.19073842465877533, 0.12976829707622528],
+                        std=[0.039894334971904755, 0.049978554248809814, 0.0687960833311081,
+                            0.092967689037323, 0.09390033036470413, 0.0819208025932312],
+                    ),
+                ]
+            )
+        else:
+            # Theoretical scaling from raw DN (0–65353) to reflectance:
+            landsat_scale = 2.75e-05
+            landsat_offset = -0.2
+            lower = 0 * landsat_scale + landsat_offset
+            upper = 65353 * landsat_scale + landsat_offset
+            mean = (upper + lower) / 2
+            std = (upper - lower) / 2
+            return transforms.Compose(
+                [
+                    transforms.Normalize(mean=[mean] * 6, std=[std] * 6),
+                ]
+            )
 
     def _apply_augmentation(self, rgb_img: torch.Tensor, landsat_img: torch.Tensor):
         """

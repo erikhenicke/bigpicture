@@ -13,8 +13,10 @@ DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
 DEFAULT_NUM_WORKERS = 4
 
 
-def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str:
-    if platform.node() in {"gaia4", "gaia5", "gaia6", "gaia7"}:
+def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str | None:
+    if preprocessed_dir is None:
+        return None
+    elif platform.node() in {"gaia4", "gaia5", "gaia6", "gaia7"}:
         return f"/data/henicke/{preprocessed_dir}"
     elif platform.node() in {"nyx"}:
         return f"/home/nyx_data1/henicke/{preprocessed_dir}"
@@ -28,12 +30,14 @@ def make_multiscale_dataset(
     landsat_dir: str = DEFAULT_LANDSAT_DIR,
     preprocessed_dir: str | None = None,
     augment: bool = False,
+    image_norm: str = "fmow-statistics",
 ) -> FMoWMultiScaleDataset:
     return FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
         preprocessed_dir=preprocessed_dir,
         augment=augment,
+        image_norm=image_norm,
     )
 
 

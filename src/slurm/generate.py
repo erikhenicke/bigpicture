@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
 SLURM_DIR = Path(__file__).parent
 
-NODELIST = "gaia4,gaia5"
+NODELIST = "gaia4,gaia5,gaia7"
 GPUS = 1
 
 SCRIPT_TEMPLATE = """\
