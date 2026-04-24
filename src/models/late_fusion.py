@@ -393,19 +393,6 @@ class LateFusionModule(LightningModule):
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
 
-        if self.trainer.sanity_checking:
-            return
-
-        if self._task_scheduler is not None:
-            if isinstance(self._task_scheduler, ReduceLROnPlateau):
-                monitor_value = self.trainer.callback_metrics.get(self.hparams.key_metric)
-                if monitor_value is not None:
-                    self._task_scheduler.step(monitor_value.item() if hasattr(monitor_value, "item") else monitor_value)
-            else:
-                self._task_scheduler.step()
-        if self._domain_scheduler is not None:
-            self._domain_scheduler.step()
-
 
     def on_test_epoch_start(self) -> None:
         """Lightning hook that is called at the beginning of a test epoch.
@@ -509,18 +496,26 @@ class LateFusionModule(LightningModule):
         Examples:
             https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
 
-        :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        :return: A list of dicts containing the configured optimizers and learning-rate schedulers to be used for training.
         """
         task_optimizer = self.optimizer_factory(params=self.model.task_parameters())
 
         self._task_scheduler = (
             self.scheduler_factory(optimizer=task_optimizer)
-            if self.scheduler_factory is not None 
+            if self.scheduler_factory is not None
             else None
         )
 
-        optimizers = [task_optimizer]
+        task_config = {"optimizer": task_optimizer}
+        if self._task_scheduler is not None:
+            scheduler_config = {"scheduler": self._task_scheduler, "interval": "epoch", "frequency": 1}
+            if isinstance(self._task_scheduler, ReduceLROnPlateau):
+                scheduler_config["monitor"] = self.hparams.key_metric
+            task_config["lr_scheduler"] = scheduler_config
+
+        configs = [task_config]
         self._domain_scheduler = None
+
         if self.use_domain_objective:
             if self.domain_optimizer_factory is None:
                 raise ValueError("Domain objective is enabled, but no domain optimizer factory was provided.")
@@ -528,14 +523,23 @@ class LateFusionModule(LightningModule):
             if len(domain_parameters) == 0:
                 raise ValueError("Domain objective is enabled, but the model does not expose domain parameters.")
             domain_optimizer = self.domain_optimizer_factory(params=domain_parameters)
-            optimizers.append(domain_optimizer)
+
             self._domain_scheduler = (
                 self.domain_scheduler_factory(optimizer=domain_optimizer)
                 if self.domain_scheduler_factory is not None
                 else None
             )
 
-        return optimizers
+            domain_config = {"optimizer": domain_optimizer}
+            if self._domain_scheduler is not None:
+                scheduler_config = {"scheduler": self._domain_scheduler, "interval": "epoch", "frequency": 1}
+                if isinstance(self._domain_scheduler, ReduceLROnPlateau):
+                    scheduler_config["monitor"] = self.hparams.key_metric
+                domain_config["lr_scheduler"] = scheduler_config
+
+            configs.append(domain_config)
+
+        return configs
 
 
 if __name__ == "__main__":
