@@ -215,29 +215,16 @@ class FMoWMultiScaleDataset(WILDSDataset):
             data = src.read()  
 
         data = data.astype(np.float32)
-        
+
         landsat_tensor = torch.from_numpy(data).float()
+
+        if landsat_tensor.shape[1] != 224 or landsat_tensor.shape[2] != 224:
+            landsat_tensor = torch.nn.functional.interpolate(
+                landsat_tensor.unsqueeze(0), size=(224, 224), mode="bilinear", align_corners=False
+            ).squeeze(0)
 
         if self.transform_landsat is not None:
             landsat_tensor = self.transform_landsat(landsat_tensor)
-
-        # Resize to 224x224
-        if landsat_tensor.shape[1] != 224 or landsat_tensor.shape[2] != 224:
-            resized_bands = []
-            for band_idx in range(landsat_tensor.shape[0]):
-                band = landsat_tensor[band_idx, :, :]
-                # Scale from [-1, 1] to [0, 1] for PIL
-                band_scaled = (band + 1) / 2
-                band_img = transforms.ToPILImage()(band_scaled)
-                band_img = band_img.resize((224, 224), Image.BILINEAR)
-                # Scale back from [0, 1] to [-1, 1]
-                # v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) is equivalent to transforms.ToTensor()
-                band_resized = transforms.Compose([
-                    transforms.ToImage(),
-                    transforms.ToDtype(torch.float32, scale=True)
-                ])(band_img).squeeze(0) * 2 - 1
-                resized_bands.append(band_resized)
-            landsat_tensor = torch.stack(resized_bands, dim=0)
 
         return landsat_tensor
 
