@@ -76,7 +76,6 @@ class LateFusionModule(LightningModule):
         )
         self.train_domain_loss = MeanMetric() if self.use_domain_objective else None
         self.train_consistency_loss = MeanMetric() if self.use_d3g_objective else None
-        self.train_total_loss = MeanMetric()
         self.val_acc_best = MaxMetric()
 
         self.val_loader_names = val_loader_names 
@@ -193,38 +192,11 @@ class LateFusionModule(LightningModule):
         self._train_domain_targets.append(regions.cpu())
     
     
-    def task_optimizer_step(self, task_optimizer: torch.optim.Optimizer, task_loss: torch.Tensor) -> None:    
-        task_optimizer.zero_grad()
-        self.toggle_optimizer(task_optimizer)
-        self.manual_backward(task_loss)
-        task_optimizer.step()
-        self.untoggle_optimizer(task_optimizer)
-
-
-    def domain_backward(
-        self,
-        domain_optimizer: torch.optim.Optimizer,
-        domain_logits_detached: torch.Tensor,
-        regions: torch.Tensor,
-    ) -> None:
-        domain_loss_head = self.domain_criterion(domain_logits_detached, regions)
-        self.manual_backward(domain_loss_head)
-
-
-    def domain_optimizer_step(self, domain_optimizer: torch.optim.Optimizer) -> None:
-        # No toggle needed: domain_logits_detached is computed from lr_features.detach(),
-        # so its graph is isolated to domain_classifier weights — task params are unreachable.
-        domain_optimizer.zero_grad()
-        domain_optimizer.step()
-
-
-    def log_task_metrics(self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor, total_loss: torch.Tensor) -> None:
+    def log_task_metrics(self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor) -> None:
         self.train_task_loss(task_loss)
         self.train_task_acc(task_preds, y)
-        self.train_total_loss(total_loss)
         self.log("train/train-task-loss", self.train_task_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/train-task-acc", self.train_task_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/train-total-loss", self.train_total_loss, on_step=False, on_epoch=True, prog_bar=True)
 
 
     def training_step(
@@ -248,32 +220,34 @@ class LateFusionModule(LightningModule):
         task_preds = torch.argmax(task_logits, dim=1)
 
         optimizers = self.optimizers()
-        total_loss = task_loss
+        task_opt = optimizers[0] if isinstance(optimizers, list) else optimizers
 
+        task_opt.zero_grad()
+        if self.use_domain_objective:
+            optimizers[1].zero_grad()
+
+        self.manual_backward(task_loss)
+
+        domain_loss = None
         if self.use_domain_objective:
             domain_loss, domain_preds = self.get_domain_loss(result, regions)
             self.log_domain_metrics(domain_loss, domain_preds, regions)
-            total_loss = total_loss + self.domain_loss_coeff * domain_loss
+            self.manual_backward(self.domain_loss_coeff * domain_loss)
 
+        d3g_consistency_loss = None
         if self.use_d3g_objective:
             d3g_consistency_loss = self.task_criterion(result["rel_logits"], y)
             self.train_consistency_loss(d3g_consistency_loss)
             self.log("train/d3g-consistency-loss", d3g_consistency_loss, on_step=False, on_epoch=True, prog_bar=False)
-            total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
+            self.manual_backward(self.d3g_loss_coeff * d3g_consistency_loss)
 
+        task_opt.step()
         if self.use_domain_objective:
-            self.domain_backward(optimizers[1], result["domain_logits_detached"], regions)
-        self.task_optimizer_step(
-            optimizers[0] if isinstance(optimizers, list) else optimizers,
-            total_loss,
-        )
-        if self.use_domain_objective:
-            self.domain_optimizer_step(optimizers[1])
+            optimizers[1].step()
 
-        self.log_task_metrics(task_loss, task_preds, y, total_loss)
+        self.log_task_metrics(task_loss, task_preds, y)
 
-        # return loss or backpropagation will fail
-        return total_loss
+        return task_loss
 
 
     def _log_domain_confusion_matrix(

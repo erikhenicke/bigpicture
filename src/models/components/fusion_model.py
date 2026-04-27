@@ -77,7 +77,6 @@ class LateFusionModel(nn.Module):
         outputs = {"task_logits": self.task_classifier(fused)}
         if self.supports_domain_objective():
             outputs["domain_logits"] = self.domain_classifier(lr_branch_out)
-            outputs["domain_logits_detached"] = self.domain_classifier(lr_branch_out.detach())
         return outputs
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
@@ -144,19 +143,23 @@ class D3GModel(LateFusionModel):
             dim=1,
         )
 
-        domain_weights = self.domain_weights(region_ids, lr_features)  # batch_size x num_domain_labels
-
         if self.training:
             task_logits = head_outputs[torch.arange(len(region_ids), device=region_ids.device), region_ids]
+            head_outputs_detached = torch.stack(
+                [head(hr_features.detach()) for head in self.task_classifiers],
+                dim=1,
+            )
+            domain_weights = self.domain_weights(region_ids, lr_features.detach())
             consistency_weights = domain_weights.clone()
             consistency_weights[
                 torch.arange(len(region_ids), device=region_ids.device),
                 region_ids,
             ] = 0.0
             consistency_weights_sum = torch.clamp(consistency_weights.sum(dim=1), min=1e-6)
-            rel_logits = torch.sum(consistency_weights * head_outputs, dim=1) / consistency_weights_sum
+            rel_logits = torch.sum(consistency_weights * head_outputs_detached, dim=1) / consistency_weights_sum
         else:
-            weights_sum = torch.clamp(domain_weights.sum(dim=1), min=1e-6)  
+            domain_weights = self.domain_weights(region_ids, lr_features)
+            weights_sum = torch.clamp(domain_weights.sum(dim=1), min=1e-6)
             rel_logits = torch.sum(domain_weights * head_outputs, dim=1) / weights_sum
             task_logits = rel_logits
 
@@ -166,7 +169,6 @@ class D3GModel(LateFusionModel):
         }
         if self.supports_domain_objective():
             outputs["domain_logits"] = self.domain_classifier(lr_features)
-            outputs["domain_logits_detached"] = self.domain_classifier(lr_features.detach())
         return outputs
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
