@@ -87,7 +87,9 @@ def compute_stats(
                     )
                     pbar.update(1)
                     continue
-
+  
+                # Reshape (C, H, W) -> (H*W, C) for Welford
+                # Welford uses first dimension as batch dimension
                 rgb_stats.add_all(rgb.permute(1, 2, 0).reshape(-1, 3))
                 landsat_stats.add_all(landsat.permute(1, 2, 0).reshape(-1, 6))
 
