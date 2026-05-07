@@ -4,10 +4,11 @@ slurm:
   mem_per_cpu: 8GB
 
 global_overrides:
-  data.frac: 0.1
-  trainer.max_epochs: 5
-  optim: adam_warmup_cosine
+  num_reruns: 1
+  data.frac: 1.0 
   data.preprocessed_dir: FMoW_LandSat_Norm
+  trainer.max_epochs: 10
+  optim: adam_warmup_cosine
 
 experiments:
   # ---------------- GeoPrior: detach_lr_for_task ablation ----------------
@@ -21,8 +22,8 @@ experiments:
       model.extra_ch_init: "he"
 
   # ---------------- D3G: detach_lr/hr_for_consistency ablation -----------
-  d3g_default:
-    model: densenet_d3g
+  # d3g_default:
+  #   model: densenet_d3g
 
   d3g_detach_lr:
     model: densenet_d3g
@@ -30,13 +31,13 @@ experiments:
       model.detach_lr_for_consistency: true
       model.extra_ch_init: "average"
 
-  d3g_detach_hr:
-    model: densenet_d3g
-    overrides:
-      model.detach_hr_for_consistency: true
+  # d3g_detach_hr:
+  #   model: densenet_d3g
+  #   overrides:
+  #     model.detach_hr_for_consistency: true
 
-  d3g_detach_both:
-    model: densenet_d3g
-    overrides:
-      model.detach_lr_for_consistency: true
-      model.detach_hr_for_consistency: true
+  # d3g_detach_both:
+  #   model: densenet_d3g
+  #   overrides:
+  #     model.detach_lr_for_consistency: true
+  #     model.detach_hr_for_consistency: true
