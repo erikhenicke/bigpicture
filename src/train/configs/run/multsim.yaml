@@ -4,8 +4,8 @@ slurm:
   mem_per_cpu: 8GB
 
 global_overrides:
-  data.frac: 0.02 
-  trainer.max_epochs: 3
+  data.frac: 1.0
+  trainer.max_epochs: 50
   optim: adam_warmup_cosine
   data.preprocessed_dir: FMoW_LandSat_Norm
   trainer.label_smoothing: 0.1
