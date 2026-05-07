@@ -4,7 +4,7 @@
 #SBATCH --job-name=copy_fmow_to_gaia4
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --output=log/slurm/copy_fmow_to_gaia4.%j.out
 #SBATCH --error=log/slurm/copy_fmow_to_gaia4.%j.err
 
