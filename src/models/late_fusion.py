@@ -284,6 +284,7 @@ class LateFusionModule(LightningModule):
         preds: torch.Tensor,
         targets: torch.Tensor,
         label: str,
+        feature_label: str,
         region_names: List[str],
     ) -> None:
         logger = self.logger
@@ -295,6 +296,7 @@ class LateFusionModule(LightningModule):
                 y_true=targets.tolist(),
                 preds=preds.tolist(),
                 class_names=region_names,
+                title=f"{feature_label.upper()} Domain Confusion Matrix"
             )},
             commit=False,
         )
@@ -310,7 +312,7 @@ class LateFusionModule(LightningModule):
             preds = torch.cat(self._train_lr_domain_preds)
             targets = torch.cat(self._train_lr_domain_targets)
             self.log("train/train-lr-domain-acc", (preds == targets).float().mean())
-            self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", list(REGIONS.values()))
+            self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", "lr", list(REGIONS.values()))
 
         # HR domain metrics 
         if self._train_hr_domain_preds:
@@ -321,7 +323,7 @@ class LateFusionModule(LightningModule):
             preds = torch.cat(self._train_hr_domain_preds)
             targets = torch.cat(self._train_hr_domain_targets)
             self.log("train/train-hr-domain-acc", (preds == targets).float().mean())
-            self._log_domain_confusion_matrix(preds, targets, "train/hr-domain-confusion-matrix", list(REGIONS.values()))
+            self._log_domain_confusion_matrix(preds, targets, "train/hr-domain-confusion-matrix", "hr", list(REGIONS.values()))
 
 
     def on_validation_epoch_start(self) -> None:
@@ -405,13 +407,13 @@ class LateFusionModule(LightningModule):
                     lr_preds = torch.cat(state["lr_domain_preds"])
                     lr_targets = torch.cat(state["lr_domain_targets"])
                     self._log_domain_confusion_matrix(
-                        lr_preds, lr_targets, f"val/{loader_name}-lr-domain-confusion-matrix", list(REGIONS.values())
+                        lr_preds, lr_targets, f"val/{loader_name}-lr-domain-confusion-matrix", "lr", list(REGIONS.values())
                     )
                 if state["hr_domain_preds"]:
                     hr_preds = torch.cat(state["hr_domain_preds"])
                     hr_targets = torch.cat(state["hr_domain_targets"])
                     self._log_domain_confusion_matrix(
-                        hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", list(REGIONS.values())
+                        hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", "hr", list(REGIONS.values())
                     )
 
         for key, value in all_metrics.items():
@@ -498,13 +500,13 @@ class LateFusionModule(LightningModule):
                 lr_preds = torch.cat(state["lr_domain_preds"])
                 lr_targets = torch.cat(state["lr_domain_targets"])
                 self._log_domain_confusion_matrix(
-                    lr_preds, lr_targets, f"test/{loader_name}-lr-domain-confusion-matrix", region_names
+                    lr_preds, lr_targets, f"test/{loader_name}-lr-domain-confusion-matrix", "lr", region_names
                 )
             if state["hr_domain_preds"]:
                 hr_preds = torch.cat(state["hr_domain_preds"])
                 hr_targets = torch.cat(state["hr_domain_targets"])
                 self._log_domain_confusion_matrix(
-                    hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", region_names
+                    hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", "hr", region_names
                 )
 
 
