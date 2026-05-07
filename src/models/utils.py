@@ -232,7 +232,7 @@ def compute_final_eval_metrics(
     metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
     })
-    if state["lr_domain_preds"]:
+    if state["lr_domain_preds"]:  # Empty, if no LR domain classifier
         metrics.update({
             f"{loader_name}-{k}": v for k, v in compute_final_lr_domain_metrics(state, region_names).items()
         })

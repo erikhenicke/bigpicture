@@ -55,11 +55,13 @@ class LateFusionModule(LightningModule):
 
         self.model = model
 
-        self.domain_loss_coeff = self.model.domain_loss_coeff
 
         self.use_d3g_objective = self.model.supports_d3g_objective()
         if self.use_d3g_objective:
             self.d3g_loss_coeff = self.model.consistency_loss_coeff
+        
+        self.domain_loss_coeff = self.model.domain_loss_coeff
+        self.has_lr_domain_classifier = self.model.supports_lr_domain_classification()
 
         self.task_criterion = nn.CrossEntropyLoss(label_smoothing=self.hparams.label_smoothing)
         self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none", label_smoothing=self.hparams.label_smoothing)
@@ -68,13 +70,14 @@ class LateFusionModule(LightningModule):
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_task_labels)
         self.train_task_loss = MeanMetric()
 
-        # HR domain metrics (always present)
+        # HR domain metrics
         self.train_hr_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
         self.train_hr_domain_loss = MeanMetric()
 
-        # LR domain metrics (always present)
-        self.train_lr_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
-        self.train_lr_domain_loss = MeanMetric()
+        if self.has_lr_domain_classifier:
+            # LR domain metrics
+            self.train_lr_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
+            self.train_lr_domain_loss = MeanMetric()
 
         self.train_consistency_loss = MeanMetric() if self.use_d3g_objective else None
         self.val_acc_best = MaxMetric()
@@ -154,10 +157,11 @@ class LateFusionModule(LightningModule):
         self.train_hr_domain_acc.reset()
         self._train_hr_domain_preds = []
         self._train_hr_domain_targets = []
-        self.train_lr_domain_loss.reset()
-        self.train_lr_domain_acc.reset()
-        self._train_lr_domain_preds = []
-        self._train_lr_domain_targets = []
+        if self.has_lr_domain_classifier:
+            self.train_lr_domain_loss.reset()
+            self.train_lr_domain_acc.reset()
+            self._train_lr_domain_preds = []
+            self._train_lr_domain_targets = []
         if self.use_d3g_objective:
             self.train_consistency_loss.reset()
 
@@ -227,22 +231,27 @@ class LateFusionModule(LightningModule):
 
         # Get optimizers: [task, lr_domain, hr_domain]
         optimizers = self.optimizers()
-        task_opt = optimizers[0] if isinstance(optimizers, list) else optimizers
-        lr_domain_opt = optimizers[1]
-        hr_domain_opt = optimizers[2]
+        task_opt = optimizers[0]
+        if self.has_lr_domain_classifier:
+            lr_domain_opt = optimizers[1]
+            hr_domain_opt = optimizers[2]
+        else:
+            hr_domain_opt = optimizers[1]
 
         task_opt.zero_grad()
-        lr_domain_opt.zero_grad()
+        if self.has_lr_domain_classifier:
+            lr_domain_opt.zero_grad()
         hr_domain_opt.zero_grad()
 
         total_loss = task_loss
 
-        # LR domain loss (coeff controls contribution; 0 means no LR domain training)
-        lr_domain_logits = result["lr_domain_logits"]
-        lr_domain_loss = self.domain_criterion(lr_domain_logits, regions)
-        lr_domain_preds = lr_domain_logits.argmax(dim=1)
-        self.log_lr_domain_metrics(lr_domain_loss, lr_domain_preds, regions)
-        total_loss = total_loss + self.domain_loss_coeff * lr_domain_loss
+        if self.has_lr_domain_classifier:
+            # LR domain loss (coeff controls contribution; 0 means no LR domain training)
+            lr_domain_logits = result["lr_domain_logits"]
+            lr_domain_loss = self.domain_criterion(lr_domain_logits, regions)
+            lr_domain_preds = lr_domain_logits.argmax(dim=1)
+            self.log_lr_domain_metrics(lr_domain_loss, lr_domain_preds, regions)
+            total_loss = total_loss + self.domain_loss_coeff * lr_domain_loss
 
         # HR domain loss (always)
         hr_domain_logits = result["hr_domain_logits"]
@@ -261,7 +270,8 @@ class LateFusionModule(LightningModule):
         self.manual_backward(total_loss)
 
         task_opt.step()
-        lr_domain_opt.step()
+        if self.has_lr_domain_classifier:
+            lr_domain_opt.step()
         hr_domain_opt.step()
 
         self.log_task_metrics(task_loss, task_preds, y)
@@ -302,7 +312,7 @@ class LateFusionModule(LightningModule):
             self.log("train/train-lr-domain-acc", (preds == targets).float().mean())
             self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", list(REGIONS.values()))
 
-        # HR domain metrics (always)
+        # HR domain metrics 
         if self._train_hr_domain_preds:
             per_class = self.train_hr_domain_acc.compute()
             for rid, acc in enumerate(per_class):
@@ -369,8 +379,10 @@ class LateFusionModule(LightningModule):
             metadata,
             self.hparams.domain_index,
         )
-        lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
-        update_lr_domain_metrics(self._val_state[dataloader_idx], lr_domain_preds, regions)
+
+        if self.has_lr_domain_classifier:
+            lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
+            update_lr_domain_metrics(self._val_state[dataloader_idx], lr_domain_preds, regions)
         hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
         update_hr_domain_metrics(self._val_state[dataloader_idx], hr_domain_preds, regions)
 
@@ -461,8 +473,10 @@ class LateFusionModule(LightningModule):
             metadata,
             self.hparams.domain_index,
         )
-        lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
-        update_lr_domain_metrics(self._test_state[dataloader_idx], lr_domain_preds, regions)
+
+        if self.has_lr_domain_classifier:
+            lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
+            update_lr_domain_metrics(self._test_state[dataloader_idx], lr_domain_preds, regions)
         hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
         update_hr_domain_metrics(self._test_state[dataloader_idx], hr_domain_preds, regions)
 
@@ -538,23 +552,24 @@ class LateFusionModule(LightningModule):
         if self.domain_optimizer_factory is None:
             raise ValueError("No domain optimizer factory was provided.")
 
-        # LR domain optimizer
-        lr_domain_params = self.model.lr_domain_parameters()
-        lr_domain_optimizer = self.domain_optimizer_factory(params=lr_domain_params)
+        if self.has_lr_domain_classifier:
+            # LR domain optimizer
+            lr_domain_params = self.model.lr_domain_parameters()
+            lr_domain_optimizer = self.domain_optimizer_factory(params=lr_domain_params)
 
-        self._lr_domain_scheduler = (
-            self.domain_scheduler_factory(optimizer=lr_domain_optimizer)
-            if self.domain_scheduler_factory is not None
-            else None
-        )
+            self._lr_domain_scheduler = (
+                self.domain_scheduler_factory(optimizer=lr_domain_optimizer)
+                if self.domain_scheduler_factory is not None
+                else None
+            )
 
-        lr_domain_config = {"optimizer": lr_domain_optimizer}
-        if self._lr_domain_scheduler is not None:
-            sched_config = {"scheduler": self._lr_domain_scheduler, "interval": "epoch", "frequency": 1}
-            if isinstance(self._lr_domain_scheduler, ReduceLROnPlateau):
-                sched_config["monitor"] = self.hparams.key_metric
-            lr_domain_config["lr_scheduler"] = sched_config
-        configs.append(lr_domain_config)
+            lr_domain_config = {"optimizer": lr_domain_optimizer}
+            if self._lr_domain_scheduler is not None:
+                sched_config = {"scheduler": self._lr_domain_scheduler, "interval": "epoch", "frequency": 1}
+                if isinstance(self._lr_domain_scheduler, ReduceLROnPlateau):
+                    sched_config["monitor"] = self.hparams.key_metric
+                lr_domain_config["lr_scheduler"] = sched_config
+            configs.append(lr_domain_config)
 
         # HR domain optimizer
         hr_domain_params = self.model.hr_domain_parameters()

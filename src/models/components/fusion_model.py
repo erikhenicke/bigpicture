@@ -15,18 +15,19 @@ class SingleBranchModel(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
-        self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
         self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
         self.domain_loss_coeff = 0.0
 
     def supports_d3g_objective(self) -> bool:
         return False
 
+    def supports_lr_domain_classification(self) -> bool:
+        return False
+
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         features = self.encoder(x["rgb"])
         return {
             "task_logits": self.task_classifier(features),
-            "lr_domain_logits": self.lr_domain_classifier(features),
             "hr_domain_logits": self.hr_domain_classifier(features.detach()),
         }
 
@@ -34,7 +35,7 @@ class SingleBranchModel(nn.Module):
         return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
-        return list(self.lr_domain_classifier.parameters())
+        return []
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return list(self.hr_domain_classifier.parameters())
@@ -64,6 +65,9 @@ class LateFusionModel(nn.Module):
 
     def supports_d3g_objective(self) -> bool:
         return isinstance(self, D3GModel)
+
+    def supports_lr_domain_classification(self) -> bool:
+        return True
 
     def forward(
         self,
