@@ -93,6 +93,8 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 learnable_relation_coeff=cfg.model.learnable_relation_coeff,
                 consistency_loss_coeff=cfg.model.d3g_loss_coeff,
                 pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
+                detach_lr_for_consistency=cfg.model.detach_lr_for_consistency,
+                detach_hr_for_consistency=cfg.model.detach_hr_for_consistency,
             )
         else:
             fusion = instantiate(cfg.model.fusion)
@@ -104,6 +106,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 num_domain_labels=cfg.num_domain_labels,
                 enable_domain_head=cfg.model.enable_domain_head,
                 domain_loss_coeff=cfg.model.domain_loss_coeff,
+                detach_lr_for_task=cfg.model.detach_lr_for_task,
             )
 
     optimizer_factory = instantiate(cfg.optim.optimizer)
