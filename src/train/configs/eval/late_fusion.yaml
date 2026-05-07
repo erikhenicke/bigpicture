@@ -3,15 +3,12 @@ metric_directions:
 
 summary_metrics:
   - test/test-od-worst-group-task-acc
-  - test/test-od-lr-domain-acc
-  - test/test-od-hr-domain-acc
+  - test/test-od-domain-acc
 
 primary_metrics:
   - test/test-od-task-acc
   - test/test-id-task-acc
   - test/test-od-worst-group-task-acc
-  - test/test-od-lr-domain-acc
-  - test/test-od-hr-domain-acc
 
 groups:
   - name: Backbone
@@ -63,10 +60,6 @@ groups:
       - densenet_d3g
       - densenet_d3g_no_domain
       - densenet_d3g_no_domain_pred
-      # - densenet_d3g_rel_0_2_d3g_0_2
-      # - densenet_d3g_rel_0_2_d3g_0_8
-      # - densenet_d3g_rel_0_5_d3g_0_2
-      # - densenet_d3g_rel_0_5_d3g_0_8
 
   - name: Normalization Ablation
     runs:

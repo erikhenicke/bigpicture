@@ -7,6 +7,7 @@ global_overrides:
   data.frac: 1.0
   trainer.max_epochs: 50
   optim: adam_warmup_cosine
+  model.landsat_channel_init: average  # Maybe bad, because baseline don't have this parameter
 
 experiments:
   # ---------------- Baselines (HR-only, 3 backbones) ----------------
@@ -21,8 +22,6 @@ experiments:
     
   densenet_lr_baseline:
     model: densenet_lr_baseline
-    overrides:
-      model.landsat_channel_init: average
 
   # ---------------- Label-smoothing ablation (DenseNet baseline) ----
   densenet_baseline_ls_0_1:
@@ -38,68 +37,52 @@ experiments:
   # ---------------- Fusion variants (DenseNet dual-branch) ----------
   densenet_concat:
     model: densenet_concat
-    overrides:
-      model.landsat_channel_init: average
 
   densenet_film:
     model: densenet_film
-    overrides:
-      model.landsat_channel_init: average
 
   densenet_d3g:
     model: densenet_d3g
-    overrides:
-      model.landsat_channel_init: average
 
   densenet_geoprior:
     model: densenet_geoprior
-    overrides:
-      model.landsat_channel_init: average
 
   densenet_multsim:
     model: densenet_multsim
-    overrides:
-      model.landsat_channel_init: average
     
   # ---------------- Concat: domain-classification ablation ----------
   densenet_concat_no_domain:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.0
 
   densenet_concat_dloss_0_1_lrf_0_1:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.0909
       optim.domain_optimizer_lr_factor: 0.1
 
   densenet_concat_dloss_0_1_lrf_1_0:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.0909
       optim.domain_optimizer_lr_factor: 1.0
 
   densenet_concat_dloss_0_5_lrf_0_1:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.3333
       optim.domain_optimizer_lr_factor: 0.1
 
   densenet_concat_dloss_0_5_lrf_1_0:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.3333
       optim.domain_optimizer_lr_factor: 1.0
 
   densenet_concat_dloss_1_0_lrf_1_0:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.5
       optim.domain_optimizer_lr_factor: 1.0
 
@@ -107,20 +90,17 @@ experiments:
   densenet_concat_dim_256:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.fusion.out_dim: 256
 
   densenet_concat_dim_512:
     model: densenet_concat
     overrides:
-      model.landsat_channel_init: average
       model.fusion.out_dim: 512
 
   # ---------------- D3G: hyperparameter study ----------------------
   densenet_d3g_no_domain:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.lr_domain_loss_coeff: 0.0
       model.consistency_loss_coeff: 0.3333
       model.pred_domain_for_d3g: false
@@ -128,13 +108,11 @@ experiments:
   densenet_d3g_no_domain_pred:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.pred_domain_for_d3g: false
 
   densenet_d3g_rel_0_2_d3g_0_2:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.learnable_relation_coeff: 0.2
       model.lr_domain_loss_coeff: 0.1429
       model.consistency_loss_coeff: 0.1429
@@ -143,7 +121,6 @@ experiments:
   densenet_d3g_rel_0_2_d3g_0_8:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.learnable_relation_coeff: 0.2
       model.lr_domain_loss_coeff: 0.1
       model.consistency_loss_coeff: 0.4
@@ -152,7 +129,6 @@ experiments:
   densenet_d3g_rel_0_5_d3g_0_2:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.learnable_relation_coeff: 0.5
       model.lr_domain_loss_coeff: 0.1429
       model.consistency_loss_coeff: 0.1429
@@ -161,7 +137,6 @@ experiments:
   densenet_d3g_rel_0_5_d3g_0_8:
     model: densenet_d3g
     overrides:
-      model.landsat_channel_init: average
       model.learnable_relation_coeff: 0.5
       model.lr_domain_loss_coeff: 0.1
       model.consistency_loss_coeff: 0.4
