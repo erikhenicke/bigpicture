@@ -1,0 +1,33 @@
+metric_directions:
+  test/test-od-task-ece: min
+
+summary_metrics:
+  - test/test-od-worst-group-task-acc
+  - test/test-od-lr-domain-acc
+  - test/test-od-hr-domain-acc
+
+primary_metrics:
+  - test/test-od-task-acc
+  - test/test-id-task-acc
+  - test/test-od-worst-group-task-acc
+
+groups:
+  - name: Fusion Comparison
+    runs:
+      - concat
+      - film
+      - geoprior
+      - d3g
+      - multsim
+    additional_metrics:
+      - test/test-od-task-acc-lr-constant
+      - test/test-od-task-acc-hr-constant
+
+  - name: MultSim Ablation
+    runs:
+      - multsim
+      - multsim_detach
+      - multsim_no_relu
+    additional_metrics:
+      - test/test-od-task-acc-lr-constant
+      - test/test-od-task-acc-hr-constant

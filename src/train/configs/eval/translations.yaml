@@ -46,6 +46,10 @@ params:
   model.landsat_channel_init:
     plain: "Ch-Init"
     latex: "Ch-Init"
+  trainer.branch_ablation:
+    hidden: true
+  trainer.branch_ablation_value:
+    hidden: true
   data.preprocessed_dir:
     plain: "DS-Norm"
     latex: "DS-Norm"

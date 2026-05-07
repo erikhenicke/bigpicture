@@ -1,0 +1,50 @@
+slurm:
+  partition: robolab
+  cpus_per_task: 4
+  mem_per_cpu: 8GB
+
+global_overrides:
+  data.frac: 0.02 
+  trainer.max_epochs: 3
+  optim: adam_warmup_cosine
+  data.preprocessed_dir: FMoW_LandSat_Norm
+  trainer.label_smoothing: 0.1
+
+experiments:
+  # ---------------- Fusion variants ------------------------------------
+  concat:
+    model: densenet_concat
+
+  film:
+    model: densenet_film
+
+  geoprior:
+    model: densenet_geoprior
+    overrides:
+      trainer.branch_ablation: true
+      trainer.branch_ablation_value: 0.0
+
+  d3g:
+    model: densenet_d3g
+
+  multsim:
+    model: densenet_multsim
+    overrides:
+      trainer.branch_ablation: true
+      trainer.branch_ablation_value: 1.0
+
+  # ---------------- MultSim: detach ablation ---------------------------
+  multsim_detach:
+    model: densenet_multsim
+    overrides:
+      model.detach_lr_for_task: true
+      trainer.branch_ablation: true
+      trainer.branch_ablation_value: 1.0
+
+  # ---------------- MultSim: ReLU ablation -----------------------------
+  multsim_no_relu:
+    model: densenet_multsim
+    overrides:
+      model.fusion.pre_fusion_relu: false
+      trainer.branch_ablation: true
+      trainer.branch_ablation_value: 1.0
