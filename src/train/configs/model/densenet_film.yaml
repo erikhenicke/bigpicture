@@ -25,6 +25,7 @@ model:
     hr_dim: 1024
     lr_dim: 1024
     out_dim: 1024
+    pre_fusion_relu: false
 
   model:
     _target_: models.components.fusion_model.LateFusionModel

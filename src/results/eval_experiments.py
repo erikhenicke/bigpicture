@@ -98,7 +98,7 @@ def format_experiment_name(
         print(param_key, value)
         param_trans = translations["params"].get(param_key)
         label = param_trans[symbol_key] if param_trans else param_key.split(".")[-1]
-        no_value = param_trans.get("no_value", False)
+        no_value = param_trans.get("no_value", False) if param_trans else False
         if isinstance(value, bool):
             if not value:
                 parts.append(f"no {label}")
