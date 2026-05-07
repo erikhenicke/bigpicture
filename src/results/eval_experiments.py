@@ -69,7 +69,7 @@ def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float
 
 def format_cell(values: list[float], format_percent: bool, latex: bool = False) -> str:
     if not values:
-        return ""
+        return "—"
     mean = np.mean(values)
     std = np.std(values)
     sep = r"$\pm$" if latex else "±"
@@ -128,7 +128,7 @@ def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: b
 
     if "region" in metric:
         metric = re.sub(r"-region(-.*?)", r"\1 ", metric)
-    metric = metric.replace("-", " ").title().replace("Od", "OD").replace("Id", "ID")
+    metric = metric.replace("-", " ").title().replace("Od", "OD").replace("Id", "ID").replace("Lr", "LR").replace("Hr", "HR")
 
     return metric
 

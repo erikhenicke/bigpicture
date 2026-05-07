@@ -18,6 +18,8 @@ def make_eval_state() -> Dict[str, Any]:
         "region_total": defaultdict(int),
         "task_loss_sum": 0.0,
         "task_correct": 0,
+        "task_lr_const_correct": 0, 
+        "task_hr_const_correct": 0,
         "task_entropy_correct": 0.0,
         "task_entropy_incorrect": 0.0,
         "task_region_correct": defaultdict(int),

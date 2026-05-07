@@ -3,7 +3,7 @@ model:
   landsat_in_channels: 6
   hr_image_net: true
   lr_image_net: true
-  extra_ch_init: zero
+  landsat_channel_init: zero
 
   hr_encoder:
     _target_: models.components.branches.DenseNetBranch
@@ -14,7 +14,7 @@ model:
     _target_: models.components.branches.DenseNetBranch
     in_channels: ${model.landsat_in_channels}
     image_net: ${model.lr_image_net}
-    extra_ch_init: ${model.extra_ch_init}
+    landsat_channel_init: ${model.landsat_channel_init}
 
   branches:
     _target_: models.components.branches.DualBranch

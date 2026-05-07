@@ -23,6 +23,9 @@ class SingleBranchModel(nn.Module):
     def supports_lr_domain_classification(self) -> bool:
         return False
 
+    def supports_hr_domain_classification(self) -> bool:
+        return True
+
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         features = self.encoder(x["rgb"])
         return {
@@ -38,6 +41,50 @@ class SingleBranchModel(nn.Module):
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return list(self.hr_domain_classifier.parameters())
+
+
+class SingleBranchLRModel(nn.Module):
+    """LR-only model: single LR encoder + task classifier + LR domain head."""
+
+    def __init__(
+        self,
+        encoder: Branch,
+        num_task_labels: int,
+        num_domain_labels: int = 6,
+        lr_domain_loss_coeff: float = 0.1667,
+        landsat_channels: int = 6,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.landsat_channels = landsat_channels
+        self.lr_domain_loss_coeff = lr_domain_loss_coeff
+        self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
+        self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
+
+    def supports_d3g_objective(self) -> bool:
+        return False
+
+    def supports_lr_domain_classification(self) -> bool:
+        return True
+
+    def supports_hr_domain_classification(self) -> bool:
+        return False
+
+    def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        features = self.encoder(x["landsat"][:, :self.landsat_channels, :, :])
+        return {
+            "task_logits": self.task_classifier(features),
+            "lr_domain_logits": self.lr_domain_classifier(features),
+        }
+
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
 
 
 class LateFusionModel(nn.Module):
@@ -68,6 +115,9 @@ class LateFusionModel(nn.Module):
     def supports_lr_domain_classification(self) -> bool:
         return True
 
+    def supports_hr_domain_classification(self) -> bool:
+        return True
+
     def forward(
         self,
         x: Dict[str, torch.Tensor],
@@ -87,6 +137,25 @@ class LateFusionModel(nn.Module):
             "hr_domain_logits": self.hr_domain_classifier(hr_branch_out.detach()),
         }
         return outputs
+
+    def supports_branch_ablation(self) -> bool:
+        return self.fusion is not None and self.task_classifier is not None
+
+    def forward_branch_ablation(
+        self, x: Dict[str, torch.Tensor], constant_value: float = 1.0,
+    ) -> Dict[str, torch.Tensor]:
+        hr_features, lr_features = self.branches(x)
+
+        lr_const = torch.full_like(lr_features, constant_value)
+        lr_const_logits = self.task_classifier(self.fusion(hr_features, lr_const))
+
+        hr_const = torch.full_like(hr_features, constant_value)
+        hr_const_logits = self.task_classifier(self.fusion(hr_const, lr_features))
+
+        return {
+            "lr_constant_logits": lr_const_logits,
+            "hr_constant_logits": hr_const_logits,
+        }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
         parameters = list(self.branches.parameters())

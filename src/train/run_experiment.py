@@ -78,6 +78,16 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             num_task_labels=cfg.num_task_labels,
             num_domain_labels=cfg.num_domain_labels,
         )
+    elif model_target.endswith("SingleBranchLRModel"):
+        lr_encoder = instantiate(cfg.model.lr_encoder)
+        model = instantiate(
+            cfg.model.model,
+            encoder=lr_encoder,
+            num_task_labels=cfg.num_task_labels,
+            num_domain_labels=cfg.num_domain_labels,
+            lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
+            landsat_channels=cfg.model.landsat_in_channels,
+        )
     else:
         hr_encoder = instantiate(cfg.model.hr_encoder)
         lr_encoder = instantiate(cfg.model.lr_encoder)
@@ -134,6 +144,8 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         key_metric=cfg.trainer.monitor_metric,
         compile=cfg.trainer.compile,
         label_smoothing=cfg.trainer.label_smoothing,
+        branch_ablation=cfg.trainer.branch_ablation,
+        branch_ablation_value=cfg.trainer.branch_ablation_value,
     )
 
 

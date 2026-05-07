@@ -4,6 +4,7 @@ models:
   densenet_film: "FiLM"
   densenet_d3g: "D3G"
   densenet_geoprior: "GeoPrior"
+  densenet_multsim: "MultSim"
   efficientformer_baseline: "EfficientFormer"
   efficientnet_baseline: "EfficientNet"
 

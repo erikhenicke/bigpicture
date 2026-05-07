@@ -10,7 +10,7 @@ from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 import wandb
 
-from models.components.fusion_model import SingleBranchModel, LateFusionModel
+from models.components.fusion_model import SingleBranchModel, SingleBranchLRModel, LateFusionModel
 from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_lr_domain_metrics, update_hr_domain_metrics, compute_final_eval_metrics, REGIONS
 
 
@@ -19,7 +19,7 @@ class LateFusionModule(LightningModule):
 
     def __init__(
         self,
-        model: LateFusionModel | SingleBranchModel,
+        model: LateFusionModel | SingleBranchModel | SingleBranchLRModel,
         optimizer: Callable[..., torch.optim.Optimizer],
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,
@@ -33,6 +33,8 @@ class LateFusionModule(LightningModule):
         key_metric: str = "val/val-od-worst-group-task-acc",
         compile: bool = False,
         label_smoothing: float = 0.0,
+        branch_ablation: bool = False,
+        branch_ablation_value: float = 1.0,
     ) -> None:
         """Initialize a `LateFusionModule`.
 
@@ -55,9 +57,11 @@ class LateFusionModule(LightningModule):
 
         self.model = model
 
-
         self.use_d3g_objective = self.model.supports_d3g_objective()
         self.has_lr_domain_classifier = self.model.supports_lr_domain_classification()
+        self.has_hr_domain_classifier = self.model.supports_hr_domain_classification()
+
+        self.do_branch_ablation = branch_ablation and self.model.supports_branch_ablation()
 
         non_task_coeff = 0.0
         if self.has_lr_domain_classifier:
@@ -79,9 +83,9 @@ class LateFusionModule(LightningModule):
         self.train_task_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_task_labels)
         self.train_task_loss = MeanMetric()
 
-        # HR domain metrics
-        self.train_hr_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
-        self.train_hr_domain_loss = MeanMetric()
+        if self.has_hr_domain_classifier:
+            self.train_hr_domain_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_domain_labels, average="none")
+            self.train_hr_domain_loss = MeanMetric()
 
         if self.has_lr_domain_classifier:
             # LR domain metrics
@@ -124,8 +128,9 @@ class LateFusionModule(LightningModule):
         self._hr_domain_scheduler = None
         self._train_lr_domain_preds: List[torch.Tensor] = []
         self._train_lr_domain_targets: List[torch.Tensor] = []
-        self._train_hr_domain_preds: List[torch.Tensor] = []
-        self._train_hr_domain_targets: List[torch.Tensor] = []
+        if self.has_hr_domain_classifier:
+            self._train_hr_domain_preds: List[torch.Tensor] = []
+            self._train_hr_domain_targets: List[torch.Tensor] = []
 
         self.automatic_optimization = False
         self._force_train_mode()
@@ -134,6 +139,16 @@ class LateFusionModule(LightningModule):
         """Force the full module tree into train mode."""
         self.train()
         self.model.train()
+
+    def _branch_ablation_step(
+        self,
+        x: Dict[str, torch.Tensor],
+        y: torch.Tensor,
+        state: Dict[str, Any],
+    ) -> None:
+        result = self.model.forward_branch_ablation(x, self.hparams.branch_ablation_value)
+        state["task_lr_const_correct"] += (result["lr_constant_logits"].argmax(dim=1) == y).sum().item()
+        state["task_hr_const_correct"] += (result["hr_constant_logits"].argmax(dim=1) == y).sum().item()
 
 
     def forward(
@@ -162,10 +177,11 @@ class LateFusionModule(LightningModule):
         self.val_acc_best.reset()
         self.train_task_loss.reset()
         self.train_task_acc.reset()
-        self.train_hr_domain_loss.reset()
-        self.train_hr_domain_acc.reset()
-        self._train_hr_domain_preds = []
-        self._train_hr_domain_targets = []
+        if self.has_hr_domain_classifier:
+            self.train_hr_domain_loss.reset()
+            self.train_hr_domain_acc.reset()
+            self._train_hr_domain_preds = []
+            self._train_hr_domain_targets = []
         if self.has_lr_domain_classifier:
             self.train_lr_domain_loss.reset()
             self.train_lr_domain_acc.reset()
@@ -238,19 +254,23 @@ class LateFusionModule(LightningModule):
         task_loss = self.task_criterion(task_logits, y)
         task_preds = torch.argmax(task_logits, dim=1)
 
-        # Get optimizers: [task, lr_domain, hr_domain]
         optimizers = self.optimizers()
-        task_opt = optimizers[0]
+        opt_idx = 0
+        task_opt = optimizers[opt_idx]
+        opt_idx += 1
+        lr_domain_opt = None
         if self.has_lr_domain_classifier:
-            lr_domain_opt = optimizers[1]
-            hr_domain_opt = optimizers[2]
-        else:
-            hr_domain_opt = optimizers[1]
+            lr_domain_opt = optimizers[opt_idx]
+            opt_idx += 1
+        hr_domain_opt = None
+        if self.has_hr_domain_classifier:
+            hr_domain_opt = optimizers[opt_idx]
 
         task_opt.zero_grad()
-        if self.has_lr_domain_classifier:
+        if lr_domain_opt is not None:
             lr_domain_opt.zero_grad()
-        hr_domain_opt.zero_grad()
+        if hr_domain_opt is not None:
+            hr_domain_opt.zero_grad()
 
         backbone_loss = self.task_loss_coeff * task_loss
 
@@ -269,16 +289,18 @@ class LateFusionModule(LightningModule):
 
         self.manual_backward(backbone_loss)
 
-        hr_domain_logits = result["hr_domain_logits"]
-        hr_domain_loss = self.domain_criterion(hr_domain_logits, regions)
-        hr_domain_preds = hr_domain_logits.argmax(dim=1)
-        self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, regions)
-        self.manual_backward(hr_domain_loss)
+        if self.has_hr_domain_classifier:
+            hr_domain_logits = result["hr_domain_logits"]
+            hr_domain_loss = self.domain_criterion(hr_domain_logits, regions)
+            hr_domain_preds = hr_domain_logits.argmax(dim=1)
+            self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, regions)
+            self.manual_backward(hr_domain_loss)
 
         task_opt.step()
-        if self.has_lr_domain_classifier:
+        if lr_domain_opt is not None:
             lr_domain_opt.step()
-        hr_domain_opt.step()
+        if hr_domain_opt is not None:
+            hr_domain_opt.step()
 
         self.log_task_metrics(task_loss, task_preds, y)
 
@@ -321,8 +343,8 @@ class LateFusionModule(LightningModule):
             self.log("train/train-lr-domain-acc", (preds == targets).float().mean())
             self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", "lr", list(REGIONS.values()), "Train")
 
-        # HR domain metrics 
-        if self._train_hr_domain_preds:
+        # HR domain metrics
+        if self.has_hr_domain_classifier and self._train_hr_domain_preds:
             per_class = self.train_hr_domain_acc.compute()
             for rid, acc in enumerate(per_class):
                 name = REGIONS[rid].lower()
@@ -392,8 +414,12 @@ class LateFusionModule(LightningModule):
         if self.has_lr_domain_classifier:
             lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
             update_lr_domain_metrics(self._val_state[dataloader_idx], lr_domain_preds, regions)
-        hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
-        update_hr_domain_metrics(self._val_state[dataloader_idx], hr_domain_preds, regions)
+        if self.has_hr_domain_classifier:
+            hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
+            update_hr_domain_metrics(self._val_state[dataloader_idx], hr_domain_preds, regions)
+
+        if self.do_branch_ablation:
+            self._branch_ablation_step(x, y, self._val_state[dataloader_idx])
 
 
     def on_validation_epoch_end(self) -> None:
@@ -422,9 +448,15 @@ class LateFusionModule(LightningModule):
                     self._log_domain_confusion_matrix(
                         hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", "hr", list(REGIONS.values()), loader_name,
                     )
+                if self.do_branch_ablation:
+                    total = state["total"]
+                    if total > 0:
+                        all_metrics[f"val/{loader_name}-task-acc-lr-constant"] = state["task_lr_const_correct"] / total
+                        all_metrics[f"val/{loader_name}-task-acc-hr-constant"] = state["task_hr_const_correct"] / total
 
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
 
 
     def on_test_epoch_start(self) -> None:
@@ -486,12 +518,17 @@ class LateFusionModule(LightningModule):
         if self.has_lr_domain_classifier:
             lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
             update_lr_domain_metrics(self._test_state[dataloader_idx], lr_domain_preds, regions)
-        hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
-        update_hr_domain_metrics(self._test_state[dataloader_idx], hr_domain_preds, regions)
+        if self.has_hr_domain_classifier:
+            hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
+            update_hr_domain_metrics(self._test_state[dataloader_idx], hr_domain_preds, regions)
+
+        if self.do_branch_ablation:
+            self._branch_ablation_step(x, y, self._test_state[dataloader_idx])
 
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
+        all_metrics: Dict[str, float] = {}
         for idx, state in self._test_state.items():
             loader_name = self.test_loader_names[idx]
             region_names = self._test_region_names.get(idx, [])
@@ -501,8 +538,7 @@ class LateFusionModule(LightningModule):
                 region_names,
                 self.test_ece_metrics[idx],
             )
-            for key, value in metrics.items():
-                self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            all_metrics.update({f"test/{k}": v for k, v in metrics.items()})
             if state["lr_domain_preds"]:
                 lr_preds = torch.cat(state["lr_domain_preds"])
                 lr_targets = torch.cat(state["lr_domain_targets"])
@@ -515,6 +551,14 @@ class LateFusionModule(LightningModule):
                 self._log_domain_confusion_matrix(
                     hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", "hr", region_names, loader_name,
                 )
+            if self.do_branch_ablation:
+                total = state["total"]
+                if total > 0:
+                    all_metrics[f"test/{loader_name}-task-acc-lr-constant"] = state["task_lr_const_correct"] / total
+                    all_metrics[f"test/{loader_name}-task-acc-hr-constant"] = state["task_hr_const_correct"] / total
+
+        for key, value in all_metrics.items():
+            self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
 
 
     def setup(self, stage: str) -> None:
@@ -558,11 +602,10 @@ class LateFusionModule(LightningModule):
         self._lr_domain_scheduler = None
         self._hr_domain_scheduler = None
 
-        if self.domain_optimizer_factory is None:
+        if (self.has_lr_domain_classifier or self.has_hr_domain_classifier) and self.domain_optimizer_factory is None:
             raise ValueError("No domain optimizer factory was provided.")
 
         if self.has_lr_domain_classifier:
-            # LR domain optimizer
             lr_domain_params = self.model.lr_domain_parameters()
             lr_domain_optimizer = self.domain_optimizer_factory(params=lr_domain_params)
 
@@ -580,23 +623,23 @@ class LateFusionModule(LightningModule):
                 lr_domain_config["lr_scheduler"] = sched_config
             configs.append(lr_domain_config)
 
-        # HR domain optimizer
-        hr_domain_params = self.model.hr_domain_parameters()
-        hr_domain_optimizer = self.domain_optimizer_factory(params=hr_domain_params)
+        if self.has_hr_domain_classifier:
+            hr_domain_params = self.model.hr_domain_parameters()
+            hr_domain_optimizer = self.domain_optimizer_factory(params=hr_domain_params)
 
-        self._hr_domain_scheduler = (
-            self.domain_scheduler_factory(optimizer=hr_domain_optimizer)
-            if self.domain_scheduler_factory is not None
-            else None
-        )
+            self._hr_domain_scheduler = (
+                self.domain_scheduler_factory(optimizer=hr_domain_optimizer)
+                if self.domain_scheduler_factory is not None
+                else None
+            )
 
-        hr_domain_config = {"optimizer": hr_domain_optimizer}
-        if self._hr_domain_scheduler is not None:
-            sched_config = {"scheduler": self._hr_domain_scheduler, "interval": "epoch", "frequency": 1}
-            if isinstance(self._hr_domain_scheduler, ReduceLROnPlateau):
-                sched_config["monitor"] = self.hparams.key_metric
-            hr_domain_config["lr_scheduler"] = sched_config
-        configs.append(hr_domain_config)
+            hr_domain_config = {"optimizer": hr_domain_optimizer}
+            if self._hr_domain_scheduler is not None:
+                sched_config = {"scheduler": self._hr_domain_scheduler, "interval": "epoch", "frequency": 1}
+                if isinstance(self._hr_domain_scheduler, ReduceLROnPlateau):
+                    sched_config["monitor"] = self.hparams.key_metric
+                hr_domain_config["lr_scheduler"] = sched_config
+            configs.append(hr_domain_config)
 
         return configs
 
