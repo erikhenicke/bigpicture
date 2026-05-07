@@ -27,7 +27,6 @@ model:
   model:
     _target_: models.components.fusion_model.LateFusionModel
 
-  enable_domain_head: true
   domain_loss_coeff: 0.2
   domain_optimizer_lr_factor: 0.1
 

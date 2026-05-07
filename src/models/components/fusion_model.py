@@ -9,30 +9,35 @@ from models.components.domain_relations import D3GRelation
 
 
 class SingleBranchModel(nn.Module):
-    """HR-only baseline: single encoder + task classifier, no fusion, no domain head."""
+    """HR-only baseline: single encoder + task classifier, no fusion."""
 
     def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
         super().__init__()
         self.encoder = encoder
         self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
+        self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
+        self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
         self.domain_loss_coeff = 0.0
-        self.enable_domain_head = False
-        self.domain_classifier = None
-
-    def supports_domain_objective(self) -> bool:
-        return False
 
     def supports_d3g_objective(self) -> bool:
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
-        return {"task_logits": self.task_classifier(self.encoder(x["rgb"]))}
+        features = self.encoder(x["rgb"])
+        return {
+            "task_logits": self.task_classifier(features),
+            "lr_domain_logits": self.lr_domain_classifier(features),
+            "hr_domain_logits": self.hr_domain_classifier(features.detach()),
+        }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
         return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
 
-    def domain_parameters(self) -> List[torch.nn.Parameter]:
-        return []
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.hr_domain_classifier.parameters())
 
 
 class LateFusionModel(nn.Module):
@@ -42,7 +47,6 @@ class LateFusionModel(nn.Module):
         fusion: Optional[Fusion],
         num_task_labels: int,
         num_domain_labels: int,
-        enable_domain_head: bool = True,
         domain_loss_coeff: float = 0.5,
         detach_lr_for_task: bool = False,
     ):
@@ -55,13 +59,8 @@ class LateFusionModel(nn.Module):
         self.task_classifier: Optional[nn.Linear] = None
         if self.fusion is not None:
             self.task_classifier = nn.Linear(self.fusion.out_dim, num_task_labels)
-        self.enable_domain_head = enable_domain_head
-        self.domain_classifier: Optional[nn.Linear] = None
-        if self.enable_domain_head:
-            self.domain_classifier = nn.Linear(branches.lr_encoder.out_dim, num_domain_labels)
-
-    def supports_domain_objective(self) -> bool:
-        return self.enable_domain_head and self.domain_classifier is not None
+        self.lr_domain_classifier = nn.Linear(branches.lr_encoder.out_dim, num_domain_labels)
+        self.hr_domain_classifier = nn.Linear(branches.hr_encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
         return isinstance(self, D3GModel)
@@ -75,12 +74,15 @@ class LateFusionModel(nn.Module):
             raise RuntimeError("LateFusionModel requires a fusion module and task classifier for forward().")
 
         hr_branch_out, lr_branch_out = self.branches(x)
+        lr_for_domain = lr_branch_out  # save before potential detach
         if self.detach_lr_for_task:
             lr_branch_out = lr_branch_out.detach()
         fused = self.fusion(hr_branch_out, lr_branch_out)
-        outputs = {"task_logits": self.task_classifier(fused)}
-        if self.supports_domain_objective():
-            outputs["domain_logits"] = self.domain_classifier(lr_branch_out)
+        outputs = {
+            "task_logits": self.task_classifier(fused),
+            "lr_domain_logits": self.lr_domain_classifier(lr_for_domain),
+            "hr_domain_logits": self.hr_domain_classifier(hr_branch_out.detach()),
+        }
         return outputs
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
@@ -91,10 +93,11 @@ class LateFusionModel(nn.Module):
             parameters += list(self.task_classifier.parameters())
         return parameters
 
-    def domain_parameters(self) -> List[torch.nn.Parameter]:
-        if self.domain_classifier is None:
-            return []
-        return list(self.domain_classifier.parameters())
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.hr_domain_classifier.parameters())
 
 
 class D3GModel(LateFusionModel):
@@ -103,7 +106,6 @@ class D3GModel(LateFusionModel):
         branches: DualBranch,
         num_task_labels: int,
         num_domain_labels: int,
-        enable_domain_head: bool = True,
         domain_loss_coeff: float = 0.5,
         learnable_relation_coeff: float = 0.8,
         consistency_loss_coeff: float = 0.5,
@@ -116,7 +118,6 @@ class D3GModel(LateFusionModel):
             fusion=None,
             num_task_labels=num_task_labels,
             num_domain_labels=num_domain_labels,
-            enable_domain_head=enable_domain_head,
             domain_loss_coeff=domain_loss_coeff,
         )
         self.detach_lr_for_consistency = detach_lr_for_consistency
@@ -141,10 +142,7 @@ class D3GModel(LateFusionModel):
                 if region_ids is None:
                     raise ValueError("D3GModel requires region_ids for inference when pred_domain_for_d3g is False.")
             else:
-                if not self.supports_domain_objective():
-                    raise ValueError("D3GModel requires a domain head when pred_domain_for_d3g is True.")
-                region_ids = self.domain_classifier(lr_features).argmax(dim=1)
-                
+                region_ids = self.lr_domain_classifier(lr_features).argmax(dim=1)
 
         head_outputs = torch.stack(
             [head(hr_features) for head in self.task_classifiers],
@@ -176,9 +174,9 @@ class D3GModel(LateFusionModel):
         outputs = {
             "task_logits": task_logits,
             "rel_logits": rel_logits,
+            "lr_domain_logits": self.lr_domain_classifier(lr_features),
+            "hr_domain_logits": self.hr_domain_classifier(hr_features.detach()),
         }
-        if self.supports_domain_objective():
-            outputs["domain_logits"] = self.domain_classifier(lr_features)
         return outputs
 
     def task_parameters(self) -> List[torch.nn.Parameter]:

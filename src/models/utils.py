@@ -22,8 +22,10 @@ def make_eval_state() -> Dict[str, Any]:
         "task_entropy_incorrect": 0.0,
         "task_region_correct": defaultdict(int),
         "task_region_loss_sum": defaultdict(float),
-        "domain_preds": [],
-        "domain_targets": [],
+        "lr_domain_preds": [],
+        "lr_domain_targets": [],
+        "hr_domain_preds": [],
+        "hr_domain_targets": [],
     }
 
 def extract_region_names(dataloaders: List[torch.utils.data.DataLoader]) -> Dict[int, List[str]]:
@@ -88,14 +90,19 @@ def update_task_region_metrics(
         state["task_region_correct"][rid_int] += int((correct_mask & mask).sum().item())
         state["task_region_loss_sum"][rid_int] += float(per_sample_loss[mask].sum().item())
 
-def update_domain_metrics(state: Dict[str, Any], domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
-    state["domain_preds"].append(domain_preds.cpu())
-    state["domain_targets"].append(regions.cpu())
+def update_lr_domain_metrics(state: Dict[str, Any], lr_domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    state["lr_domain_preds"].append(lr_domain_preds.cpu())
+    state["lr_domain_targets"].append(regions.cpu())
 
 
-def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
-    preds = torch.cat(state["domain_preds"])
-    targets = torch.cat(state["domain_targets"])
+def update_hr_domain_metrics(state: Dict[str, Any], hr_domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    state["hr_domain_preds"].append(hr_domain_preds.cpu())
+    state["hr_domain_targets"].append(regions.cpu())
+
+
+def compute_final_lr_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    preds = torch.cat(state["lr_domain_preds"])
+    targets = torch.cat(state["lr_domain_targets"])
     metrics: Dict[str, float] = {}
     for rid, name in enumerate(region_names):
         if name not in FIVE_REGION_NAMES:
@@ -103,8 +110,23 @@ def compute_final_domain_metrics(state: Dict[str, Any], region_names: List[str])
         mask = targets == rid
         if mask.sum() == 0:
             continue
-        metrics[f"domain-acc-{name.lower()}"] = (preds[mask] == targets[mask]).float().mean().item()
-    metrics["domain-acc"] = (preds == targets).float().mean().item()
+        metrics[f"lr-domain-acc-{name.lower()}"] = (preds[mask] == targets[mask]).float().mean().item()
+    metrics["lr-domain-acc"] = (preds == targets).float().mean().item()
+    return metrics
+
+
+def compute_final_hr_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    preds = torch.cat(state["hr_domain_preds"])
+    targets = torch.cat(state["hr_domain_targets"])
+    metrics: Dict[str, float] = {}
+    for rid, name in enumerate(region_names):
+        if name not in FIVE_REGION_NAMES:
+            continue
+        mask = targets == rid
+        if mask.sum() == 0:
+            continue
+        metrics[f"hr-domain-acc-{name.lower()}"] = (preds[mask] == targets[mask]).float().mean().item()
+    metrics["hr-domain-acc"] = (preds == targets).float().mean().item()
     return metrics
 
 
@@ -200,20 +222,23 @@ def compute_final_eval_metrics(
     loader_name: str,
     region_names: List[str],
     ece_metric: MulticlassCalibrationError,
-    use_domain_objective: bool = False,
 ) -> Dict[str, float]:
     """Compute final metrics for the evaluation phase.
-    
+
     Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
     """
 
     metrics = {}
     metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
-    }) 
-    if use_domain_objective:
+    })
+    if state["lr_domain_preds"]:
         metrics.update({
-            f"{loader_name}-{k}": v for k, v in compute_final_domain_metrics(state, region_names).items()
+            f"{loader_name}-{k}": v for k, v in compute_final_lr_domain_metrics(state, region_names).items()
+        })
+    if state["hr_domain_preds"]:
+        metrics.update({
+            f"{loader_name}-{k}": v for k, v in compute_final_hr_domain_metrics(state, region_names).items()
         })
 
     return metrics

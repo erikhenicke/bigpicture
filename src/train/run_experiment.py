@@ -88,8 +88,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 branches=branches,
                 num_task_labels=cfg.num_task_labels,
                 num_domain_labels=cfg.num_domain_labels,
-                enable_domain_head=cfg.model.enable_domain_head,
-                domain_loss_coeff=cfg.model.domain_loss_coeff,
+                domain_loss_coeff=cfg.model.get("domain_loss_coeff", 0.0),
                 learnable_relation_coeff=cfg.model.learnable_relation_coeff,
                 consistency_loss_coeff=cfg.model.d3g_loss_coeff,
                 pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
@@ -102,24 +101,20 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 fusion=fusion,
                 num_task_labels=cfg.num_task_labels,
                 num_domain_labels=cfg.num_domain_labels,
-                enable_domain_head=cfg.model.enable_domain_head,
-                domain_loss_coeff=cfg.model.domain_loss_coeff,
+                domain_loss_coeff=cfg.model.get("domain_loss_coeff", 0.0),
             )
 
     optimizer_factory = instantiate(cfg.optim.optimizer)
     scheduler_factory = instantiate(cfg.optim.scheduler) if cfg.optim.scheduler is not None else None
-    domain_optimizer_factory = None
-    domain_scheduler_factory = None
-    if cfg.model.enable_domain_head:
-        domain_optimizer_factory = instantiate(
-            cfg.optim.domain_optimizer,
-            lr=cfg.optim.optimizer.lr * cfg.optim.domain_optimizer_lr_factor,
-        )
-        domain_scheduler_factory = (
-            instantiate(cfg.optim.domain_scheduler)
-            if cfg.optim.domain_scheduler is not None
-            else None
-        )
+    domain_optimizer_factory = instantiate(
+        cfg.optim.domain_optimizer,
+        lr=cfg.optim.optimizer.lr * cfg.optim.domain_optimizer_lr_factor,
+    )
+    domain_scheduler_factory = (
+        instantiate(cfg.optim.domain_scheduler)
+        if cfg.optim.domain_scheduler is not None
+        else None
+    )
 
     return LateFusionModule(
         model=model,
