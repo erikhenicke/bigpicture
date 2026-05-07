@@ -226,20 +226,20 @@ class LateFusionModule(LightningModule):
         if self.use_domain_objective:
             optimizers[1].zero_grad()
 
-        self.manual_backward(task_loss)
+        total_loss = task_loss
 
-        domain_loss = None
         if self.use_domain_objective:
             domain_loss, domain_preds = self.get_domain_loss(result, regions)
             self.log_domain_metrics(domain_loss, domain_preds, regions)
-            self.manual_backward(self.domain_loss_coeff * domain_loss)
+            total_loss = total_loss + self.domain_loss_coeff * domain_loss
 
-        d3g_consistency_loss = None
         if self.use_d3g_objective:
             d3g_consistency_loss = self.task_criterion(result["rel_logits"], y)
             self.train_consistency_loss(d3g_consistency_loss)
             self.log("train/d3g-consistency-loss", d3g_consistency_loss, on_step=False, on_epoch=True, prog_bar=False)
-            self.manual_backward(self.d3g_loss_coeff * d3g_consistency_loss)
+            total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
+
+        self.manual_backward(total_loss)
 
         task_opt.step()
         if self.use_domain_objective:
