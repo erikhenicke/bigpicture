@@ -47,7 +47,7 @@ experiments:
   densenet_concat_no_domain:
     model: densenet_concat
     overrides:
-      model.enable_domain_head: false
+      model.domain_loss_coeff: 0.0
 
   densenet_concat_dloss_0_1_lrf_0_1:
     model: densenet_concat
@@ -94,7 +94,7 @@ experiments:
   densenet_d3g_no_domain:
     model: densenet_d3g
     overrides:
-      model.enable_domain_head: false
+      model.domain_loss_coeff: 0.0
       model.pred_domain_for_d3g: false
 
   densenet_d3g_no_domain_pred:

@@ -77,7 +77,6 @@ def make_model() -> LateFusionModule:
         fusion=fusion,
         num_task_labels=NUM_TASK_LABELS,
         num_domain_labels=NUM_DOMAIN_LABELS,
-        enable_domain_head=False,
     )
 
     optimizer_factory = partial(AdamW, lr=LR, weight_decay=WEIGHT_DECAY)
@@ -87,11 +86,13 @@ def make_model() -> LateFusionModule:
         factor=LR_DECAY,
         patience=PLATEAU_PATIENCE,
     )
+    domain_optimizer_factory = partial(AdamW, lr=LR * 0.1, weight_decay=WEIGHT_DECAY)
 
     return LateFusionModule(
         model=model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
+        domain_optimizer=domain_optimizer_factory,
         num_task_labels=NUM_TASK_LABELS,
         num_domain_labels=NUM_DOMAIN_LABELS,
         domain_index=0,

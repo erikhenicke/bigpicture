@@ -23,9 +23,6 @@ params:
   model.d3g_loss_coeff:
     plain: "λ_d3g"
     latex: '$\lambda_{\text{d3g}}$'
-  model.enable_domain_head:
-    plain: "Domain Head"
-    latex: "Domain Head"
   model.pred_domain_for_d3g:
     plain: "Domain Prediction"
     latex: "Domain Prediction"
