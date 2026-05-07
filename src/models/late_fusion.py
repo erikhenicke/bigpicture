@@ -57,11 +57,20 @@ class LateFusionModule(LightningModule):
 
 
         self.use_d3g_objective = self.model.supports_d3g_objective()
-        if self.use_d3g_objective:
-            self.d3g_loss_coeff = self.model.consistency_loss_coeff
-        
-        self.domain_loss_coeff = self.model.domain_loss_coeff
         self.has_lr_domain_classifier = self.model.supports_lr_domain_classification()
+
+        non_task_coeff = 0.0
+        if self.has_lr_domain_classifier:
+            self.lr_domain_loss_coeff = self.model.lr_domain_loss_coeff
+            non_task_coeff += self.lr_domain_loss_coeff
+        if self.use_d3g_objective:
+            self.consistency_loss_coeff = self.model.consistency_loss_coeff
+            non_task_coeff += self.consistency_loss_coeff
+        if non_task_coeff >= 1.0:
+            raise ValueError(
+                f"Non-task loss coefficients must sum to less than 1.0, got {non_task_coeff}"
+            )
+        self.task_loss_coeff = 1.0 - non_task_coeff
 
         self.task_criterion = nn.CrossEntropyLoss(label_smoothing=self.hparams.label_smoothing)
         self.task_criterion_per_sample = nn.CrossEntropyLoss(reduction="none", label_smoothing=self.hparams.label_smoothing)
@@ -243,31 +252,28 @@ class LateFusionModule(LightningModule):
             lr_domain_opt.zero_grad()
         hr_domain_opt.zero_grad()
 
-        total_loss = task_loss
+        backbone_loss = self.task_loss_coeff * task_loss
 
         if self.has_lr_domain_classifier:
-            # LR domain loss (coeff controls contribution; 0 means no LR domain training)
             lr_domain_logits = result["lr_domain_logits"]
             lr_domain_loss = self.domain_criterion(lr_domain_logits, regions)
             lr_domain_preds = lr_domain_logits.argmax(dim=1)
             self.log_lr_domain_metrics(lr_domain_loss, lr_domain_preds, regions)
-            total_loss = total_loss + self.domain_loss_coeff * lr_domain_loss
+            backbone_loss = backbone_loss + self.lr_domain_loss_coeff * lr_domain_loss
 
-        # HR domain loss (always)
-        hr_domain_logits = result["hr_domain_logits"]
-        hr_domain_loss = self.domain_criterion(hr_domain_logits, regions)
-        hr_domain_preds = hr_domain_logits.argmax(dim=1)
-        self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, regions)
-        total_loss = total_loss + hr_domain_loss
-
-        # D3G consistency loss
         if self.use_d3g_objective:
             d3g_consistency_loss = self.task_criterion(result["rel_logits"], y)
             self.train_consistency_loss(d3g_consistency_loss)
             self.log("train/d3g-consistency-loss", d3g_consistency_loss, on_step=False, on_epoch=True, prog_bar=False)
-            total_loss = total_loss + self.d3g_loss_coeff * d3g_consistency_loss
+            backbone_loss = backbone_loss + self.consistency_loss_coeff * d3g_consistency_loss
 
-        self.manual_backward(total_loss)
+        self.manual_backward(backbone_loss)
+
+        hr_domain_logits = result["hr_domain_logits"]
+        hr_domain_loss = self.domain_criterion(hr_domain_logits, regions)
+        hr_domain_preds = hr_domain_logits.argmax(dim=1)
+        self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, regions)
+        self.manual_backward(hr_domain_loss)
 
         task_opt.step()
         if self.has_lr_domain_classifier:
@@ -286,6 +292,7 @@ class LateFusionModule(LightningModule):
         label: str,
         feature_label: str,
         region_names: List[str],
+        loader_label: str,
     ) -> None:
         logger = self.logger
         if isinstance(logger, list):
@@ -296,7 +303,7 @@ class LateFusionModule(LightningModule):
                 y_true=targets.tolist(),
                 preds=preds.tolist(),
                 class_names=region_names,
-                title=f"{feature_label.upper()} Domain Confusion Matrix"
+                title=f"{loader_label} {feature_label.upper()} Domain Confusion Matrix",
             )},
             commit=False,
         )
@@ -312,7 +319,7 @@ class LateFusionModule(LightningModule):
             preds = torch.cat(self._train_lr_domain_preds)
             targets = torch.cat(self._train_lr_domain_targets)
             self.log("train/train-lr-domain-acc", (preds == targets).float().mean())
-            self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", "lr", list(REGIONS.values()))
+            self._log_domain_confusion_matrix(preds, targets, "train/lr-domain-confusion-matrix", "lr", list(REGIONS.values()), "Train")
 
         # HR domain metrics 
         if self._train_hr_domain_preds:
@@ -323,7 +330,7 @@ class LateFusionModule(LightningModule):
             preds = torch.cat(self._train_hr_domain_preds)
             targets = torch.cat(self._train_hr_domain_targets)
             self.log("train/train-hr-domain-acc", (preds == targets).float().mean())
-            self._log_domain_confusion_matrix(preds, targets, "train/hr-domain-confusion-matrix", "hr", list(REGIONS.values()))
+            self._log_domain_confusion_matrix(preds, targets, "train/hr-domain-confusion-matrix", "hr", list(REGIONS.values()), "Train")
 
 
     def on_validation_epoch_start(self) -> None:
@@ -407,13 +414,13 @@ class LateFusionModule(LightningModule):
                     lr_preds = torch.cat(state["lr_domain_preds"])
                     lr_targets = torch.cat(state["lr_domain_targets"])
                     self._log_domain_confusion_matrix(
-                        lr_preds, lr_targets, f"val/{loader_name}-lr-domain-confusion-matrix", "lr", list(REGIONS.values())
+                        lr_preds, lr_targets, f"val/{loader_name}-lr-domain-confusion-matrix", "lr", list(REGIONS.values()), loader_name,
                     )
                 if state["hr_domain_preds"]:
                     hr_preds = torch.cat(state["hr_domain_preds"])
                     hr_targets = torch.cat(state["hr_domain_targets"])
                     self._log_domain_confusion_matrix(
-                        hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", "hr", list(REGIONS.values())
+                        hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", "hr", list(REGIONS.values()), loader_name,
                     )
 
         for key, value in all_metrics.items():
@@ -500,13 +507,13 @@ class LateFusionModule(LightningModule):
                 lr_preds = torch.cat(state["lr_domain_preds"])
                 lr_targets = torch.cat(state["lr_domain_targets"])
                 self._log_domain_confusion_matrix(
-                    lr_preds, lr_targets, f"test/{loader_name}-lr-domain-confusion-matrix", "lr", region_names
+                    lr_preds, lr_targets, f"test/{loader_name}-lr-domain-confusion-matrix", "lr", region_names, loader_name,
                 )
             if state["hr_domain_preds"]:
                 hr_preds = torch.cat(state["hr_domain_preds"])
                 hr_targets = torch.cat(state["hr_domain_targets"])
                 self._log_domain_confusion_matrix(
-                    hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", "hr", region_names
+                    hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", "hr", region_names, loader_name,
                 )
 
 

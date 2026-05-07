@@ -18,6 +18,7 @@ experiments:
     model: densenet_geoprior
     overrides:
       model.detach_lr_for_task: true
+      model.extra_ch_init: "he"
 
   # ---------------- D3G: detach_lr/hr_for_consistency ablation -----------
   d3g_default:
@@ -27,6 +28,7 @@ experiments:
     model: densenet_d3g
     overrides:
       model.detach_lr_for_consistency: true
+      model.extra_ch_init: "average"
 
   d3g_detach_hr:
     model: densenet_d3g

@@ -6,14 +6,20 @@ from abc import abstractmethod
 from typing import Dict
 
 
-class Branch(nn.Module):    
-    def __init__(self, in_channels=3, **kwargs):
+VALID_EXTRA_CH_INITS = ("average", "zero", "he")
+
+
+class Branch(nn.Module):
+    def __init__(self, in_channels: int = 3, extra_ch_init: str = "zero", **kwargs):
         super().__init__()
 
         if not (3 <= in_channels <= 6):
             raise ValueError(f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6.")
+        if extra_ch_init not in VALID_EXTRA_CH_INITS:
+            raise ValueError(f"Unsupported extra_ch_init: {extra_ch_init}. Must be one of {VALID_EXTRA_CH_INITS}.")
 
         self.in_channels = in_channels
+        self.extra_ch_init = extra_ch_init
         self.model = self._get_model(**kwargs)
 
         if in_channels != 3:
@@ -32,10 +38,20 @@ class Branch(nn.Module):
     def out_dim(self) -> int:
         pass
 
+    def _init_extra_weights(self, weight_slice: torch.Tensor, old_weight: torch.Tensor) -> None:
+        with torch.no_grad():
+            if self.extra_ch_init == "average":
+                mean_weight = old_weight.mean(dim=1, keepdim=True)
+                weight_slice.copy_(mean_weight.repeat(1, weight_slice.size(1), 1, 1))
+            elif self.extra_ch_init == "zero":
+                weight_slice.zero_()
+            elif self.extra_ch_init == "he":
+                nn.init.kaiming_normal_(weight_slice, mode="fan_out", nonlinearity="relu")
+
 
 class DenseNetBranch(Branch):
-    def __init__(self, in_channels=3, image_net=True):
-        super().__init__(in_channels=in_channels, image_net=image_net)
+    def __init__(self, in_channels: int = 3, image_net: bool = True, extra_ch_init: str = "zero"):
+        super().__init__(in_channels=in_channels, extra_ch_init=extra_ch_init, image_net=image_net)
     
     def forward(self, x):
         features = self.model.features(x)
@@ -71,19 +87,18 @@ class DenseNetBranch(Branch):
         with torch.no_grad():
             new_conv.weight[:, : old_conv.in_channels, :, :] = old_conv.weight
             if in_channels > old_conv.in_channels:
-                extra_channels = in_channels - old_conv.in_channels
-                mean_weight = old_conv.weight.mean(dim=1, keepdim=True)
-                new_conv.weight[:, old_conv.in_channels :, :, :] = mean_weight.repeat(
-                    1, extra_channels, 1, 1
+                self._init_extra_weights(
+                    new_conv.weight[:, old_conv.in_channels:, :, :],
+                    old_conv.weight,
                 )
             if old_conv.bias is not None:
                 new_conv.bias.copy_(old_conv.bias)
 
-        self.model.features.conv0 = new_conv 
+        self.model.features.conv0 = new_conv
 
 class DeitBranch(Branch):
-    def __init__(self, in_channels=3, image_net=True):
-        super().__init__(in_channels=in_channels, image_net=image_net)
+    def __init__(self, in_channels: int = 3, image_net: bool = True, extra_ch_init: str = "zero"):
+        super().__init__(in_channels=in_channels, extra_ch_init=extra_ch_init, image_net=image_net)
 
     def forward(self, x):
         tokens = self.model.vit(x).last_hidden_state
@@ -127,10 +142,9 @@ class DeitBranch(Branch):
         with torch.no_grad():
             new_projection.weight[:, :old_projection.in_channels, :, :] = old_projection.weight
             if in_channels > old_projection.in_channels:
-                extra_channels = in_channels - old_projection.in_channels
-                mean_weight = old_projection.weight.mean(dim=1, keepdim=True)
-                new_projection.weight[:, old_projection.in_channels:, :, :] = mean_weight.repeat(
-                    1, extra_channels, 1, 1
+                self._init_extra_weights(
+                    new_projection.weight[:, old_projection.in_channels:, :, :],
+                    old_projection.weight,
                 )
             if old_projection.bias is not None:
                 new_projection.bias.copy_(old_projection.bias)
@@ -150,8 +164,8 @@ class TimmBranch(Branch):
     and ``tf_efficientnetv2_b1`` (and most other timm backbones).
     """
 
-    def __init__(self, model_name: str, in_channels: int = 3, image_net: bool = True):
-        super().__init__(in_channels=in_channels, model_name=model_name, image_net=image_net)
+    def __init__(self, model_name: str, in_channels: int = 3, image_net: bool = True, extra_ch_init: str = "zero"):
+        super().__init__(in_channels=in_channels, extra_ch_init=extra_ch_init, model_name=model_name, image_net=image_net)
 
     def forward(self, x):
         return self.model(x)

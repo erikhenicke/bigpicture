@@ -88,9 +88,9 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 branches=branches,
                 num_task_labels=cfg.num_task_labels,
                 num_domain_labels=cfg.num_domain_labels,
-                domain_loss_coeff=cfg.model.get("domain_loss_coeff", 0.0),
+                lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
+                consistency_loss_coeff=cfg.model.consistency_loss_coeff,
                 learnable_relation_coeff=cfg.model.learnable_relation_coeff,
-                consistency_loss_coeff=cfg.model.d3g_loss_coeff,
                 pred_domain_for_d3g=cfg.model.pred_domain_for_d3g,
                 detach_lr_for_consistency=cfg.model.detach_lr_for_consistency,
                 detach_hr_for_consistency=cfg.model.detach_hr_for_consistency,
@@ -103,7 +103,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
                 fusion=fusion,
                 num_task_labels=cfg.num_task_labels,
                 num_domain_labels=cfg.num_domain_labels,
-                domain_loss_coeff=cfg.model.get("domain_loss_coeff", 0.0),
+                lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
                 detach_lr_for_task=cfg.model.detach_lr_for_task,
             )
 

@@ -16,7 +16,6 @@ class SingleBranchModel(nn.Module):
         self.encoder = encoder
         self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
         self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
-        self.domain_loss_coeff = 0.0
 
     def supports_d3g_objective(self) -> bool:
         return False
@@ -48,14 +47,14 @@ class LateFusionModel(nn.Module):
         fusion: Optional[Fusion],
         num_task_labels: int,
         num_domain_labels: int,
-        domain_loss_coeff: float = 0.5,
+        lr_domain_loss_coeff: float = 0.1667,
         detach_lr_for_task: bool = False,
     ):
         super().__init__()
 
         self.branches: DualBranch = branches
         self.fusion = fusion
-        self.domain_loss_coeff = domain_loss_coeff
+        self.lr_domain_loss_coeff = lr_domain_loss_coeff
         self.detach_lr_for_task = detach_lr_for_task
         self.task_classifier: Optional[nn.Linear] = None
         if self.fusion is not None:
@@ -110,9 +109,9 @@ class D3GModel(LateFusionModel):
         branches: DualBranch,
         num_task_labels: int,
         num_domain_labels: int,
-        domain_loss_coeff: float = 0.5,
+        lr_domain_loss_coeff: float = 0.1176,
+        consistency_loss_coeff: float = 0.2941,
         learnable_relation_coeff: float = 0.8,
-        consistency_loss_coeff: float = 0.5,
         pred_domain_for_d3g: bool = True,
         detach_lr_for_consistency: bool = False,
         detach_hr_for_consistency: bool = False,
@@ -122,7 +121,7 @@ class D3GModel(LateFusionModel):
             fusion=None,
             num_task_labels=num_task_labels,
             num_domain_labels=num_domain_labels,
-            domain_loss_coeff=domain_loss_coeff,
+            lr_domain_loss_coeff=lr_domain_loss_coeff,
         )
         self.detach_lr_for_consistency = detach_lr_for_consistency
         self.detach_hr_for_consistency = detach_hr_for_consistency
