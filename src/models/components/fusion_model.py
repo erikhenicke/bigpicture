@@ -44,12 +44,14 @@ class LateFusionModel(nn.Module):
         num_domain_labels: int,
         enable_domain_head: bool = True,
         domain_loss_coeff: float = 0.5,
+        detach_lr_for_task: bool = False,
     ):
         super().__init__()
 
         self.branches: DualBranch = branches
         self.fusion = fusion
         self.domain_loss_coeff = domain_loss_coeff
+        self.detach_lr_for_task = detach_lr_for_task
         self.task_classifier: Optional[nn.Linear] = None
         if self.fusion is not None:
             self.task_classifier = nn.Linear(self.fusion.out_dim, num_task_labels)
@@ -73,6 +75,8 @@ class LateFusionModel(nn.Module):
             raise RuntimeError("LateFusionModel requires a fusion module and task classifier for forward().")
 
         hr_branch_out, lr_branch_out = self.branches(x)
+        if self.detach_lr_for_task:
+            lr_branch_out = lr_branch_out.detach()
         fused = self.fusion(hr_branch_out, lr_branch_out)
         outputs = {"task_logits": self.task_classifier(fused)}
         if self.supports_domain_objective():
@@ -104,6 +108,8 @@ class D3GModel(LateFusionModel):
         learnable_relation_coeff: float = 0.8,
         consistency_loss_coeff: float = 0.5,
         pred_domain_for_d3g: bool = True,
+        detach_lr_for_consistency: bool = False,
+        detach_hr_for_consistency: bool = False,
     ):
         super().__init__(
             branches=branches,
@@ -113,6 +119,8 @@ class D3GModel(LateFusionModel):
             enable_domain_head=enable_domain_head,
             domain_loss_coeff=domain_loss_coeff,
         )
+        self.detach_lr_for_consistency = detach_lr_for_consistency
+        self.detach_hr_for_consistency = detach_hr_for_consistency
         self.num_heads = num_domain_labels
         self.d3g_relation = D3GRelation(learnable_relation_coeff=learnable_relation_coeff, internal_dim=256, lr_features_dim=branches.lr_encoder.out_dim)
         self.consistency_loss_coeff = consistency_loss_coeff
@@ -145,11 +153,13 @@ class D3GModel(LateFusionModel):
 
         if self.training:
             task_logits = head_outputs[torch.arange(len(region_ids), device=region_ids.device), region_ids]
+            hr_for_consistency = hr_features.detach() if self.detach_hr_for_consistency else hr_features
             head_outputs_detached = torch.stack(
-                [head(hr_features.detach()) for head in self.task_classifiers],
+                [head(hr_for_consistency) for head in self.task_classifiers],
                 dim=1,
             )
-            domain_weights = self.domain_weights(region_ids, lr_features.detach())
+            lr_for_consistency = lr_features.detach() if self.detach_lr_for_consistency else lr_features
+            domain_weights = self.domain_weights(region_ids, lr_for_consistency)
             consistency_weights = domain_weights.clone()
             consistency_weights[
                 torch.arange(len(region_ids), device=region_ids.device),
