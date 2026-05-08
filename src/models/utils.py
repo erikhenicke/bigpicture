@@ -18,8 +18,10 @@ def make_eval_state() -> Dict[str, Any]:
         "region_total": defaultdict(int),
         "task_loss_sum": 0.0,
         "task_correct": 0,
-        "task_lr_const_correct": 0, 
-        "task_hr_const_correct": 0,
+        "lr_ablated_task_correct": 0,
+        "hr_ablated_task_correct": 0,
+        "lr_ablated_task_region_correct": defaultdict(int),
+        "hr_ablated_task_region_correct": defaultdict(int),
         "task_entropy_correct": 0.0,
         "task_entropy_incorrect": 0.0,
         "task_region_correct": defaultdict(int),
@@ -153,6 +155,28 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
         **{f"region-{name.lower()}-task-loss": loss for name, loss in per_region_task_loss.items()},
         "worst-group-task-acc": worst_group_task_acc,
     }
+
+def compute_final_branch_ablation_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    total = state["total"]
+    if total == 0:
+        return {}
+    metrics: Dict[str, float] = {
+        "lr-ablated-task-acc": state["lr_ablated_task_correct"] / total,
+        "hr-ablated-task-acc": state["hr_ablated_task_correct"] / total,
+    }
+    for prefix, region_correct_key in [("lr-ablated", "lr_ablated_task_region_correct"), ("hr-ablated", "hr_ablated_task_region_correct")]:
+        worst_group = 1.0
+        for rid, rid_total in state["region_total"].items():
+            name = region_names[rid] if rid < len(region_names) else None
+            if rid_total == 0 or name not in FIVE_REGION_NAMES:
+                continue
+            acc = state[region_correct_key][rid] / rid_total
+            metrics[f"region-{name.lower()}-{prefix}-task-acc"] = acc
+            if acc < worst_group:
+                worst_group = acc
+        metrics[f"{prefix}-worst-group-task-acc"] = worst_group
+    return metrics
+
 
 def update_task_metrics(
     state: Dict[str, Any],

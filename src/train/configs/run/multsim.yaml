@@ -8,21 +8,23 @@ global_overrides:
   trainer.max_epochs: 50
   optim: adam_warmup_cosine
   data.preprocessed_dir: FMoW_LandSat_Norm
-  trainer.label_smoothing: 0.1
 
 experiments:
   # ---------------- Fusion variants ------------------------------------
   concat:
     model: densenet_concat
+    overrides:
+      trainer.branch_ablation: true
 
   film:
     model: densenet_film
+    overrides:
+      trainer.branch_ablation: true
 
   geoprior:
     model: densenet_geoprior
     overrides:
       trainer.branch_ablation: true
-      trainer.branch_ablation_value: 0.0
 
   d3g:
     model: densenet_d3g
@@ -31,20 +33,29 @@ experiments:
     model: densenet_multsim
     overrides:
       trainer.branch_ablation: true
-      trainer.branch_ablation_value: 1.0
 
-  # ---------------- MultSim: detach ablation ---------------------------
+  # ---------------- Detach ablation ---------------------------
   multsim_detach:
     model: densenet_multsim
     overrides:
       model.detach_lr_for_task: true
       trainer.branch_ablation: true
-      trainer.branch_ablation_value: 1.0
 
-  # ---------------- MultSim: ReLU ablation -----------------------------
+  concat_detach:
+    model: densenet_concat
+    overrides:
+      model.detach_lr_for_task: true
+      trainer.branch_ablation: true
+
+  # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim
     overrides:
       model.fusion.pre_fusion_relu: false
       trainer.branch_ablation: true
-      trainer.branch_ablation_value: 1.0
+
+  film_relu:
+    model: densenet_film
+    overrides:
+      model.fusion.pre_fusion_relu: true
+      trainer.branch_ablation: true

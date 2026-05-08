@@ -2,7 +2,7 @@
 model:
   landsat_in_channels: 6
   lr_image_net: true
-  landsat_channel_init: zero
+  landsat_channel_init: average
 
   lr_encoder:
     _target_: models.components.branches.DenseNetBranch

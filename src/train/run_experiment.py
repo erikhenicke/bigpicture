@@ -145,7 +145,6 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         compile=cfg.trainer.compile,
         label_smoothing=cfg.trainer.label_smoothing,
         branch_ablation=cfg.trainer.branch_ablation,
-        branch_ablation_value=cfg.trainer.branch_ablation_value,
     )
 
 

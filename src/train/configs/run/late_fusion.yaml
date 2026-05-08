@@ -7,7 +7,6 @@ global_overrides:
   data.frac: 1.0
   trainer.max_epochs: 50
   optim: adam_warmup_cosine
-  model.landsat_channel_init: average  # Maybe bad, because baseline don't have this parameter
 
 experiments:
   # ---------------- Baselines (HR-only, 3 backbones) ----------------
