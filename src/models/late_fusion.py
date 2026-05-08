@@ -11,7 +11,7 @@ from torchmetrics.classification.accuracy import Accuracy
 import wandb
 
 from models.components.fusion_model import SingleBranchModel, SingleBranchLRModel, LateFusionModel
-from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_lr_domain_metrics, update_hr_domain_metrics, compute_final_eval_metrics, REGIONS
+from models.utils import make_eval_state, extract_region_names, update_eval_metrics, update_lr_domain_metrics, update_hr_domain_metrics, compute_final_eval_metrics, compute_final_branch_ablation_metrics, REGIONS
 
 
 class LateFusionModule(LightningModule):
@@ -34,7 +34,6 @@ class LateFusionModule(LightningModule):
         compile: bool = False,
         label_smoothing: float = 0.0,
         branch_ablation: bool = False,
-        branch_ablation_value: float = 1.0,
     ) -> None:
         """Initialize a `LateFusionModule`.
 
@@ -144,11 +143,19 @@ class LateFusionModule(LightningModule):
         self,
         x: Dict[str, torch.Tensor],
         y: torch.Tensor,
+        regions: torch.Tensor,
         state: Dict[str, Any],
     ) -> None:
-        result = self.model.forward_branch_ablation(x, self.hparams.branch_ablation_value)
-        state["task_lr_const_correct"] += (result["lr_constant_logits"].argmax(dim=1) == y).sum().item()
-        state["task_hr_const_correct"] += (result["hr_constant_logits"].argmax(dim=1) == y).sum().item()
+        result = self.model.forward_branch_ablation(x)
+        lr_correct = result["lr_ablated_logits"].argmax(dim=1) == y
+        hr_correct = result["hr_ablated_logits"].argmax(dim=1) == y
+        state["lr_ablated_task_correct"] += lr_correct.sum().item()
+        state["hr_ablated_task_correct"] += hr_correct.sum().item()
+        for rid in torch.unique(regions):
+            rid_int = int(rid.item())
+            mask = regions == rid
+            state["lr_ablated_task_region_correct"][rid_int] += int((lr_correct & mask).sum().item())
+            state["hr_ablated_task_region_correct"][rid_int] += int((hr_correct & mask).sum().item())
 
 
     def forward(
@@ -419,7 +426,7 @@ class LateFusionModule(LightningModule):
             update_hr_domain_metrics(self._val_state[dataloader_idx], hr_domain_preds, regions)
 
         if self.do_branch_ablation:
-            self._branch_ablation_step(x, y, self._val_state[dataloader_idx])
+            self._branch_ablation_step(x, y, regions, self._val_state[dataloader_idx])
 
 
     def on_validation_epoch_end(self) -> None:
@@ -449,10 +456,8 @@ class LateFusionModule(LightningModule):
                         hr_preds, hr_targets, f"val/{loader_name}-hr-domain-confusion-matrix", "hr", list(REGIONS.values()), loader_name,
                     )
                 if self.do_branch_ablation:
-                    total = state["total"]
-                    if total > 0:
-                        all_metrics[f"val/{loader_name}-task-acc-lr-constant"] = state["task_lr_const_correct"] / total
-                        all_metrics[f"val/{loader_name}-task-acc-hr-constant"] = state["task_hr_const_correct"] / total
+                    ablation_metrics = compute_final_branch_ablation_metrics(state, region_names)
+                    all_metrics.update({f"val/{loader_name}-{k}": v for k, v in ablation_metrics.items()})
 
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -523,7 +528,7 @@ class LateFusionModule(LightningModule):
             update_hr_domain_metrics(self._test_state[dataloader_idx], hr_domain_preds, regions)
 
         if self.do_branch_ablation:
-            self._branch_ablation_step(x, y, self._test_state[dataloader_idx])
+            self._branch_ablation_step(x, y, regions, self._test_state[dataloader_idx])
 
 
     def on_test_epoch_end(self) -> None:
@@ -552,10 +557,8 @@ class LateFusionModule(LightningModule):
                     hr_preds, hr_targets, f"test/{loader_name}-hr-domain-confusion-matrix", "hr", region_names, loader_name,
                 )
             if self.do_branch_ablation:
-                total = state["total"]
-                if total > 0:
-                    all_metrics[f"test/{loader_name}-task-acc-lr-constant"] = state["task_lr_const_correct"] / total
-                    all_metrics[f"test/{loader_name}-task-acc-hr-constant"] = state["task_hr_const_correct"] / total
+                ablation_metrics = compute_final_branch_ablation_metrics(state, region_names)
+                all_metrics.update({f"test/{loader_name}-{k}": v for k, v in ablation_metrics.items()})
 
         for key, value in all_metrics.items():
             self.log(key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)

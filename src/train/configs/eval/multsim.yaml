@@ -20,8 +20,8 @@ groups:
       - d3g
       - multsim
     additional_metrics:
-      - test/test-od-task-acc-lr-constant
-      - test/test-od-task-acc-hr-constant
+      - test/test-od-lr-ablated-task-acc
+      - test/test-od-hr-ablated-task-acc
 
   - name: MultSim Ablation
     runs:
@@ -29,5 +29,5 @@ groups:
       - multsim_detach
       - multsim_no_relu
     additional_metrics:
-      - test/test-od-task-acc-lr-constant
-      - test/test-od-task-acc-hr-constant
+      - test/test-od-lr-ablated-task-acc
+      - test/test-od-hr-ablated-task-acc

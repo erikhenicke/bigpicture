@@ -142,19 +142,14 @@ class LateFusionModel(nn.Module):
         return self.fusion is not None and self.task_classifier is not None
 
     def forward_branch_ablation(
-        self, x: Dict[str, torch.Tensor], constant_value: float = 1.0,
+        self, x: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         hr_features, lr_features = self.branches(x)
-
-        lr_const = torch.full_like(lr_features, constant_value)
-        lr_const_logits = self.task_classifier(self.fusion(hr_features, lr_const))
-
-        hr_const = torch.full_like(hr_features, constant_value)
-        hr_const_logits = self.task_classifier(self.fusion(hr_const, lr_features))
-
+        lr_ablated = self.task_classifier(self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="lr"))
+        hr_ablated = self.task_classifier(self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="hr"))
         return {
-            "lr_constant_logits": lr_const_logits,
-            "hr_constant_logits": hr_const_logits,
+            "lr_ablated_logits": lr_ablated,
+            "hr_ablated_logits": hr_ablated,
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:

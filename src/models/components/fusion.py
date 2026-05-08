@@ -1,10 +1,12 @@
+from typing import Literal
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from abc import abstractmethod
 
 class Fusion(nn.Module):
-    def __init__(self, hr_dim, lr_dim, out_dim): 
+    def __init__(self, hr_dim, lr_dim, out_dim):
         super().__init__()
 
         self.hr_dim = hr_dim
@@ -16,6 +18,15 @@ class Fusion(nn.Module):
         self,
         hr_features: torch.Tensor,
         lr_features: torch.Tensor,
+    ) -> torch.Tensor:
+        pass
+
+    @abstractmethod
+    def forward_branch_ablation(
+        self,
+        hr_features: torch.Tensor,
+        lr_features: torch.Tensor,
+        cutoff: Literal["lr", "hr"],
     ) -> torch.Tensor:
         pass
 
@@ -37,6 +48,13 @@ class ConcatFusion(Fusion):
     def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
         concatenated = torch.cat([hr_features, lr_features], dim=1)
         return self.fusion(concatenated)
+
+    def forward_branch_ablation(self, hr_features: torch.Tensor, lr_features: torch.Tensor, cutoff: Literal["lr", "hr"]) -> torch.Tensor:
+        if cutoff == "lr":
+            lr_features = torch.zeros_like(lr_features)
+        else:
+            hr_features = torch.zeros_like(hr_features)
+        return self.forward(hr_features, lr_features)
 
 
 class FiLM(nn.Module):
@@ -63,6 +81,14 @@ class FiLM(nn.Module):
         add = self.film_add(z)
         return mul * x + add
 
+    def forward_branch_ablation(self, x: torch.Tensor, z: torch.Tensor, cutoff: Literal["z", "x"]) -> torch.Tensor:
+        if cutoff == "z":
+            if self.pre_fusion_relu:
+                x = F.relu(x)
+            return x
+        else:
+            return self.film_mul(z) + self.film_add(z)
+
 
 class FilmFusion(Fusion):
     def __init__(self, hr_dim, lr_dim, out_dim, pre_fusion_relu=False):
@@ -78,6 +104,13 @@ class FilmFusion(Fusion):
 
     def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
         film_features = self.film(hr_features, lr_features)
+        return self.projection(film_features)
+
+    def forward_branch_ablation(self, hr_features: torch.Tensor, lr_features: torch.Tensor, cutoff: Literal["lr", "hr"]) -> torch.Tensor:
+        if cutoff == "lr":
+            film_features = self.film.forward_branch_ablation(x=hr_features, z=lr_features, cutoff="z") 
+        else:
+            film_features = self.film.forward_branch_ablation(x=hr_features, z=lr_features, cutoff="x")
         return self.projection(film_features)
 
 
@@ -102,6 +135,11 @@ class MultSimFusion(Fusion):
         lr_projected = self.lr_projection(lr_features)
         return torch.mul(hr_projected, lr_projected)
 
+    def forward_branch_ablation(self, hr_features: torch.Tensor, lr_features: torch.Tensor, cutoff: Literal["lr", "hr"]) -> torch.Tensor:
+        if cutoff == "lr":
+            return self.hr_projection(hr_features)
+        return self.lr_projection(lr_features)
+
 
 class GeoPriorFusion(Fusion):
     def __init__(self, hr_dim, lr_dim, out_dim, pre_fusion_relu=True):
@@ -123,3 +161,8 @@ class GeoPriorFusion(Fusion):
         hr_projected = self.hr_projection(hr_features)
         lr_projected = self.lr_projection(lr_features)
         return hr_projected + lr_projected
+
+    def forward_branch_ablation(self, hr_features: torch.Tensor, lr_features: torch.Tensor, cutoff: Literal["lr", "hr"]) -> torch.Tensor:
+        if cutoff == "lr":
+            return self.hr_projection(hr_features)
+        return self.lr_projection(lr_features)
