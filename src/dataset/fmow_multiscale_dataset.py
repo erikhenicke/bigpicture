@@ -1,6 +1,7 @@
 from pathlib import Path
 import torch
 import numpy as np
+import pandas as pd
 from PIL import Image
 from torchvision.transforms import v2 as transforms
 import rasterio
@@ -23,15 +24,15 @@ class FMoWMultiScaleDataset(WILDSDataset):
         fmow_dir="data",
         landsat_dir="data",
         preprocessed_dir=None,
-        metadata_csv="rgb_metadata.csv",
+        extended_metadata_csv="rgb_metadata_extended.csv",
         split_scheme="official",
         use_ood_val=True,
         seed=111,
         transform_rgb=None,
         transform_landsat=None,
-        augment=False,  
-        hflip_prob=0.5,               
-        vflip_prob=0.5,               
+        augment=False,
+        hflip_prob=0.5,
+        vflip_prob=0.5,
         image_norm="fmow-statistics"
     ):
         """
@@ -81,6 +82,18 @@ class FMoWMultiScaleDataset(WILDSDataset):
         # Store full indices (accounting for sequestered images)
         self.full_idxs = self.base_dataset.full_idxs
         self.metadata = self.base_dataset.metadata
+
+        # Extend metadata with coords and image span from the extended CSV
+        csv_path = self.root_landsat / extended_metadata_csv
+        ext_df = pd.read_csv(csv_path)
+        ext_df = ext_df[ext_df["split"] != "seq"].reset_index(drop=True)
+        extra_cols = torch.tensor(
+            ext_df[["lat", "lon", "img_span_km"]].values, dtype=torch.float32
+        )
+        self._metadata_array = torch.cat(
+            [self._metadata_array.float(), extra_cols], dim=1
+        )
+        self._metadata_fields = self._metadata_fields + ["lat", "lon", "img_span_km"]
 
         # Transforms
         self.transform_rgb = transform_rgb or self.get_default_transform_rgb()
@@ -183,7 +196,16 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         y = self._y_array[idx]
         metadata = self._metadata_array[idx]
-        x = {"rgb": rgb_img, "landsat": landsat_img}
+        coords_start = self._metadata_fields.index("lat")
+        coords = self._metadata_array[idx, coords_start:coords_start + 2]
+        img_span_idx = self._metadata_fields.index("img_span_km")
+        img_span_km = self._metadata_array[idx, img_span_idx]
+        x = {
+            "rgb": rgb_img,
+            "landsat": landsat_img,
+            "coords": coords,
+            "img_span_km": img_span_km,
+        }
 
         return x, y, metadata
 
@@ -234,9 +256,15 @@ class FMoWMultiScaleDataset(WILDSDataset):
         Returns the input for a given idx.
         """
         file_idx = self.full_idxs[idx]
+        coords_start = self._metadata_fields.index("lat")
+        coords = self._metadata_array[idx, coords_start:coords_start + 2]
+        img_span_idx = self._metadata_fields.index("img_span_km")
+        img_span_km = self._metadata_array[idx, img_span_idx]
         return {
             "rgb": self.get_rgb_input(file_idx),
             "landsat": self.get_landsat_input(file_idx),
+            "coords": coords,
+            "img_span_km": img_span_km,
         }
 
     def eval(self, y_pred, y_true, metadata, prediction_fn=None):
@@ -249,20 +277,23 @@ def collate_multiscale(batch):
     Custom collate function to handle dict inputs from FMoWMultiScaleDataset.
 
     Args:
-        batch: List of tuples (x, y, metadata) where x is dict with 'rgb' and 'landsat'
+        batch: List of tuples (x, y, metadata) where x is dict with 'rgb', 'landsat', 'coords'
 
     Returns:
         tuple of (x_dict, y_batch, metadata_batch)
-        where x_dict = {'rgb': tensor, 'landsat': tensor}
     """
     rgb_list = []
     landsat_list = []
+    coords_list = []
+    img_span_list = []
     y_list = []
     metadata_list = []
 
     for x, y, metadata in batch:
         rgb_list.append(x["rgb"])
         landsat_list.append(x["landsat"])
+        coords_list.append(x["coords"])
+        img_span_list.append(x["img_span_km"])
         y_list.append(y)
         metadata_list.append(metadata)
 
@@ -270,6 +301,8 @@ def collate_multiscale(batch):
         {
             "rgb": torch.stack(rgb_list, dim=0),
             "landsat": torch.stack(landsat_list, dim=0),
+            "coords": torch.stack(coords_list, dim=0),
+            "img_span_km": torch.stack(img_span_list, dim=0),
         },
         torch.stack(y_list, dim=0),
         torch.stack(metadata_list, dim=0),

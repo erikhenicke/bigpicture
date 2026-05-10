@@ -1,4 +1,5 @@
-# TODO: Implement SatClip and CrossAttention
+import os
+import sys
 
 import torch
 import torch.nn as nn
@@ -210,7 +211,58 @@ class DualBranch(nn.Module):
         lr_image = x["landsat"][:, : self.landsat_channels, :, :]
         hr_features = self.hr_encoder(hr_image)
         lr_features = self.lr_encoder(lr_image)
-        return hr_features, lr_features 
+        return hr_features, lr_features
+
+
+class SatCLIPLocationBranch(nn.Module):
+    def __init__(
+        self,
+        satclip_repo_id: str = "microsoft/SatCLIP-ViT16-L10",
+        satclip_ckpt_name: str = "satclip-vit16-l10.ckpt",
+        freeze: bool = False,
+    ):
+        super().__init__()
+        from huggingface_hub import hf_hub_download
+
+        sys.path.append(os.path.join(os.getcwd(), "lib/satclip/satclip"))
+        from load import get_satclip
+
+        ckpt_path = hf_hub_download(satclip_repo_id, satclip_ckpt_name)
+        satclip_model = get_satclip(ckpt_path, device="cpu", return_all=True)
+        self.location_encoder = satclip_model.location
+        nnet = self.location_encoder.nnet
+        if hasattr(nnet, "last_layer"):
+            # Default case for SatCLIP-ViT16-L10
+            self._embed_dim = nnet.last_layer.dim_out
+        elif hasattr(nnet, "class_emb"):
+            self._embed_dim = nnet.class_emb.out_features
+        else:
+            raise ValueError(f"Cannot determine output dim from {type(nnet).__name__}")
+
+        if freeze:
+            for p in self.location_encoder.parameters():
+                p.requires_grad = False
+
+    @property
+    def out_dim(self) -> int:
+        return self._embed_dim
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        embeddings = self.location_encoder(coords.double())
+        return embeddings.float()
+
+
+class CoordDualBranch(nn.Module):
+    def __init__(self, hr_encoder: Branch, lr_encoder: SatCLIPLocationBranch):
+        super().__init__()
+        self.hr_encoder = hr_encoder
+        self.lr_encoder = lr_encoder
+
+    def forward(self, x: Dict[str, torch.Tensor]) -> torch.Tensor:
+        hr_features = self.hr_encoder(x["rgb"])
+        lr_features = self.lr_encoder(x["coords"])
+        return hr_features, lr_features
+
 
 if __name__ == "__main__":
     # Example usage

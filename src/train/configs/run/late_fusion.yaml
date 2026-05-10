@@ -1,3 +1,6 @@
+# ------------------ Late Fusion Experiments ------------------
+# Launched until 2026-05-05 - after that multsim.yaml 
+# -------------------------------------------------------------
 slurm:
   partition: robolab
   cpus_per_task: 4

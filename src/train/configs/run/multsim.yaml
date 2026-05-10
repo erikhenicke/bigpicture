@@ -34,11 +34,17 @@ experiments:
     overrides:
       trainer.branch_ablation: true
 
-  # ---------------- Detach ablation ---------------------------
+  # ---------------- Gradient ablation ---------------------------
   multsim_detach:
     model: densenet_multsim
     overrides:
       model.detach_lr_for_task: true
+      trainer.branch_ablation: true
+  
+  multsim_no_domain:
+    model: densenet_multsim
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
       trainer.branch_ablation: true
 
   concat_detach:
@@ -58,4 +64,24 @@ experiments:
     model: densenet_film
     overrides:
       model.fusion.pre_fusion_relu: true
+      trainer.branch_ablation: true
+
+  # ------------------ Label Smoothing ------------------
+  multsim_ls_0_1:
+    model: densenet_multsim
+    overrides:
+      trainer.label_smoothing: 0.1
+      trainer.branch_ablation: true
+
+  # ------------------ Channel Init ------------------
+  multsim_channel_init_he:
+    model: densenet_multsim
+    overrides:
+      model.landsat_channel_init: "he"
+      trainer.branch_ablation: true
+    
+  multsim_channel_init_zero:
+    model: densenet_multsim
+    overrides:
+      model.landsat_channel_init: "zero"
       trainer.branch_ablation: true

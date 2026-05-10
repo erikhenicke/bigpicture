@@ -1,0 +1,38 @@
+slurm:
+  partition: robolab
+  cpus_per_task: 4
+  mem_per_cpu: 8GB
+
+global_overrides:
+  data.frac: 1.0
+  trainer.max_epochs: 50
+  optim: adam_warmup_cosine
+  data.preprocessed_dir: FMoW_LandSat_Norm
+
+experiments:
+  # ---------------- Backbone Models --------------------------------
+  densenet_baseline:
+    model: densenet_baseline
+
+  efficientformer_baseline:
+    model: efficientformer_baseline
+  
+  efficientnet_baseline:
+    model: efficientnet_baseline
+  
+  deit_baseline:
+    model: deit_baseline
+
+  # ---------------- LR features only -------------------------------
+  densenet_lr_baseline:
+    model: densenet_lr_baseline
+
+  densenet_lr_baseline_no_domain:
+    model: densenet_lr_baseline
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+
+  # ---------------- CoordDualBranch -------------------------------
+  densenet_satclip_loc:
+    model: densenet_satclip_loc
+  
