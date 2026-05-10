@@ -290,7 +290,9 @@ def main() -> None:
         nargs="?",
         help="Path to eval YAML (default: prompt user to pick from src/train/configs/eval/)",
     )
-    parser.add_argument("--latex", action="store_true", help="Output booktabs .tex snippets instead of HTML")
+    fmt = parser.add_mutually_exclusive_group()
+    fmt.add_argument("--latex", action="store_true", help="Output booktabs .tex snippets instead of HTML")
+    fmt.add_argument("--both", action="store_true", help="Output both HTML and LaTeX tables")
     args = parser.parse_args()
 
     if args.eval_yaml:
@@ -298,7 +300,9 @@ def main() -> None:
         if not eval_yaml.is_absolute():
             eval_yaml = Path.cwd() / eval_yaml
     else:
-        yamls = sorted(EVAL_CONFIG_DIR.glob("*.yaml"))
+        yamls = sorted(
+            p for p in EVAL_CONFIG_DIR.glob("*.yaml") if p.name != "translations.yaml"
+        )
         if not yamls:
             print(f"No eval YAML files found in {EVAL_CONFIG_DIR}", file=sys.stderr)
             sys.exit(1)
@@ -335,25 +339,32 @@ def main() -> None:
     groups: list[dict] = cfg["groups"]
     metric_directions: dict[str, str] = cfg.get("metric_directions", {})
 
-    latex: bool = args.latex
-    ext = ".tex" if latex else ".html"
+    if args.both:
+        formats = ["html", "latex"]
+    elif args.latex:
+        formats = ["latex"]
+    else:
+        formats = ["html"]
 
-    output_dir = LATEX_OUTPUT_DIR / run_name if latex else REPO_ROOT / "results" / run_name
-    output_dir.mkdir(parents=True, exist_ok=True)
+    for fmt in formats:
+        latex = fmt == "latex"
+        ext = ".tex" if latex else ".html"
+        output_dir = LATEX_OUTPUT_DIR / run_name if latex else REPO_ROOT / "results" / run_name
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    for group in groups:
-        safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
-        output = output_dir / f"{safe_name}{ext}"
-        written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions)
-        if written:
+        for group in groups:
+            safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
+            output = output_dir / f"{safe_name}{ext}"
+            written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions)
+            if written:
+                print(f"  wrote {output}")
+            else:
+                print(f"  skipped {group['name']} (no finished runs)")
+
+        if summary_metrics:
+            output = output_dir / f"summary{ext}"
+            build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions)
             print(f"  wrote {output}")
-        else:
-            print(f"  skipped {group['name']} (no finished runs)")
-
-    if summary_metrics:
-        output = output_dir / f"summary{ext}"
-        build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions)
-        print(f"  wrote {output}")
 
 
 if __name__ == "__main__":
