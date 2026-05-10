@@ -10,5 +10,7 @@
 
 set -euo pipefail
 
-srun rsync -avh --progress gaia7:/data/henicke/FMoW_LandSat_Norm_/fmow_preprocessed/landsat /data/henicke/FMoW_LandSat_Norm_/fmow_preprocessed/
+mkdir -p /data/henicke/FMoW_LandSat_/fmow_preprocessed/
+ln -s /data/henicke/FMoW_LandSat_Norm/fmow_preprocessed/fmow_rgb /data/henicke/FMoW_LandSat_/fmow_preprocessed/fmow_rgb
+srun rsync -avh --progress /home/datasets4/FMoW_LandSat/fmow_preprocessed/landsat /data/henicke/FMoW_LandSat_/fmow_preprocessed/
 

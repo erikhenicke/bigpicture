@@ -59,3 +59,17 @@ experiments:
     overrides:
       model.fusion.pre_fusion_relu: true
       trainer.branch_ablation: true
+
+  # ------------------ Dataset Normalization -----------------------
+  # Not data specific normalization but with 0.5
+  multsim_constnorm:
+    model: densenet_multsim
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
+  
+  concat_constnorm:
+    model: densenet_concat
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
