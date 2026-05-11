@@ -15,6 +15,7 @@ def save_transformed_images(
     landsat_dir="data",
     output_dir="data",
     batch_size=1,
+    image_norm="fmow-statistics",
 ):
     """
     Load all images from the dataset, apply transforms, and save as .pt files.
@@ -47,6 +48,7 @@ def save_transformed_images(
     dataset = FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
+        image_norm=image_norm,
     )
     
     print(f"Found {len(idxs)} images in landsat directory")
@@ -122,6 +124,12 @@ if __name__ == "__main__":
         default=100,
         help="Batch size for processing (higher = more memory usage)",
     )
+    parser.add_argument(
+        "--image-norm",
+        type=str,
+        default="fmow-statistics",
+        choices=["fmow-statistics", "const", "imagenet-statistics"],
+    )
     
     args = parser.parse_args()
     
@@ -130,4 +138,5 @@ if __name__ == "__main__":
         landsat_dir=args.landsat_dir,
         output_dir=args.output_dir,
         batch_size=args.batch_size,
+        image_norm=args.image_norm,
     )

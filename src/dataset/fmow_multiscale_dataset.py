@@ -120,6 +120,14 @@ class FMoWMultiScaleDataset(WILDSDataset):
                     )
                 ]
             )
+        elif self.image_norm == "const":
+            return transforms.Compose(
+                [
+                    transforms.ToImage(),
+                    transforms.ToDtype(torch.float32, scale=True),
+                    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+                ]
+            )
         else:
             return transforms.Compose(
                 [
