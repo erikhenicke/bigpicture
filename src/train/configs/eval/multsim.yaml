@@ -60,3 +60,6 @@ groups:
       - multsim_constnorm
       - concat
       - concat_constnorm
+    additional_metrics:
+      - test/test-od-lr-ablated-worst-group-task-acc
+      - test/test-od-hr-ablated-worst-group-task-acc

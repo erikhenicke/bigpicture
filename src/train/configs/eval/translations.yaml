@@ -8,6 +8,7 @@ models:
   densenet_lr_baseline: "DenseNet LR"
   efficientformer_baseline: "EfficientFormer"
   efficientnet_baseline: "EfficientNet"
+  densenet_baseline_satclip_loc: "Concat SatCLIP"
 
 params:
   model.lr_domain_loss_coeff:
@@ -49,9 +50,15 @@ params:
   trainer.branch_ablation:
     hidden: true
   data.preprocessed_dir:
-    plain: "DS-Norm"
-    latex: "DS-Norm"
-    no_value: true
+    plain: "Norm"
+    latex: "Norm"
+    values:
+      FMoW_LandSat_:
+        plain: "Const-Norm"
+        latex: "Const-Norm"
+      FMoW_LandSat_Norm:
+        plain: "DS-Norm"
+        latex: "DS-Norm"
   data.image_norm:
     plain: "Norm"
     latex: "Norm"
