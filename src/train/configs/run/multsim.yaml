@@ -73,6 +73,13 @@ experiments:
       trainer.label_smoothing: 0.1
       trainer.branch_ablation: true
 
+  multsim_ls_0_1_constnorm:
+    model: densenet_multsim
+    overrides:
+      trainer.label_smoothing: 0.1
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
+
   # ------------------ Channel Init ------------------
   multsim_channel_init_he:
     model: densenet_multsim
