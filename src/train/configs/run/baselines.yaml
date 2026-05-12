@@ -36,3 +36,9 @@ experiments:
   densenet_satclip_loc:
     model: densenet_satclip_loc
   
+  # ---------------- Dataset Normalization -------------------------
+  # Normalized not with data statistics but with 0.5
+  densenet_baseline_constnorm:
+    model: densenet_baseline
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_ 
