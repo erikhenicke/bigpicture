@@ -14,6 +14,8 @@ primary_metrics:
 groups:
   - name: Fusion Comparison
     runs:
+      - baselines@densenet_baseline
+      - baselines@densenet_satclip_loc
       - concat
       - film
       - geoprior
@@ -28,6 +30,7 @@ groups:
       - multsim
       - multsim_detach
       - multsim_no_domain
+      - concat
       - concat_detach
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
@@ -42,3 +45,18 @@ groups:
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
+
+  - name: Label Smoothing
+    runs:
+      - multsim
+      - multsim_ls_0_1  
+      - multsim_ls_0_1_constnorm
+  
+  - name: Normalization Ablation
+    runs:
+      - baselines@densenet_baseline
+      - baselines@densenet_baseline_constnorm
+      - multsim
+      - multsim_constnorm
+      - concat
+      - concat_constnorm

@@ -67,6 +67,53 @@ def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float
     return results
 
 
+def parse_run_ref(ref: str, default_config: str) -> tuple[str, str]:
+    if "@" in ref:
+        config_name, exp_key = ref.split("@", 1)
+        return config_name, exp_key
+    return default_config, ref
+
+
+def load_run_configs(config_names: set[str]) -> dict[str, dict]:
+    configs: dict[str, dict] = {}
+    for name in config_names:
+        path = RUN_CONFIG_DIR / f"{name}.yaml"
+        if not path.exists():
+            print(f"Warning: run config not found: {path}", file=sys.stderr)
+            continue
+        with path.open() as f:
+            configs[name] = yaml.safe_load(f)
+    return configs
+
+
+def resolve_experiments(
+    groups: list[dict],
+    run_configs: dict[str, dict],
+    default_config: str,
+) -> dict[str, dict]:
+    default_global = run_configs.get(default_config, {}).get("global_overrides", {})
+    resolved: dict[str, dict] = {}
+    for group in groups:
+        for ref in group["runs"]:
+            if ref in resolved:
+                continue
+            config_name, exp_key = parse_run_ref(ref, default_config)
+            cfg = run_configs.get(config_name)
+            if cfg is None:
+                print(f"Warning: run config '{config_name}' not found (referenced by '{ref}')", file=sys.stderr)
+                continue
+            exp_def = cfg.get("experiments", {}).get(exp_key)
+            if exp_def is None:
+                print(f"Warning: experiment '{exp_key}' not found in '{config_name}'", file=sys.stderr)
+                continue
+            source_global = cfg.get("global_overrides", {})
+            exp_overrides = exp_def.get("overrides") or {}
+            global_diff = {k: v for k, v in source_global.items() if default_global.get(k) != v}
+            display_overrides = {**global_diff, **exp_overrides}
+            resolved[ref] = {**exp_def, "overrides": display_overrides or None}
+    return resolved
+
+
 def format_cell(values: list[float], format_percent: bool, latex: bool = False) -> str:
     if not values:
         return "—"
@@ -79,12 +126,13 @@ def format_cell(values: list[float], format_percent: bool, latex: bool = False) 
 
 
 def format_experiment_name(
-    exp_key: str,
+    run_ref: str,
     run_experiments: dict,
     translations: dict,
     latex: bool = False,
 ) -> str:
-    exp_def = run_experiments.get(exp_key)
+    exp_def = run_experiments.get(run_ref)
+    exp_key = run_ref.split("@", 1)[1] if "@" in run_ref else run_ref
     if exp_def is None:
         return exp_key.replace("_", " ").title()
 
@@ -218,16 +266,18 @@ def build_group_table(
     run_experiments: dict,
     translations: dict,
     metric_directions: dict[str, str],
+    default_config: str,
 ) -> bool:
     """Build and write a table for one group. Returns False if skipped."""
     metrics = primary_metrics + group.get("additional_metrics", [])
-    exp_keys: list[str] = group["runs"]
+    run_refs: list[str] = group["runs"]
 
     rows: list[dict] = []
-    for key in exp_keys:
-        run_dir = find_run_dir(key)
+    for ref in run_refs:
+        _, exp_key = parse_run_ref(ref, default_config)
+        run_dir = find_run_dir(exp_key)
         metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
-        row: dict = {"Experiment": format_experiment_name(key, run_experiments, translations, latex=latex)}
+        row: dict = {"Experiment": format_experiment_name(ref, run_experiments, translations, latex=latex)}
         for m in metrics:
             row[format_metric_name(m)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
         rows.append(row)
@@ -251,22 +301,24 @@ def build_summary_table(
     run_experiments: dict,
     translations: dict,
     metric_directions: dict[str, str],
+    default_config: str,
 ) -> None:
     """Build a table ranking all unique experiments by the summary metrics."""
     seen: set[str] = set()
-    exp_keys: list[str] = []
+    run_refs: list[str] = []
     for group in groups:
-        for key in group["runs"]:
-            if key not in seen:
-                seen.add(key)
-                exp_keys.append(key)
+        for ref in group["runs"]:
+            if ref not in seen:
+                seen.add(ref)
+                run_refs.append(ref)
 
     cols = [format_metric_name(m) for m in summary_metrics]
     rows: list[dict] = []
-    for key in exp_keys:
-        run_dir = find_run_dir(key)
+    for ref in run_refs:
+        _, exp_key = parse_run_ref(ref, default_config)
+        run_dir = find_run_dir(exp_key)
         all_values = load_test_metrics(run_dir, summary_metrics) if run_dir else {m: [] for m in summary_metrics}
-        row: dict = {"Experiment": format_experiment_name(key, run_experiments, translations, latex=latex)}
+        row: dict = {"Experiment": format_experiment_name(ref, run_experiments, translations, latex=latex)}
         for m, col in zip(summary_metrics, cols):
             row[col] = format_cell(all_values[m], format_percent=m.endswith("acc"), latex=latex)
         first_vals = all_values[summary_metrics[0]]
@@ -320,24 +372,20 @@ def main() -> None:
         cfg = yaml.safe_load(f)
 
     run_name = eval_yaml.stem
-    run_yaml = RUN_CONFIG_DIR / f"{run_name}.yaml"
-    run_experiments: dict = {}
-    if run_yaml.exists():
-        with run_yaml.open() as f:
-            run_cfg = yaml.safe_load(f)
-        run_experiments = run_cfg.get("experiments", {})
-    else:
-        print(f"Warning: no run config found at {run_yaml}", file=sys.stderr)
+    primary_metrics: list[str] = cfg["primary_metrics"]
+    summary_metrics: list[str] = cfg.get("summary_metrics", [])
+    groups: list[dict] = cfg["groups"]
+    metric_directions: dict[str, str] = cfg.get("metric_directions", {})
+
+    all_refs = [ref for group in groups for ref in group["runs"]]
+    config_names = {parse_run_ref(ref, run_name)[0] for ref in all_refs}
+    run_configs = load_run_configs(config_names)
+    run_experiments = resolve_experiments(groups, run_configs, run_name)
 
     translations: dict = {"models": {}, "params": {}}
     if TRANSLATIONS_FILE.exists():
         with TRANSLATIONS_FILE.open() as f:
             translations = yaml.safe_load(f)
-
-    primary_metrics: list[str] = cfg["primary_metrics"]
-    summary_metrics: list[str] = cfg.get("summary_metrics", [])
-    groups: list[dict] = cfg["groups"]
-    metric_directions: dict[str, str] = cfg.get("metric_directions", {})
 
     if args.both:
         formats = ["html", "latex"]
@@ -355,7 +403,7 @@ def main() -> None:
         for group in groups:
             safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
             output = output_dir / f"{safe_name}{ext}"
-            written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions)
+            written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions, run_name)
             if written:
                 print(f"  wrote {output}")
             else:
@@ -363,7 +411,7 @@ def main() -> None:
 
         if summary_metrics:
             output = output_dir / f"summary{ext}"
-            build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions)
+            build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions, run_name)
             print(f"  wrote {output}")
 
 
