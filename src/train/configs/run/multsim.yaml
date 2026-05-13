@@ -106,3 +106,28 @@ experiments:
     overrides:
       data.preprocessed_dir: FMoW_LandSat_
       trainer.branch_ablation: true
+
+  # ------------------ Spatial Encoding -----------------------
+  multsim_overlap_binary:
+    model: densenet_multsim
+    overrides:
+      spatial: binary_overlap_mask_encoding
+      trainer.branch_ablation: true
+
+  multsim_overlap_gaussian:
+    model: densenet_multsim
+    overrides:
+      spatial: gaussian_overlap_mask_encoding
+      trainer.branch_ablation: true
+
+  multsim_coord:
+    model: densenet_multsim
+    overrides:
+      spatial: coord_encoding
+      trainer.branch_ablation: true
+  
+  multsim_fourier:
+    model: densenet_multsim
+    overrides:
+      spatial: fourier_encoding
+      trainer.branch_ablation: true
