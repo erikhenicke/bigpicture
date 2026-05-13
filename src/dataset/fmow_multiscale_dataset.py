@@ -123,9 +123,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
             self.lr_span_km = max_hr_span * lr_extension_factor
             S = self._IMG_SIZE
             self._lr_res = self.lr_span_km * 1000.0 / S
+            self._coord_scale = (S - 1) * self._lr_res / 2.0  # half-extent for [-1, 1]
+            self._coord_center = self._coord_scale  # center value in meters
             pixel = torch.arange(S, dtype=torch.float32)
             py, px = torch.meshgrid(pixel * self._lr_res, pixel * self._lr_res, indexing="ij")
-            self._coord_grid_lr = torch.stack([px, py], dim=0)  # (2, S, S)
+            self._coord_grid_lr = (torch.stack([px, py], dim=0) - self._coord_center) / self._coord_scale  # (2, S, S), in [-1, 1]
         else:
             self.lr_span_km = None
 
@@ -227,10 +229,10 @@ class FMoWMultiScaleDataset(WILDSDataset):
         offset = center * lr_res - center * hr_res
 
         if self.spatial_coord_grid:
-            tensors["coord_grid_lr"] = self._coord_grid_lr  # (2, S, S), shared
+            tensors["coord_grid_lr"] = self._coord_grid_lr  # (2, S, S), shared, in [-1, 1]
             pixel = torch.arange(S, dtype=torch.float32)
             py, px = torch.meshgrid(pixel * hr_res + offset, pixel * hr_res + offset, indexing="ij")
-            tensors["coord_grid_hr"] = torch.stack([px, py], dim=0)
+            tensors["coord_grid_hr"] = (torch.stack([px, py], dim=0) - self._coord_center) / self._coord_scale
 
         if self.spatial_overlap_mask:
             ratio = img_span_km / self.lr_span_km

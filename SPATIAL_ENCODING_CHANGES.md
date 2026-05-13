@@ -102,10 +102,10 @@ Other DualBranch configs (film, d3g, multsim, geoprior) work without this block 
 
 ## Coordinate System
 
-Both HR and LR grids use a shared physical reference frame: **meters from the top-left of the LR image**.
+Both HR and LR grids use a shared physical reference frame, **normalized to [-1, 1]** by centering and dividing by the LR grid's half-extent.
 
-- LR resolution: `lr_span_km * 1000 / 224` m/pixel (constant)
-- HR resolution: `img_span_km * 1000 / 224` m/pixel (per-sample)
-- HR offset: `112 * lr_res - 112 * hr_res` (aligns centers)
+- LR grid spans [-1, 1] — full LR extent
+- HR grid clusters around 0 (center-aligned) in a narrow band proportional to `img_span_km / lr_span_km`
+- HR offset: `112 * lr_res - 112 * hr_res` (aligns centers before normalization)
 
-At the center pixel (112, 112), HR and LR coordinates are identical. HR values cluster in a narrow band around the center of LR's range — this reflects the correct physical relationship where the HR image covers a small subset of the LR extent.
+The [-1, 1] normalization preserves the relative scale signal (HR covers a small subset of LR) while keeping values bounded, symmetric, and well-conditioned for learning. The Fourier encoding receives these normalized coordinates as input.

@@ -75,13 +75,15 @@ def build_coord_grids(img_span_km: float, lr_span_km: float):
     hr_res = img_span_km * 1000.0 / S
     center = S / 2.0
     offset = center * lr_res - center * hr_res
+    coord_scale = (S - 1) * lr_res / 2.0
+    coord_center = coord_scale
 
     pixel = torch.arange(S, dtype=torch.float32)
     lr_py, lr_px = torch.meshgrid(pixel * lr_res, pixel * lr_res, indexing="ij")
-    coord_grid_lr = torch.stack([lr_px, lr_py], dim=0)
+    coord_grid_lr = (torch.stack([lr_px, lr_py], dim=0) - coord_center) / coord_scale
 
     hr_py, hr_px = torch.meshgrid(pixel * hr_res + offset, pixel * hr_res + offset, indexing="ij")
-    coord_grid_hr = torch.stack([hr_px, hr_py], dim=0)
+    coord_grid_hr = (torch.stack([hr_px, hr_py], dim=0) - coord_center) / coord_scale
 
     return coord_grid_hr, coord_grid_lr
 
