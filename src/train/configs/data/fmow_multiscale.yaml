@@ -7,6 +7,7 @@ batch_size: 64
 num_workers: 4
 frac: 1.0 
 augment_train: true
+lr_extension_factor: 3.0
 
 train_split: train
 val_splits: [val, id_val]

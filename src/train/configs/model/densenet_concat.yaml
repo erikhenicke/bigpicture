@@ -20,14 +20,6 @@ model:
     _target_: models.components.branches.DualBranch
     landsat_channels: ${model.landsat_in_channels}
 
-  spatial_encoding:
-    coord_channels: false
-    overlap_mask: false
-    overlap_mask_type: binary
-    fourier_bands: 0
-    fourier_proj_dim: 0
-    lr_extension_factor: 3.0
-
   fusion:
     _target_: models.components.fusion.ConcatFusion
     hr_dim: 1024

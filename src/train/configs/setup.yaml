@@ -2,6 +2,7 @@ defaults:
   - _self_
   - data: fmow_multiscale
   - model: deit_both
+  - spatial: no_spatial_encoding
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow

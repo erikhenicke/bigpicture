@@ -45,7 +45,7 @@ def _parse_spatial_cfg(cfg: DictConfig):
     fourier_bands = spatial_cfg.get("fourier_bands", 0)
     fourier_proj_dim = spatial_cfg.get("fourier_proj_dim", 0)
     overlap_mask_type = spatial_cfg.get("overlap_mask_type", "binary")
-    lr_extension_factor = spatial_cfg.get("lr_extension_factor", None)
+    lr_extension_factor = cfg.data.get("lr_extension_factor", None)
 
     hr_extra, lr_extra = 0, 0
     if coord_channels:
