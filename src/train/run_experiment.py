@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 import wandb
 
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
+from models.components.spatial_encoding import SpatialEncoding
 from models.late_fusion import LateFusionModule
 from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
 
@@ -37,8 +38,54 @@ def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, sh
     )
 
 
+def _parse_spatial_cfg(cfg: DictConfig):
+    spatial_cfg = cfg.model.get("spatial_encoding", {})
+    coord_channels = spatial_cfg.get("coord_channels", False)
+    overlap_mask = spatial_cfg.get("overlap_mask", False)
+    fourier_bands = spatial_cfg.get("fourier_bands", 0)
+    fourier_proj_dim = spatial_cfg.get("fourier_proj_dim", 0)
+    overlap_mask_type = spatial_cfg.get("overlap_mask_type", "binary")
+    lr_span_km = spatial_cfg.get("lr_span_km", None)
+
+    hr_extra, lr_extra = 0, 0
+    if coord_channels:
+        hr_extra += 2
+        lr_extra += 2
+    if overlap_mask:
+        lr_extra += 1
+    use_fourier = fourier_proj_dim > 0 and fourier_bands > 0
+    if use_fourier:
+        hr_extra += fourier_proj_dim
+        lr_extra += fourier_proj_dim
+
+    needs_coord_grid = coord_channels or use_fourier
+    needs_overlap_mask = overlap_mask
+
+    return {
+        "coord_channels": coord_channels,
+        "overlap_mask": overlap_mask,
+        "overlap_mask_type": overlap_mask_type,
+        "fourier_bands": fourier_bands,
+        "fourier_proj_dim": fourier_proj_dim,
+        "use_fourier": use_fourier,
+        "lr_span_km": lr_span_km,
+        "hr_extra": hr_extra,
+        "lr_extra": lr_extra,
+        "needs_coord_grid": needs_coord_grid,
+        "needs_overlap_mask": needs_overlap_mask,
+    }
+
+
 def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
     preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
+    sc = _parse_spatial_cfg(cfg)
+
+    spatial_kwargs = dict(
+        spatial_coord_grid=sc["needs_coord_grid"],
+        spatial_overlap_mask=sc["needs_overlap_mask"],
+        overlap_mask_type=sc["overlap_mask_type"],
+        lr_span_km=sc["lr_span_km"],
+    )
 
     dataset_train = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
@@ -46,12 +93,14 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         preprocessed_dir=preprocessed_dir,
         augment=cfg.data.augment_train,
         image_norm=cfg.data.image_norm,
+        **spatial_kwargs,
     )
     dataset_eval = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
         preprocessed_dir=preprocessed_dir,
         image_norm=cfg.data.image_norm,
+        **spatial_kwargs,
     )
 
     train_loader = _make_loader(dataset_train, split=cfg.data.train_split, cfg=cfg, shuffle=True)
@@ -89,9 +138,32 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             landsat_channels=cfg.model.landsat_in_channels,
         )
     else:
-        hr_encoder = instantiate(cfg.model.hr_encoder)
-        lr_encoder = instantiate(cfg.model.lr_encoder)
-        branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
+        branches_target = cfg.model.branches.get("_target_", "")
+        is_dual_branch = branches_target.endswith(".DualBranch")
+
+        if is_dual_branch:
+            sc = _parse_spatial_cfg(cfg)
+            hr_encoder = instantiate(cfg.model.hr_encoder, in_channels=3 + sc["hr_extra"])
+            lr_encoder = instantiate(cfg.model.lr_encoder, in_channels=cfg.model.landsat_in_channels + sc["lr_extra"])
+
+            hr_spatial_enc = None
+            lr_spatial_enc = None
+            if sc["use_fourier"]:
+                hr_spatial_enc = SpatialEncoding(sc["fourier_bands"], sc["fourier_proj_dim"])
+                lr_spatial_enc = SpatialEncoding(sc["fourier_bands"], sc["fourier_proj_dim"])
+
+            branches = instantiate(
+                cfg.model.branches,
+                hr_encoder=hr_encoder,
+                lr_encoder=lr_encoder,
+                coord_channels=sc["coord_channels"],
+                hr_spatial_encoding=hr_spatial_enc,
+                lr_spatial_encoding=lr_spatial_enc,
+            )
+        else:
+            hr_encoder = instantiate(cfg.model.hr_encoder)
+            lr_encoder = instantiate(cfg.model.lr_encoder)
+            branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
         if model_target.endswith("D3GModel"):
             model = instantiate(
                 cfg.model.model,

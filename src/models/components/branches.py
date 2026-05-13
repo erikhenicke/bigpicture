@@ -4,7 +4,9 @@ import sys
 import torch
 import torch.nn as nn
 from abc import abstractmethod
-from typing import Dict
+from typing import Dict, Optional
+
+from models.components.spatial_encoding import SpatialEncoding
 
 
 VALID_EXTRA_CH_INITS = ("average", "zero", "he")
@@ -14,8 +16,8 @@ class Branch(nn.Module):
     def __init__(self, in_channels: int = 3, landsat_channel_init: str = "zero", **kwargs):
         super().__init__()
 
-        if not (3 <= in_channels <= 6):
-            raise ValueError(f"Unsupported number of input channels: {in_channels}. Supported values are 3, 4, 5, or 6.")
+        if in_channels < 3:
+            raise ValueError(f"Unsupported number of input channels: {in_channels}. Must be >= 3.")
         if landsat_channel_init not in VALID_EXTRA_CH_INITS:
             raise ValueError(f"Unsupported landsat_channel_init: {landsat_channel_init}. Must be one of {VALID_EXTRA_CH_INITS}.")
 
@@ -194,21 +196,70 @@ class TimmBranch(Branch):
 
 
 class DualBranch(nn.Module):
-    def __init__(self, hr_encoder: Branch, lr_encoder: Branch, landsat_channels: int = 6):
+    def __init__(
+        self,
+        hr_encoder: Branch,
+        lr_encoder: Branch,
+        landsat_channels: int = 6,
+        coord_channels: bool = False,
+        hr_spatial_encoding: Optional[SpatialEncoding] = None,
+        lr_spatial_encoding: Optional[SpatialEncoding] = None,
+    ):
         super().__init__()
 
-        if lr_encoder.in_channels != landsat_channels:
+        hr_extra = 0
+        lr_extra = 0
+        if coord_channels:
+            hr_extra += 2
+            lr_extra += 2
+        if hr_spatial_encoding is not None:
+            hr_extra += hr_spatial_encoding.extra_channels
+        if lr_spatial_encoding is not None:
+            lr_extra += lr_spatial_encoding.extra_channels
+
+        expected_lr = landsat_channels + lr_extra
+        if lr_encoder.in_channels != expected_lr:
             raise ValueError(
-                f"LR encoder input channels ({lr_encoder.in_channels}) do not match specified landsat_channels ({landsat_channels})."
+                f"LR encoder in_channels ({lr_encoder.in_channels}) != "
+                f"landsat_channels({landsat_channels}) + spatial extras({lr_extra}) = {expected_lr}."
+            )
+        expected_hr = 3 + hr_extra
+        if hr_encoder.in_channels != expected_hr:
+            raise ValueError(
+                f"HR encoder in_channels ({hr_encoder.in_channels}) != "
+                f"3 + spatial extras({hr_extra}) = {expected_hr}."
             )
 
         self.hr_encoder = hr_encoder
         self.lr_encoder = lr_encoder
         self.landsat_channels = landsat_channels
+        self.coord_channels = coord_channels
+        self.hr_spatial_encoding = hr_spatial_encoding
+        self.lr_spatial_encoding = lr_spatial_encoding
 
     def forward(self, x: Dict[str, torch.Tensor]) -> torch.Tensor:
         hr_image = x["rgb"]
         lr_image = x["landsat"][:, : self.landsat_channels, :, :]
+
+        extra_hr, extra_lr = [], []
+
+        if self.coord_channels:
+            extra_hr.append(x["coord_grid_hr"])
+            extra_lr.append(x["coord_grid_lr"])
+
+        if "overlap_mask" in x:
+            extra_lr.append(x["overlap_mask"])
+
+        if self.hr_spatial_encoding is not None and "coord_grid_hr" in x:
+            extra_hr.append(self.hr_spatial_encoding(x["coord_grid_hr"]))
+        if self.lr_spatial_encoding is not None and "coord_grid_lr" in x:
+            extra_lr.append(self.lr_spatial_encoding(x["coord_grid_lr"]))
+
+        if extra_hr:
+            hr_image = torch.cat([hr_image] + extra_hr, dim=1)
+        if extra_lr:
+            lr_image = torch.cat([lr_image] + extra_lr, dim=1)
+
         hr_features = self.hr_encoder(hr_image)
         lr_features = self.lr_encoder(lr_image)
         return hr_features, lr_features

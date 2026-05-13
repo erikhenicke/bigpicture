@@ -19,6 +19,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     _dataset_name = "fmow_multiscale"
 
+    _IMG_SIZE = 224
+
     def __init__(
         self,
         fmow_dir="data",
@@ -33,7 +35,11 @@ class FMoWMultiScaleDataset(WILDSDataset):
         augment=False,
         hflip_prob=0.5,
         vflip_prob=0.5,
-        image_norm="fmow-statistics"
+        image_norm="fmow-statistics",
+        spatial_coord_grid=False,
+        spatial_overlap_mask=False,
+        overlap_mask_type="binary",
+        lr_span_km=None,
     ):
         """
         Args:
@@ -104,7 +110,21 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.augment = augment
         self.hflip_prob = hflip_prob
         self.vflip_prob = vflip_prob
- 
+
+        self.spatial_coord_grid = spatial_coord_grid
+        self.spatial_overlap_mask = spatial_overlap_mask
+        self.overlap_mask_type = overlap_mask_type
+        self.lr_span_km = lr_span_km
+
+        if spatial_coord_grid or spatial_overlap_mask:
+            if lr_span_km is None:
+                raise ValueError("lr_span_km is required when spatial features are enabled.")
+            S = self._IMG_SIZE
+            self._lr_res = lr_span_km * 1000.0 / S
+            pixel = torch.arange(S, dtype=torch.float32)
+            py, px = torch.meshgrid(pixel * self._lr_res, pixel * self._lr_res, indexing="ij")
+            self._coord_grid_lr = torch.stack([px, py], dim=0)  # (2, S, S)
+
 
     def get_default_transform_rgb(self):
         """Default transform for RGB images."""
@@ -169,50 +189,87 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 ]
             )
 
-    def _apply_augmentation(self, rgb_img: torch.Tensor, landsat_img: torch.Tensor):
-        """
-        Apply the same spatial augmentation to both modalities to keep alignment.
-        Expects tensors shaped:
-          rgb_img:      (3, H, W)
-          landsat_img:  (C, H, W)
-        """
-        if torch.rand(1).item() < self.hflip_prob:
-            rgb_img = torch.flip(rgb_img, dims=[2])       # flip width
+    def _apply_augmentation(self, rgb_img, landsat_img, spatial_tensors=None):
+        """Apply the same spatial augmentation to images and optional spatial tensors."""
+        if spatial_tensors is None:
+            spatial_tensors = {}
+
+        hflip = torch.rand(1).item() < self.hflip_prob
+        vflip = torch.rand(1).item() < self.vflip_prob
+
+        if hflip:
+            rgb_img = torch.flip(rgb_img, dims=[2])
             landsat_img = torch.flip(landsat_img, dims=[2])
+            for k in spatial_tensors:
+                spatial_tensors[k] = torch.flip(spatial_tensors[k], dims=[2])
 
-        if torch.rand(1).item() < self.vflip_prob:
-            rgb_img = torch.flip(rgb_img, dims=[1])       # flip height
+        if vflip:
+            rgb_img = torch.flip(rgb_img, dims=[1])
             landsat_img = torch.flip(landsat_img, dims=[1])
+            for k in spatial_tensors:
+                spatial_tensors[k] = torch.flip(spatial_tensors[k], dims=[1])
 
-        return rgb_img, landsat_img
+        return rgb_img, landsat_img, spatial_tensors
+
+    def _build_spatial_tensors(self, img_span_km):
+        tensors = {}
+        if not (self.spatial_coord_grid or self.spatial_overlap_mask):
+            return tensors
+
+        S = self._IMG_SIZE
+        lr_res = self._lr_res
+        hr_res = img_span_km * 1000.0 / S
+        center = S / 2.0
+        offset = center * lr_res - center * hr_res
+
+        if self.spatial_coord_grid:
+            tensors["coord_grid_lr"] = self._coord_grid_lr  # (2, S, S), shared
+            pixel = torch.arange(S, dtype=torch.float32)
+            py, px = torch.meshgrid(pixel * hr_res + offset, pixel * hr_res + offset, indexing="ij")
+            tensors["coord_grid_hr"] = torch.stack([px, py], dim=0)
+
+        if self.spatial_overlap_mask:
+            ratio = img_span_km / self.lr_span_km
+            if self.overlap_mask_type == "gaussian":
+                lin = torch.linspace(-1, 1, S)
+                gy, gx = torch.meshgrid(lin, lin, indexing="ij")
+                sigma = ratio / 2.0
+                mask = torch.exp(-(gx ** 2 + gy ** 2) / (2 * sigma ** 2))
+            else:
+                lin = torch.linspace(-1, 1, S)
+                gy, gx = torch.meshgrid(lin, lin, indexing="ij")
+                mask = ((gx.abs() <= ratio) & (gy.abs() <= ratio)).float()
+            tensors["overlap_mask"] = mask.unsqueeze(0)  # (1, S, S)
+
+        return tensors
 
     def __len__(self):
         return len(self._y_array)
 
     def __getitem__(self, idx):
-        """
-        Returns tuple of (x, y, metadata) following WILDS convention.
-        x is now a dict with 'rgb' and 'landsat' keys.
-        """
         file_idx = self.full_idxs[idx]
 
         rgb_img = self.get_rgb_input(file_idx)
         landsat_img = self.get_landsat_input(file_idx)
-
-        if self.augment:
-            rgb_img, landsat_img = self._apply_augmentation(rgb_img, landsat_img)
 
         y = self._y_array[idx]
         metadata = self._metadata_array[idx]
         coords_start = self._metadata_fields.index("lat")
         coords = self._metadata_array[idx, coords_start:coords_start + 2]
         img_span_idx = self._metadata_fields.index("img_span_km")
-        img_span_km = self._metadata_array[idx, img_span_idx]
+        img_span_km = self._metadata_array[idx, img_span_idx].item()
+
+        spatial = self._build_spatial_tensors(img_span_km)
+
+        if self.augment:
+            rgb_img, landsat_img, spatial = self._apply_augmentation(rgb_img, landsat_img, spatial)
+
         x = {
             "rgb": rgb_img,
             "landsat": landsat_img,
             "coords": coords,
-            "img_span_km": img_span_km,
+            "img_span_km": self._metadata_array[idx, img_span_idx],
+            **spatial,
         }
 
         return x, y, metadata
@@ -259,20 +316,18 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return landsat_tensor
 
     def get_input(self, idx):
-        """
-        Required by WILDSDataset interface.
-        Returns the input for a given idx.
-        """
         file_idx = self.full_idxs[idx]
         coords_start = self._metadata_fields.index("lat")
         coords = self._metadata_array[idx, coords_start:coords_start + 2]
         img_span_idx = self._metadata_fields.index("img_span_km")
         img_span_km = self._metadata_array[idx, img_span_idx]
+        spatial = self._build_spatial_tensors(img_span_km.item())
         return {
             "rgb": self.get_rgb_input(file_idx),
             "landsat": self.get_landsat_input(file_idx),
             "coords": coords,
             "img_span_km": img_span_km,
+            **spatial,
         }
 
     def eval(self, y_pred, y_true, metadata, prediction_fn=None):
@@ -281,40 +336,10 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
 
 def collate_multiscale(batch):
-    """
-    Custom collate function to handle dict inputs from FMoWMultiScaleDataset.
-
-    Args:
-        batch: List of tuples (x, y, metadata) where x is dict with 'rgb', 'landsat', 'coords'
-
-    Returns:
-        tuple of (x_dict, y_batch, metadata_batch)
-    """
-    rgb_list = []
-    landsat_list = []
-    coords_list = []
-    img_span_list = []
-    y_list = []
-    metadata_list = []
-
-    for x, y, metadata in batch:
-        rgb_list.append(x["rgb"])
-        landsat_list.append(x["landsat"])
-        coords_list.append(x["coords"])
-        img_span_list.append(x["img_span_km"])
-        y_list.append(y)
-        metadata_list.append(metadata)
-
-    return (
-        {
-            "rgb": torch.stack(rgb_list, dim=0),
-            "landsat": torch.stack(landsat_list, dim=0),
-            "coords": torch.stack(coords_list, dim=0),
-            "img_span_km": torch.stack(img_span_list, dim=0),
-        },
-        torch.stack(y_list, dim=0),
-        torch.stack(metadata_list, dim=0),
-    )
+    xs, ys, metas = zip(*batch)
+    keys = xs[0].keys()
+    x_batch = {k: torch.stack([x[k] for x in xs], dim=0) for k in keys}
+    return x_batch, torch.stack(ys, dim=0), torch.stack(metas, dim=0)
 
 
 if __name__ == "__main__":

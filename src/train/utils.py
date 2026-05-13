@@ -31,6 +31,10 @@ def make_multiscale_dataset(
     preprocessed_dir: str | None = None,
     augment: bool = False,
     image_norm: str = "fmow-statistics",
+    spatial_coord_grid: bool = False,
+    spatial_overlap_mask: bool = False,
+    overlap_mask_type: str = "binary",
+    lr_span_km: float | None = None,
 ) -> FMoWMultiScaleDataset:
     return FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
@@ -38,6 +42,10 @@ def make_multiscale_dataset(
         preprocessed_dir=preprocessed_dir,
         augment=augment,
         image_norm=image_norm,
+        spatial_coord_grid=spatial_coord_grid,
+        spatial_overlap_mask=spatial_overlap_mask,
+        overlap_mask_type=overlap_mask_type,
+        lr_span_km=lr_span_km,
     )
 
 
