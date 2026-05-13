@@ -207,29 +207,6 @@ class DualBranch(nn.Module):
     ):
         super().__init__()
 
-        hr_extra = 0
-        lr_extra = 0
-        if coord_channels:
-            hr_extra += 2
-            lr_extra += 2
-        if hr_spatial_encoding is not None:
-            hr_extra += hr_spatial_encoding.extra_channels
-        if lr_spatial_encoding is not None:
-            lr_extra += lr_spatial_encoding.extra_channels
-
-        expected_lr = landsat_channels + lr_extra
-        if lr_encoder.in_channels != expected_lr:
-            raise ValueError(
-                f"LR encoder in_channels ({lr_encoder.in_channels}) != "
-                f"landsat_channels({landsat_channels}) + spatial extras({lr_extra}) = {expected_lr}."
-            )
-        expected_hr = 3 + hr_extra
-        if hr_encoder.in_channels != expected_hr:
-            raise ValueError(
-                f"HR encoder in_channels ({hr_encoder.in_channels}) != "
-                f"3 + spatial extras({hr_extra}) = {expected_hr}."
-            )
-
         self.hr_encoder = hr_encoder
         self.lr_encoder = lr_encoder
         self.landsat_channels = landsat_channels
