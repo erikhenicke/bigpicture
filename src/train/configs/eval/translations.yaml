@@ -77,5 +77,5 @@ params:
         latex: "Overlap-Binary"
       gaussian_overlap_mask_encoding:
         plain: "Overlap-Gauss"
-        latex: "OVerlap-Gauss"
+        latex: "Overlap-Gauss"
 
