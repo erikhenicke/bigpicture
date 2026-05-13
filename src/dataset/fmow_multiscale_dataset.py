@@ -39,7 +39,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         spatial_coord_grid=False,
         spatial_overlap_mask=False,
         overlap_mask_type="binary",
-        lr_span_km=None,
+        lr_extension_factor=None,
     ):
         """
         Args:
@@ -114,16 +114,20 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.spatial_coord_grid = spatial_coord_grid
         self.spatial_overlap_mask = spatial_overlap_mask
         self.overlap_mask_type = overlap_mask_type
-        self.lr_span_km = lr_span_km
 
         if spatial_coord_grid or spatial_overlap_mask:
-            if lr_span_km is None:
-                raise ValueError("lr_span_km is required when spatial features are enabled.")
+            if lr_extension_factor is None:
+                raise ValueError("lr_extension_factor is required when spatial features are enabled.")
+            img_span_idx = self._metadata_fields.index("img_span_km")
+            max_hr_span = self._metadata_array[:, img_span_idx].max().item()
+            self.lr_span_km = max_hr_span * lr_extension_factor
             S = self._IMG_SIZE
-            self._lr_res = lr_span_km * 1000.0 / S
+            self._lr_res = self.lr_span_km * 1000.0 / S
             pixel = torch.arange(S, dtype=torch.float32)
             py, px = torch.meshgrid(pixel * self._lr_res, pixel * self._lr_res, indexing="ij")
             self._coord_grid_lr = torch.stack([px, py], dim=0)  # (2, S, S)
+        else:
+            self.lr_span_km = None
 
 
     def get_default_transform_rgb(self):
