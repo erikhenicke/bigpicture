@@ -62,3 +62,20 @@ params:
   data.image_norm:
     plain: "Norm"
     latex: "Norm"
+  spatial:
+    plain: "Spatial Encoding"
+    latex: "Spatial Encoding"
+    values:
+      fourier_encoding:
+        plain: "Coord-Freq"
+        latex: "Coord-Freq"
+      coord_encoding:
+        plain: "Coord"
+        latex: "Coord"
+      binary_overlap_mask_encoding:
+        plain: "Overlap-Binary"
+        latex: "Overlap-Binary"
+      gaussian_overlap_mask_encoding:
+        plain: "Overlap-Gauss"
+        latex: "OVerlap-Gauss"
+

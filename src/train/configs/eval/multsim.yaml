@@ -63,3 +63,14 @@ groups:
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
+
+  - name: Spatial Encodings
+    runs:
+      - multsim
+      - multsim_fourier
+      - multsim_coord
+      - multsim_overlap_gaussian
+    additional_metrics:
+      - test/test-od-lr-ablated-worst-group-task-acc
+      - test/test-od-hr-ablated-worst-group-task-acc
+
