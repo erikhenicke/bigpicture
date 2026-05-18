@@ -162,28 +162,29 @@ def evaluate_lightning_checkpoint() -> None:
 
     checkpoint_path = resolve_checkpoint_path(Path(args.checkpoint_path))
 
-    preprocessed_dir = resolve_platform_preprocessed_dir(args.preprocessed_dir, "/data/henicke/FMoW_LandSat")
-    test_loaders = make_data_loaders(
-        fmow_dir=args.fmow_dir,
-        landsat_dir=args.landsat_dir,
-        preprocessed_dir=preprocessed_dir,
-        frac=args.frac,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-    )
+    # preprocessed_dir = resolve_platform_preprocessed_dir(args.preprocessed_dir, "/data/henicke/FMoW_LandSat")
+    # test_loaders = make_data_loaders(
+    #     fmow_dir=args.fmow_dir,
+    #     landsat_dir=args.landsat_dir,
+    #     preprocessed_dir=preprocessed_dir,
+    #     frac=args.frac,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    # )
 
     model = load_model_from_checkpoint(str(checkpoint_path))
+    print(model)
 
-    trainer = Trainer(
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=1,
-        logger=False,
-        enable_checkpointing=False,
-        log_every_n_steps=25,
-    )
+    # trainer = Trainer(
+    #     accelerator="gpu" if torch.cuda.is_available() else "cpu",
+    #     devices=1,
+    #     logger=False,
+    #     enable_checkpointing=False,
+    #     log_every_n_steps=25,
+    # )
 
-    results = trainer.test(model=model, dataloaders=test_loaders, ckpt_path=None)
-    print(results)
+    # results = trainer.test(model=model, dataloaders=test_loaders, ckpt_path=None)
+    # print(results)
 
 
 if __name__ == "__main__":

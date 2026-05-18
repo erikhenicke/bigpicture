@@ -22,7 +22,10 @@ def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED
         return f"/home/nyx_data1/henicke/{preprocessed_dir}"
     elif platform.node() in {"gaia1"}:
         return f"/users/henicke/{preprocessed_dir}"
-    raise ValueError(f"Unknown host {platform.node()}, cannot resolve preprocessed_dir path.")
+    elif platform.node() in {"kallisto", "io"}:
+        return f"/home/datasets4/FMoW_LandSat/{preprocessed_dir}"
+    else:
+        raise ValueError(f"Unknown host {platform.node()}, cannot resolve preprocessed_dir path.")
 
 
 def make_multiscale_dataset(
