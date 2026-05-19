@@ -1,0 +1,8 @@
+# @package _global_
+model:
+  spatial_encoding:
+    coord_channels: false
+    overlap_mask: true
+    overlap_mask_type: gaussian
+    fourier_bands: 4
+    fourier_proj_dim: 4

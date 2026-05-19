@@ -76,6 +76,12 @@ experiments:
       model.detach_lr_for_consistency: true
       data.preprocessed_dir: FMoW_LandSat_
 
+  film_detach:
+    model: densenet_film
+    overrides:
+      model.detach_lr_for_task: true
+      trainer.branch_ablation: true
+
   # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim
@@ -130,6 +136,12 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_
       trainer.branch_ablation: true
 
+  film_constnorm:
+    model: densenet_film
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
+
   # ------------------ Spatial Encoding -----------------------
   multsim_overlap_binary:
     model: densenet_multsim
@@ -162,6 +174,36 @@ experiments:
       spatial: fourier_encoding
       trainer.branch_ablation: true
 
+  film_overlap_binary:
+    model: densenet_film
+    overrides:
+      spatial: binary_overlap_mask_encoding
+      trainer.branch_ablation: true
+
+  film_overlap_gaussian:
+    model: densenet_film
+    overrides:
+      spatial: gaussian_overlap_mask_encoding
+      trainer.branch_ablation: true
+  
+  film_coord:
+    model: densenet_film
+    overrides:
+      spatial: coord_encoding
+      trainer.branch_ablation: true
+
+  film_fourier:
+    model: densenet_film
+    overrides:
+      spatial: fourier_encoding
+      trainer.branch_ablation: true
+
+  film_overlap_gaussian_fourier:
+    model: densenet_film
+    overrides:
+      spatial: gaussian_overlap_fourier 
+      trainer.branch_ablation: true
+
   # ----------------- Alternate Freezing ----------------------
   multsim_alternate_branches:
     model: densenet_multsim
@@ -179,5 +221,12 @@ experiments:
       trainer.alternating_freeze: true
       trainer.alternating_freeze_period: 2
       spatial: gaussian_overlap_mask_encoding
+
+  film_alternate_branches:
+    model: densenet_film
+    overrides:
+      trainer.branch_ablation: true
+      trainer.alternating_freeze: true
+      trainer.alternating_freeze_period: 2
 
 
