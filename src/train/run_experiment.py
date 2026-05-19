@@ -217,6 +217,8 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         compile=cfg.trainer.compile,
         label_smoothing=cfg.trainer.label_smoothing,
         branch_ablation=cfg.trainer.branch_ablation,
+        alternating_freeze=cfg.trainer.alternating_freeze,
+        alternating_freeze_period=cfg.trainer.alternating_freeze_period,
     )
 
 

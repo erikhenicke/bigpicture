@@ -34,6 +34,8 @@ class LateFusionModule(LightningModule):
         compile: bool = False,
         label_smoothing: float = 0.0,
         branch_ablation: bool = False,
+        alternating_freeze: bool = False,
+        alternating_freeze_period: int = 1,
     ) -> None:
         """Initialize a `LateFusionModule`.
 
@@ -198,6 +200,34 @@ class LateFusionModule(LightningModule):
             self.train_consistency_loss.reset()
 
 
+    def _set_branch_freeze(self, branch: nn.Module, frozen: bool) -> None:
+        for param in branch.parameters():
+            param.requires_grad = not frozen
+
+    def on_train_epoch_start(self) -> None:
+        if not self.hparams.alternating_freeze or not isinstance(self.model, LateFusionModel):
+            return
+
+        self._unfreeze_all_branches()
+
+        period = self.hparams.alternating_freeze_period
+        if (self.current_epoch // period) % 2 == 0:
+            frozen_branch = self.model.branches.lr_encoder
+            frozen_name = "lr"
+        else:
+            frozen_branch = self.model.branches.hr_encoder
+            frozen_name = "hr"
+
+        self._set_branch_freeze(frozen_branch, frozen=True)
+        self.log("train/frozen_branch", float(frozen_name == "lr"), on_step=False, on_epoch=True)
+        self.print(f"Epoch {self.current_epoch}: freezing {frozen_name} branch (period={period})")
+
+    def _unfreeze_all_branches(self) -> None:
+        if not self.hparams.alternating_freeze or not isinstance(self.model, LateFusionModel):
+            return
+        self._set_branch_freeze(self.model.branches.hr_encoder, frozen=False)
+        self._set_branch_freeze(self.model.branches.lr_encoder, frozen=False)
+
     def model_step(
         self, batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -339,6 +369,8 @@ class LateFusionModule(LightningModule):
 
     def on_train_epoch_end(self) -> None:
         """Lightning hook that is called when a training epoch ends."""
+        self._unfreeze_all_branches()
+
         # LR domain metrics
         if self._train_lr_domain_preds:
             per_class = self.train_lr_domain_acc.compute()

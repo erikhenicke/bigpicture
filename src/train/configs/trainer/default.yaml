@@ -7,3 +7,5 @@ best_run_metric: test/test-od-worst-group-task-acc
 compile: false
 label_smoothing: 0.0
 branch_ablation: false
+alternating_freeze: false
+alternating_freeze_period: 1

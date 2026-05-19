@@ -53,6 +53,29 @@ experiments:
       model.detach_lr_for_task: true
       trainer.branch_ablation: true
 
+  d3g_detach_lr:
+    model: densenet_d3g
+    overrides:
+      model.detach_lr_for_consistency: true
+
+  d3g_detach_hr:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+
+  d3g_detach_both:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      model.detach_lr_for_consistency: true
+
+  d3g_detach_both_constnorm:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      model.detach_lr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_
+
   # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim
@@ -120,6 +143,13 @@ experiments:
       spatial: gaussian_overlap_mask_encoding
       trainer.branch_ablation: true
 
+  multsim_overlap_gaussian_constnorm:
+    model: densenet_multsim
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      spatial: gaussian_overlap_mask_encoding
+      trainer.branch_ablation: true
+
   multsim_coord:
     model: densenet_multsim
     overrides:
@@ -131,3 +161,23 @@ experiments:
     overrides:
       spatial: fourier_encoding
       trainer.branch_ablation: true
+
+  # ----------------- Alternate Freezing ----------------------
+  multsim_alternate_branches:
+    model: densenet_multsim
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
+      trainer.alternating_freeze: true
+      trainer.alternating_freeze_period: 2
+
+  multsim_alternate_overlap_gaussian:
+    model: densenet_multsim
+    overrides:
+      data.preprocessed_dir: FMoW_LandSat_
+      trainer.branch_ablation: true
+      trainer.alternating_freeze: true
+      trainer.alternating_freeze_period: 2
+      spatial: gaussian_overlap_mask_encoding
+
+
