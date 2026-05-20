@@ -1,0 +1,35 @@
+# @package _global_
+model:
+  hr_image_net: true
+
+  hr_encoder:
+    _target_: models.components.branches.DenseNetBranch
+    in_channels: 3
+    image_net: ${model.hr_image_net}
+
+  lr_encoder:
+    _target_: models.components.branches.SatCLIPLocationBranch
+    satclip_repo_id: microsoft/SatCLIP-ViT16-L10
+    satclip_ckpt_name: satclip-vit16-l10.ckpt
+    freeze: false
+
+  branches:
+    _target_: models.components.branches.CoordDualBranch
+
+  fusion:
+    _target_: models.components.fusion.FilmFusion
+    hr_dim: 1024
+    lr_dim: 256
+    out_dim: 1024
+    pre_fusion_relu: false
+
+  model:
+    _target_: models.components.fusion_model.LateFusionModel
+
+  lr_domain_loss_coeff: 0.1667
+  domain_optimizer_lr_factor: 0.1
+  detach_lr_for_task: false
+
+run_name: train-densenet-satclip-film
+data:
+  batch_size: 80

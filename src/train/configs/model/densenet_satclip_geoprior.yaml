@@ -1,9 +1,6 @@
 # @package _global_
 model:
-  landsat_in_channels: 6
   hr_image_net: true
-  lr_image_net: true
-  landsat_channel_init: average 
 
   hr_encoder:
     _target_: models.components.branches.DenseNetBranch
@@ -11,19 +8,18 @@ model:
     image_net: ${model.hr_image_net}
 
   lr_encoder:
-    _target_: models.components.branches.DenseNetBranch
-    in_channels: ${model.landsat_in_channels}
-    image_net: ${model.lr_image_net}
-    landsat_channel_init: ${model.landsat_channel_init}
+    _target_: models.components.branches.SatCLIPLocationBranch
+    satclip_repo_id: microsoft/SatCLIP-ViT16-L10
+    satclip_ckpt_name: satclip-vit16-l10.ckpt
+    freeze: false
 
   branches:
-    _target_: models.components.branches.DualBranch
-    landsat_channels: ${model.landsat_in_channels}
+    _target_: models.components.branches.CoordDualBranch
 
   fusion:
     _target_: models.components.fusion.GeoPriorFusion
     hr_dim: 1024
-    lr_dim: 1024
+    lr_dim: 256
     out_dim: 62
     pre_fusion_relu: true
 
@@ -34,6 +30,6 @@ model:
   domain_optimizer_lr_factor: 0.1
   detach_lr_for_task: false
 
-run_name: train-densenet-geoprior
+run_name: train-densenet-satclip-geoprior
 data:
-  batch_size: 80 
+  batch_size: 80

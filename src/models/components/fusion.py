@@ -13,6 +13,10 @@ class Fusion(nn.Module):
         self.lr_dim = lr_dim
         self.out_dim = out_dim
 
+    @property
+    def produces_logits(self) -> bool:
+        return False
+
     @abstractmethod
     def forward(
         self,
@@ -156,6 +160,10 @@ class GeoPriorFusion(Fusion):
             *([nn.ReLU()] if pre_fusion_relu else []),
             nn.Dropout(0.1),
         )
+
+    @property
+    def produces_logits(self) -> bool:
+        return True
 
     def forward(self, hr_features: torch.Tensor, lr_features: torch.Tensor) -> torch.Tensor:
         hr_projected = self.hr_projection(hr_features)

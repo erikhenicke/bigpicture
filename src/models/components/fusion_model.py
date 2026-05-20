@@ -104,8 +104,13 @@ class LateFusionModel(nn.Module):
         self.lr_domain_loss_coeff = lr_domain_loss_coeff
         self.detach_lr_for_task = detach_lr_for_task
         self.task_classifier: Optional[nn.Linear] = None
-        if self.fusion is not None:
+        if self.fusion is not None and not self.fusion.produces_logits:
             self.task_classifier = nn.Linear(self.fusion.out_dim, num_task_labels)
+        elif self.fusion is not None:
+            assert self.fusion.out_dim == num_task_labels, (
+                f"Fusion produces logits but out_dim ({self.fusion.out_dim}) != "
+                f"num_task_labels ({num_task_labels})"
+            )
         self.lr_domain_classifier = nn.Linear(branches.lr_encoder.out_dim, num_domain_labels)
         self.hr_domain_classifier = nn.Linear(branches.hr_encoder.out_dim, num_domain_labels)
 
@@ -123,30 +128,34 @@ class LateFusionModel(nn.Module):
         x: Dict[str, torch.Tensor],
         region_ids: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
-        if self.fusion is None or self.task_classifier is None:
-            raise RuntimeError("LateFusionModel requires a fusion module and task classifier for forward().")
+        if self.fusion is None:
+            raise RuntimeError("LateFusionModel requires a fusion module for forward().")
 
         hr_branch_out, lr_branch_out = self.branches(x)
-        lr_for_domain = lr_branch_out  # save before potential detach
+        lr_for_domain = lr_branch_out
         if self.detach_lr_for_task:
             lr_branch_out = lr_branch_out.detach()
         fused = self.fusion(hr_branch_out, lr_branch_out)
+        task_logits = self.task_classifier(fused) if self.task_classifier is not None else fused
         outputs = {
-            "task_logits": self.task_classifier(fused),
+            "task_logits": task_logits,
             "lr_domain_logits": self.lr_domain_classifier(lr_for_domain),
             "hr_domain_logits": self.hr_domain_classifier(hr_branch_out.detach()),
         }
         return outputs
 
     def supports_branch_ablation(self) -> bool:
-        return self.fusion is not None and self.task_classifier is not None
+        return self.fusion is not None
 
     def forward_branch_ablation(
         self, x: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         hr_features, lr_features = self.branches(x)
-        lr_ablated = self.task_classifier(self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="lr"))
-        hr_ablated = self.task_classifier(self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="hr"))
+        lr_ablated = self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="lr")
+        hr_ablated = self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="hr")
+        if self.task_classifier is not None:
+            lr_ablated = self.task_classifier(lr_ablated)
+            hr_ablated = self.task_classifier(hr_ablated)
         return {
             "lr_ablated_logits": lr_ablated,
             "hr_ablated_logits": hr_ablated,

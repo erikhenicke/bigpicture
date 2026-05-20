@@ -9,6 +9,7 @@ class SpatialEncoding(nn.Module):
         super().__init__()
         self.fourier_proj_dim = fourier_proj_dim
         freqs = math.pi * (2.0 ** torch.arange(fourier_bands, dtype=torch.float32))
+        # freqs are not registered as model parameters, but as buffers to be stored in the state dict and moved to device
         self.register_buffer("freqs", freqs)
         self.fourier_proj = nn.Conv2d(4 * fourier_bands, fourier_proj_dim, kernel_size=1)
 
