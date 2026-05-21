@@ -8,7 +8,11 @@ models:
   densenet_lr_baseline: "DenseNet LR"
   efficientformer_baseline: "EfficientFormer"
   efficientnet_baseline: "EfficientNet"
-  densenet_baseline_satclip_loc: "Concat SatCLIP"
+  densenet_satclip_concat: "Concat SatCLIP"
+  densenet_satclip_film: "FiLM SatCLIP"
+  densenet_satclip_d3g: "D3G SatCLIP"
+  densenet_satclip_geoprior: "GeoPrior SatCLIP"
+
 
 params:
   model.lr_domain_loss_coeff:
@@ -33,14 +37,14 @@ params:
     plain: "d"
     latex: "$d$"
   model.detach_lr_for_task:
-    plain: "Detach LR→Task"
-    latex: "Detach LR$\\to$Task"
+    plain: "⊥_LR→Task"
+    latex: '$\bot_{\text{LR}\to\text{Task}}$'
   model.detach_lr_for_consistency:
-    plain: "Detach LR→Con"
-    latex: "Detach LR$\\to$Con"
+    plain: "⊥_LR→Con"
+    latex: '$\bot_{\text{LR}\to\text{Con}}$'
   model.detach_hr_for_consistency:
-    plain: "Detach HR→Con"
-    latex: "Detach HR$\\to$Con"
+    plain: "⊥_HR→Con"
+    latex: '$\bot_{\text{HR}\to\text{Con}}$'
   model.fusion.pre_fusion_relu:
     plain: "Pre-ReLU"
     latex: "Pre-ReLU"
@@ -54,11 +58,11 @@ params:
     latex: "Norm"
     values:
       FMoW_LandSat_:
-        plain: "Const-Norm"
-        latex: "Const-Norm"
+        plain: "N_const"
+        latex: '$N_{\text{const}}$'
       FMoW_LandSat_Norm:
-        plain: "DS-Norm"
-        latex: "DS-Norm"
+        plain: "N_data"
+        latex: '$N_{\text{data}}$'
   data.image_norm:
     plain: "Norm"
     latex: "Norm"
@@ -67,15 +71,24 @@ params:
     latex: "Spatial Encoding"
     values:
       fourier_encoding:
-        plain: "Coord-Freq"
-        latex: "Coord-Freq"
+        plain: "Γ_fourier"
+        latex: '$\Gamma_{\text{fourier}}$'
       coord_encoding:
-        plain: "Coord"
-        latex: "Coord"
+        plain: "Γ_coord"
+        latex: '$\Gamma_{\text{coord}}$'
       binary_overlap_mask_encoding:
-        plain: "Overlap-Binary"
-        latex: "Overlap-Binary"
+        plain: "Ω_0,1"
+        latex: '$\Omega_{\mathbf{0}, \mathbf{1}}$'
       gaussian_overlap_mask_encoding:
-        plain: "Overlap-Gauss"
-        latex: "Overlap-Gauss"
+        plain: "Ω_N"
+        latex: '$\Omega_{\mathcal{N}}$'
+      gaussian_overlap_fourier:
+        plain: "Ω_N, Γ_fourier"
+        latex: '$\Omega_{\mathcal{N}}, \Gamma_{\text{fourier}}$'
+  trainer.alternating_freeze:
+    hidden: true 
+  trainer.alternating_freeze_period:
+    plain: "T_freeze"
+    latex: '$T_{\text{freeze}}$'
+  
 

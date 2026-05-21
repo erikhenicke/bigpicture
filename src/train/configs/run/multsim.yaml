@@ -82,6 +82,12 @@ experiments:
       model.detach_lr_for_task: true
       trainer.branch_ablation: true
 
+  film_no_domain:
+    model: densenet_film
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      trainer.branch_ablation: true
+
   # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim

@@ -12,10 +12,21 @@ primary_metrics:
   - test/test-od-worst-group-task-acc
 
 groups:
+  - name: Baselines
+    runs:
+      - baselines@densenet_baseline
+      - baselines@densenet_lr_baseline
+      - baselines@densenet_lr_baseline_no_domain
+      - baselines@densenet_satclip_concat
+      - baselines@densenet_satclip_film
+      - baselines@densenet_satclip_d3g
+      - baselines@densenet_satclip_geoprior
+    additional_metrics:
+      - param_count
+
   - name: Fusion Comparison
     runs:
       - baselines@densenet_baseline
-      - baselines@densenet_satclip_loc
       - concat
       - film
       - geoprior
@@ -24,14 +35,20 @@ groups:
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
+      - param_count
 
-  - name: Gradient Ablation
+  - name: Gradient Flow 
     runs:
       - multsim
       - multsim_detach
-      - multsim_no_domain
       - concat
       - concat_detach
+      - d3g
+      - d3g_detach_lr
+      - d3g_detach_hr
+      - d3g_detach_both
+      - film
+      - film_detach
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
@@ -50,7 +67,6 @@ groups:
     runs:
       - multsim
       - multsim_ls_0_1  
-      - multsim_ls_0_1_constnorm
   
   - name: Normalization Ablation
     runs:
@@ -60,6 +76,11 @@ groups:
       - multsim_constnorm
       - concat
       - concat_constnorm
+      - d3g
+      - d3g_detach_both_constnorm
+      - multsim_overlap_gaussian_constnorm
+      - film
+      - film_constnorm
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
@@ -70,7 +91,24 @@ groups:
       - multsim_fourier
       - multsim_coord
       - multsim_overlap_gaussian
+      - film
+      - film_overlap_binary
+      - film_overlap_gaussian
+      - film_coord
+      - film_fourier
+      - film_overlap_gaussian_fourier
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
 
+  - name: Alternating Branch Freezing
+    runs:
+      - multsim
+      - multsim_alternate_branches
+      - multsim_alternate_overlap_gaussian
+      - film
+      - film_alternate_branches
+
+    additional_metrics:
+      - test/test-od-lr-ablated-worst-group-task-acc
+      - test/test-od-hr-ablated-worst-group-task-acc

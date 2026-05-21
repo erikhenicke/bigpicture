@@ -89,6 +89,9 @@ def evaluate_lightning_checkpoint() -> None:
         config_path = find_hydra_config(Path(args.checkpoint_path))
 
     cfg, overrides = load_hydra_config(config_path)
+    if not hasattr(cfg, "trainer") or not hasattr(cfg.trainer, "alternating_freeze"):
+        cfg.trainer.alternating_freeze = False
+        cfg.trainer.alternating_freeze_period = 1
 
     if overrides:
         print("=== Hydra overrides ===")

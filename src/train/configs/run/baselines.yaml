@@ -33,9 +33,18 @@ experiments:
       model.lr_domain_loss_coeff: 0.0
 
   # ---------------- CoordDualBranch -------------------------------
-  densenet_satclip_loc:
-    model: densenet_satclip_loc
+  densenet_satclip_concat:
+    model: densenet_satclip_concat
+
+  densenet_satclip_film:
+    model: densenet_satclip_film
   
+  densenet_satclip_d3g:
+    model: densenet_satclip_d3g
+
+  densenet_satclip_geoprior:
+    model: densenet_satclip_geoprior
+
   # ---------------- Dataset Normalization -------------------------
   # Normalized not with data statistics but with 0.5
   densenet_baseline_constnorm:

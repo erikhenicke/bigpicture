@@ -2,6 +2,7 @@
 """Evaluate experiment groups and generate per-group HTML result tables."""
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -67,6 +68,38 @@ def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float
     return results
 
 
+def _load_param_count(run_dir: Path) -> int | None:
+    """Load total parameter count, caching to model_info.json."""
+    info_path = run_dir / "model_info.json"
+    if info_path.exists():
+        with info_path.open() as f:
+            return json.load(f).get("param_count")
+
+    ckpt_path = run_dir / "checkpoints" / "run0" / "last.ckpt"
+    if not ckpt_path.exists():
+        return None
+
+    import torch
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = ckpt.get("state_dict", {})
+    param_count = sum(v.numel() for v in state_dict.values())
+
+    with info_path.open("w") as f:
+        json.dump({"param_count": param_count}, f)
+
+    return param_count
+
+
+def load_all_metrics(run_dir: Path | None, metrics: list[str]) -> dict[str, list[float]]:
+    """Load metrics from CSV and param_count from checkpoint/cache."""
+    csv_metrics = [m for m in metrics if m != "param_count"]
+    results = load_test_metrics(run_dir, csv_metrics) if run_dir and csv_metrics else {m: [] for m in csv_metrics}
+    if "param_count" in metrics:
+        count = _load_param_count(run_dir) if run_dir else None
+        results["param_count"] = [float(count)] if count is not None else []
+    return results
+
+
 def parse_run_ref(ref: str, default_config: str) -> tuple[str, str]:
     if "@" in ref:
         config_name, exp_key = ref.split("@", 1)
@@ -114,9 +147,16 @@ def resolve_experiments(
     return resolved
 
 
-def format_cell(values: list[float], format_percent: bool, latex: bool = False) -> str:
+def format_cell(values: list[float], format_percent: bool = False, format_count: bool = False, latex: bool = False) -> str:
     if not values:
         return "—"
+    if format_count:
+        count = int(values[0])
+        if count >= 1_000_000:
+            return f"{count / 1e6:.1f}M"
+        if count >= 1_000:
+            return f"{count / 1e3:.1f}K"
+        return str(count)
     mean = np.mean(values)
     std = np.std(values)
     sep = r"$\pm$" if latex else "±"
@@ -165,6 +205,8 @@ def format_experiment_name(
 
 
 def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: bool=False, remove_od: bool=False) -> str:
+    if metric == "param_count":
+        return "Parameters"
     if metric.startswith("test/test-"):
         metric = metric.removeprefix("test/test-")
     elif metric.startswith("val/val-"):
@@ -277,10 +319,12 @@ def build_group_table(
     for ref in run_refs:
         _, exp_key = parse_run_ref(ref, default_config)
         run_dir = find_run_dir(exp_key)
-        metric_values = load_test_metrics(run_dir, metrics) if run_dir else {m: [] for m in metrics}
+        metric_values = load_all_metrics(run_dir, metrics)
         row: dict = {"Experiment": format_experiment_name(ref, run_experiments, translations, latex=latex)}
         for m in metrics:
-            row[format_metric_name(m)] = format_cell(metric_values[m], format_percent=m.endswith("acc"), latex=latex)
+            row[format_metric_name(m)] = format_cell(
+                metric_values[m], format_percent=m.endswith("acc"), format_count=(m == "param_count"), latex=latex,
+            )
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -289,7 +333,7 @@ def build_group_table(
     if df[metric_cols].eq("").all().all():
         return False
 
-    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in metrics}
+    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in metrics if m != "param_count"}
     write_table(df, group["name"], output, latex, col_directions)
     return True
 
@@ -318,10 +362,12 @@ def build_summary_table(
     for ref in run_refs:
         _, exp_key = parse_run_ref(ref, default_config)
         run_dir = find_run_dir(exp_key)
-        all_values = load_test_metrics(run_dir, summary_metrics) if run_dir else {m: [] for m in summary_metrics}
+        all_values = load_all_metrics(run_dir, summary_metrics)
         row: dict = {"Experiment": format_experiment_name(ref, run_experiments, translations, latex=latex)}
         for m, col in zip(summary_metrics, cols):
-            row[col] = format_cell(all_values[m], format_percent=m.endswith("acc"), latex=latex)
+            row[col] = format_cell(
+                all_values[m], format_percent=m.endswith("acc"), format_count=(m == "param_count"), latex=latex,
+            )
         first_vals = all_values[summary_metrics[0]]
         row["_sort"] = float(np.mean(first_vals)) if first_vals else -1.0
         rows.append(row)
@@ -332,7 +378,7 @@ def build_summary_table(
         .drop(columns="_sort")
         .reset_index(drop=True)
     )
-    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in summary_metrics}
+    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in summary_metrics if m != "param_count"}
     write_table(df, "All experiments — summary", output, latex, col_directions)
 
 
