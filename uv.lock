@@ -251,6 +251,7 @@ dependencies = [
     { name = "ee" },
     { name = "einops" },
     { name = "fiona" },
+    { name = "geoclip" },
     { name = "geopy" },
     { name = "great-tables" },
     { name = "huggingface-hub" },
@@ -293,6 +294,7 @@ requires-dist = [
     { name = "ee", specifier = ">=0.2" },
     { name = "einops", specifier = ">=0.8.2" },
     { name = "fiona", specifier = ">=1.10.1" },
+    { name = "geoclip", specifier = ">=1.2.0" },
     { name = "geopy", specifier = ">=2.4.1" },
     { name = "great-tables", specifier = ">=0.21.0" },
     { name = "huggingface-hub", specifier = ">=1.6.0" },
@@ -895,6 +897,26 @@ wheels = [
 [package.optional-dependencies]
 http = [
     { name = "aiohttp" },
+]
+
+[[package]]
+name = "geoclip"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "geopy" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pillow" },
+    { name = "torch", version = "2.7.1+cu118", source = { registry = "https://download.pytorch.org/whl/cu118" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "torchvision", version = "0.22.1+cu118", source = { registry = "https://download.pytorch.org/whl/cu118" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "torchvision", version = "0.25.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/44/dd778535fccf67b41c0d991ae5475dc30130aaba6b7ff152804fb5a9b841/geoclip-1.2.0.tar.gz", hash = "sha256:4767f5ad4f823d4256ecb0d69166263fb1bda19a594187bded59b498bfe8a613", size = 43155152, upload-time = "2024-03-25T18:17:45.483Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/c1/75cd818c077adc4e789fe111e3a8f7be6c33d748e4c71ad8fa390099b32e/geoclip-1.2.0-py3-none-any.whl", hash = "sha256:c29ae90b01cf177ffa50707686fc8d0bd104bc5ee8537b6c7480ed4e1a0a5a2d", size = 40289296, upload-time = "2024-03-25T18:17:40.243Z" },
 ]
 
 [[package]]
