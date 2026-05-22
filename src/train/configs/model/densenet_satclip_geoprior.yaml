@@ -9,9 +9,10 @@ model:
 
   lr_encoder:
     _target_: models.components.branches.SatCLIPLocationBranch
-    satclip_repo_id: microsoft/SatCLIP-ViT16-L10
-    satclip_ckpt_name: satclip-vit16-l10.ckpt
-    freeze: false
+    embed_dim: 512
+    legendre_polys: 10
+    capacity: 512
+    num_hidden_layers: 2
 
   branches:
     _target_: models.components.branches.CoordDualBranch
@@ -19,7 +20,7 @@ model:
   fusion:
     _target_: models.components.fusion.GeoPriorFusion
     hr_dim: 1024
-    lr_dim: 256
+    lr_dim: 512
     out_dim: 62
     pre_fusion_relu: true
 

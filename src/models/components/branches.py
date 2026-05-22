@@ -245,31 +245,26 @@ class DualBranch(nn.Module):
 class SatCLIPLocationBranch(nn.Module):
     def __init__(
         self,
-        satclip_repo_id: str = "microsoft/SatCLIP-ViT16-L10",
-        satclip_ckpt_name: str = "satclip-vit16-l10.ckpt",
-        freeze: bool = False,
+        embed_dim: int = 512,
+        legendre_polys: int = 10,
+        capacity: int = 512,
+        num_hidden_layers: int = 2,
     ):
         super().__init__()
-        from huggingface_hub import hf_hub_download
 
         sys.path.append(os.path.join(os.getcwd(), "lib/satclip/satclip"))
-        from load import get_satclip
+        from location_encoder import get_positional_encoding, get_neural_network, LocationEncoder
 
-        ckpt_path = hf_hub_download(satclip_repo_id, satclip_ckpt_name)
-        satclip_model = get_satclip(ckpt_path, device="cpu", return_all=True)
-        self.location_encoder = satclip_model.location
-        nnet = self.location_encoder.nnet
-        if hasattr(nnet, "last_layer"):
-            # Default case for SatCLIP-ViT16-L10
-            self._embed_dim = nnet.last_layer.dim_out
-        elif hasattr(nnet, "class_emb"):
-            self._embed_dim = nnet.class_emb.out_features
-        else:
-            raise ValueError(f"Cannot determine output dim from {type(nnet).__name__}")
-
-        if freeze:
-            for p in self.location_encoder.parameters():
-                p.requires_grad = False
+        posenc = get_positional_encoding("sphericalharmonics", legendre_polys=legendre_polys)
+        nnet = get_neural_network(
+            "siren",
+            input_dim=posenc.embedding_dim,
+            num_classes=embed_dim,
+            dim_hidden=capacity,
+            num_layers=num_hidden_layers,
+        )
+        self.location_encoder = LocationEncoder(posenc, nnet).double()
+        self._embed_dim = embed_dim
 
     @property
     def out_dim(self) -> int:

@@ -15,6 +15,7 @@ groups:
   - name: Baselines
     runs:
       - baselines@densenet_baseline
+      - baselines@deit_baseline
       - baselines@densenet_lr_baseline
       - baselines@densenet_lr_baseline_no_domain
       - baselines@densenet_satclip_concat
@@ -49,6 +50,7 @@ groups:
       - d3g_detach_both
       - film
       - film_detach
+      - film_no_domain
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
