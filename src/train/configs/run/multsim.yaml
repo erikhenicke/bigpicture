@@ -149,71 +149,83 @@ experiments:
       trainer.branch_ablation: true
 
   # ------------------ Spatial Encoding -----------------------
-  multsim_overlap_binary:
+  multsim_om_bin:
     model: densenet_multsim
     overrides:
-      spatial: binary_overlap_mask_encoding
+      spatial: om_bin
       trainer.branch_ablation: true
 
-  multsim_overlap_gaussian:
+  multsim_om_gauss:
     model: densenet_multsim
     overrides:
-      spatial: gaussian_overlap_mask_encoding
+      spatial: om_gauss
       trainer.branch_ablation: true
 
-  multsim_overlap_gaussian_constnorm:
+  multsim_om_gauss_constnorm:
     model: densenet_multsim
     overrides:
       data.preprocessed_dir: FMoW_LandSat_
-      spatial: gaussian_overlap_mask_encoding
+      spatial: om_gauss
       trainer.branch_ablation: true
 
-  multsim_coord:
+  multsim_pe:
     model: densenet_multsim
     overrides:
-      spatial: coord_encoding
+      spatial: pe
       trainer.branch_ablation: true
-  
-  multsim_fourier:
+
+  multsim_pe_freq:
     model: densenet_multsim
     overrides:
-      spatial: fourier_encoding
+      spatial: pe_freq
       trainer.branch_ablation: true
 
-  film_overlap_binary:
+  film_om_bin:
     model: densenet_film
     overrides:
-      spatial: binary_overlap_mask_encoding
+      spatial: om_bin
       trainer.branch_ablation: true
 
-  film_overlap_gaussian:
+  film_om_gauss:
     model: densenet_film
     overrides:
-      spatial: gaussian_overlap_mask_encoding
-      trainer.branch_ablation: true
-  
-  film_coord:
-    model: densenet_film
-    overrides:
-      spatial: coord_encoding
+      spatial: om_gauss
       trainer.branch_ablation: true
 
-  film_fourier:
+  film_pe:
     model: densenet_film
     overrides:
-      spatial: fourier_encoding
+      spatial: pe
       trainer.branch_ablation: true
 
-  film_overlap_gaussian_fourier:
+  film_pe_freq:
     model: densenet_film
     overrides:
-      spatial: gaussian_overlap_fourier 
+      spatial: pe_freq
       trainer.branch_ablation: true
 
-  film_overlap_binary_fourier:
+  film_om_gauss_pe_freq:
     model: densenet_film
     overrides:
-      spatial: binary_overlap_fourier 
+      spatial: om_gauss_pe_freq
+      trainer.branch_ablation: true
+
+  film_om_bin_pe_freq:
+    model: densenet_film
+    overrides:
+      spatial: om_bin_pe_freq
+      trainer.branch_ablation: true
+
+  film_om_bin_pe:
+    model: densenet_film
+    overrides:
+      spatial: om_bin_pe
+      trainer.branch_ablation: true
+
+  film_om_gauss_pe:
+    model: densenet_film
+    overrides:
+      spatial: om_gauss_pe
       trainer.branch_ablation: true
 
   # ----------------- Alternate Freezing ----------------------
@@ -225,14 +237,14 @@ experiments:
       trainer.alternating_freeze: true
       trainer.alternating_freeze_period: 2
 
-  multsim_alternate_overlap_gaussian:
+  multsim_alternate_om_gauss:
     model: densenet_multsim
     overrides:
       data.preprocessed_dir: FMoW_LandSat_
       trainer.branch_ablation: true
       trainer.alternating_freeze: true
       trainer.alternating_freeze_period: 2
-      spatial: gaussian_overlap_mask_encoding
+      spatial: om_gauss
 
   film_alternate_branches:
     model: densenet_film

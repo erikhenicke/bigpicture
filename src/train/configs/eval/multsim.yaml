@@ -92,16 +92,16 @@ groups:
   - name: Spatial Encodings
     runs:
       - multsim
-      - multsim_fourier
-      - multsim_coord
-      - multsim_overlap_gaussian
+      - multsim_pe_freq
+      - multsim_pe
+      - multsim_om_gauss
       - film
-      - film_overlap_binary
-      - film_overlap_gaussian
-      - film_coord
-      - film_fourier
-      - film_overlap_binary_fourier
-      - film_overlap_gaussian_fourier
+      - film_om_bin
+      - film_om_gauss
+      - film_pe
+      - film_pe_freq
+      - film_om_bin_pe_freq
+      - film_om_gauss_pe_freq
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc

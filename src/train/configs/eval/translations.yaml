@@ -70,24 +70,30 @@ params:
     plain: "Spatial Encoding"
     latex: "Spatial Encoding"
     values:
-      fourier_encoding:
-        plain: "Γ_fourier"
-        latex: '$\Gamma_{\text{fourier}}$'
-      coord_encoding:
-        plain: "Γ_coord"
-        latex: '$\Gamma_{\text{coord}}$'
-      binary_overlap_mask_encoding:
-        plain: "Ω_0,1"
-        latex: '$\Omega_{\mathbf{0}, \mathbf{1}}$'
-      gaussian_overlap_mask_encoding:
-        plain: "Ω_N"
-        latex: '$\Omega_{\mathcal{N}}$'
-      binary_overlap_fourier:
-        plain: "Ω_0,1, Γ_fourier"
-        latex: '$\Omega_{\mathbf{0}, \mathbf{1}}, \Gamma_{\text{fourier}}$'
-      gaussian_overlap_fourier:
-        plain: "Ω_N, Γ_fourier"
-        latex: '$\Omega_{\mathcal{N}}, \Gamma_{\text{fourier}}$'
+      pe_freq:
+        plain: "PE_freq"
+        latex: '$\text{PE}_{\text{freq}}$'
+      pe:
+        plain: "PE"
+        latex: '$\text{PE}$'
+      om_bin:
+        plain: "OM_bin"
+        latex: '$\text{OM}_{\text{bin}}$'
+      om_gauss:
+        plain: "OM_gauss"
+        latex: '$\text{OM}_{\text{gauss}}$'
+      om_bin_pe_freq:
+        plain: "OM_bin, PE_freq"
+        latex: '$\text{OM}_{\text{bin}}, \text{PE}_{\text{freq}}$'
+      om_gauss_pe_freq:
+        plain: "OM_gauss, PE_freq"
+        latex: '$\text{OM}_{\text{gauss}}, \text{PE}_{\text{freq}}$'
+      om_bin_pe:
+        plain: "OM_bin, PE"
+        latex: '$\text{OM}_{\text{bin}}, \text{PE}$'
+      om_gauss_pe:
+        plain: "OM_gauss, PE"
+        latex: '$\text{OM}_{\text{gauss}}, \text{PE}$'
   trainer.alternating_freeze:
     hidden: true 
   trainer.alternating_freeze_period:
