@@ -210,6 +210,12 @@ experiments:
       spatial: gaussian_overlap_fourier 
       trainer.branch_ablation: true
 
+  film_overlap_binary_fourier:
+    model: densenet_film
+    overrides:
+      spatial: binary_overlap_fourier 
+      trainer.branch_ablation: true
+
   # ----------------- Alternate Freezing ----------------------
   multsim_alternate_branches:
     model: densenet_multsim
