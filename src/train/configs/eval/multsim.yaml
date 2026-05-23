@@ -20,12 +20,21 @@ groups:
       - baselines@efficientformer_baseline
       - baselines@densenet_lr_baseline
       - baselines@densenet_lr_baseline_no_domain
+    additional_metrics:
+      - param_count
+
+  - name: HR LR Encoder Comparison
+    runs:
+      - baselines@densenet_baseline
+      - baselines@densenet_lr_baseline_no_domain
+
+  - name: SatCLIP Fusion
+    runs:
+      - baselines@densenet_baseline
       - baselines@densenet_satclip_concat
       - baselines@densenet_satclip_film
       - baselines@densenet_satclip_d3g
       - baselines@densenet_satclip_geoprior
-    additional_metrics:
-      - param_count
 
   - name: Fusion Comparison
     runs:
@@ -34,22 +43,12 @@ groups:
       - film
       - geoprior
       - d3g
-      - multsim
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
-      - param_count
 
   - name: Gradient Flow 
     runs:
-      - multsim
-      - multsim_detach
-      - concat
-      - concat_detach
-      - d3g
-      - d3g_detach_lr
-      - d3g_detach_hr
-      - d3g_detach_both
       - film
       - film_detach
       - film_no_domain
@@ -91,10 +90,6 @@ groups:
 
   - name: Spatial Encodings
     runs:
-      - multsim
-      - multsim_pe_freq
-      - multsim_pe
-      - multsim_om_gauss
       - film
       - film_om_bin
       - film_om_gauss
@@ -102,6 +97,8 @@ groups:
       - film_pe_freq
       - film_om_bin_pe_freq
       - film_om_gauss_pe_freq
+      - film_om_bin_pe
+      - film_om_gauss_pe
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
