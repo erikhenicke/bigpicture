@@ -100,6 +100,7 @@ groups:
       - film_overlap_gaussian
       - film_coord
       - film_fourier
+      - film_overlap_binary_fourier
       - film_overlap_gaussian_fourier
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
