@@ -18,8 +18,6 @@ groups:
       - baselines@deit_baseline
       - baselines@efficientnet_baseline
       - baselines@efficientformer_baseline
-      - baselines@densenet_lr_baseline
-      - baselines@densenet_lr_baseline_no_domain
     additional_metrics:
       - param_count
 
