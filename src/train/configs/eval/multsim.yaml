@@ -79,7 +79,7 @@ groups:
       - concat_constnorm
       - d3g
       - d3g_detach_both_constnorm
-      - multsim_overlap_gaussian_constnorm
+      - multsim_om_gauss_constnorm
       - film
       - film_constnorm
     additional_metrics:
@@ -105,7 +105,7 @@ groups:
     runs:
       - multsim
       - multsim_alternate_branches
-      - multsim_alternate_overlap_gaussian
+      - multsim_alternate_om_gauss
       - film
       - film_alternate_branches
 
