@@ -82,6 +82,9 @@ params:
       gaussian_overlap_mask_encoding:
         plain: "Ω_N"
         latex: '$\Omega_{\mathcal{N}}$'
+      binary_overlap_fourier:
+        plain: "Ω_0,1, Γ_fourier"
+        latex: '$\Omega_{\mathbf{0}, \mathbf{1}}, \Gamma_{\text{fourier}}$'
       gaussian_overlap_fourier:
         plain: "Ω_N, Γ_fourier"
         latex: '$\Omega_{\mathcal{N}}, \Gamma_{\text{fourier}}$'
