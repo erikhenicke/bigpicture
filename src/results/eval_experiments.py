@@ -221,7 +221,16 @@ def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: b
 
     if "region" in metric:
         metric = re.sub(r"-region(-.*?)", r"\1 ", metric)
-    metric = metric.replace("-", " ").title().replace("Od", "OD").replace("Id", "ID").replace("Lr", "LR").replace("Hr", "HR")
+    metric = (
+        metric.replace("-", " ")
+              .title()
+              .replace("Od", "OOD")
+              .replace("Id", "ID")
+              .replace("Lr", "LR")
+              .replace("Hr", "HR")
+              .replace("Worst Group Acc", "WRA")
+              .replace("Acc", "Overall Acc.")
+              )
 
     return metric
 
