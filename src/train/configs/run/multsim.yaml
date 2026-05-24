@@ -88,6 +88,18 @@ experiments:
       model.lr_domain_loss_coeff: 0.0
       trainer.branch_ablation: true
 
+  concat_no_domain:
+    model: densenet_concat
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      trainer.branch_ablation: true
+          
+  geoprior_no_domain:
+    model: densenet_geoprior
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      trainer.branch_ablation: true
+
   # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim
