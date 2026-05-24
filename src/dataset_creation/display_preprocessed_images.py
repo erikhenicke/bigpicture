@@ -6,14 +6,19 @@ translate_geotiff_to_png.py); RGB is clamped to [0, 1].
 
 Usage:
     uv run python src/dataset_creation/display_preprocessed_images.py --preprocessed-dir /path/to/cache --modality both
+
+Browse by class (interactive menu):
+    uv run python src/dataset_creation/display_preprocessed_images.py --preprocessed-dir /path/to/cache --metadata-csv data/rgb_metadata_extended.csv
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 
 LANDSAT_MEAN = torch.tensor([0.06259285658597946, 0.0880340114235878, 0.09441816806793213,
@@ -45,6 +50,16 @@ def _landsat_to_display(tensor: torch.Tensor) -> torch.Tensor:
     return rgb.permute(1, 2, 0)
 
 
+def _landsat_to_false_color(tensor: torch.Tensor) -> torch.Tensor:
+    raw = _unnormalize(tensor, LANDSAT_MEAN, LANDSAT_STD)
+    r = raw[:3].max(dim=0).values
+    g = raw[3]
+    b = raw[4:6].max(dim=0).values
+    rgb = torch.stack([r, g, b], dim=0)
+    rgb = (rgb / 0.3).clamp(0, 1)
+    return rgb.permute(1, 2, 0)
+
+
 def _rgb_to_display(tensor: torch.Tensor) -> torch.Tensor:
     raw = _unnormalize(tensor, RGB_MEAN, RGB_STD)
     return raw.clamp(0, 1).permute(1, 2, 0)
@@ -59,6 +74,94 @@ def _get_index(path: Path) -> int | None:
             except ValueError:
                 pass
     return None
+
+
+def _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images: int, title_prefix: str = ""):
+    idxs = idxs[:max_images]
+    print(f"Displaying {len(idxs)} paired images (Landsat + RGB)")
+    plt.ion()
+    fig = plt.figure(figsize=(14, 12))
+    gs = fig.add_gridspec(2, 2)
+    ax_ls = fig.add_subplot(gs[0, 0])
+    ax_rgb = fig.add_subplot(gs[0, 1])
+    ax_fc = fig.add_subplot(gs[1, :])
+    for i, idx in enumerate(idxs, start=1):
+        ls_tensor = _load_pt(landsat_by_idx[idx])
+        ls_img = _landsat_to_display(ls_tensor)
+        fc_img = _landsat_to_false_color(ls_tensor)
+        rgb_img = _rgb_to_display(_load_pt(rgb_by_idx[idx]))
+        ax_ls.clear()
+        ax_ls.imshow(ls_img)
+        ax_ls.set_title(f"Landsat — image_{idx}.pt")
+        ax_ls.axis("off")
+        ax_rgb.clear()
+        ax_rgb.imshow(rgb_img)
+        ax_rgb.set_title(f"RGB — rgb_img_{idx}.pt")
+        ax_rgb.axis("off")
+        ax_fc.clear()
+        ax_fc.imshow(fc_img)
+        ax_fc.set_title(f"Landsat false color — R: max(R,G,B)  G: NIR  B: max(SWIR_1,SWIR_2)")
+        ax_fc.axis("off")
+        label = f"{title_prefix} — " if title_prefix else ""
+        fig.suptitle(f"{label}{i}/{len(idxs)}", fontsize=12)
+        fig.tight_layout()
+        fig.canvas.draw_idle()
+        plt.show(block=False)
+        plt.pause(0.001)
+        if i < len(idxs):
+            input("Press Enter for the next pair...")
+        else:
+            input("Press Enter to return to class menu...")
+    plt.ioff()
+    plt.close(fig)
+
+
+def _build_class_index(metadata_csv: str, paired_idxs: set[int]) -> dict[str, list[int]]:
+    df = pd.read_csv(metadata_csv)
+    df = df[df["split"] != "seq"].reset_index(drop=True)
+    class_to_idxs: dict[str, list[int]] = defaultdict(list)
+    for idx in sorted(paired_idxs):
+        if idx < len(df):
+            class_to_idxs[df.iloc[idx]["category"]].append(idx)
+    return dict(class_to_idxs)
+
+
+def browse_by_class(preprocessed_dir: str, metadata_csv: str, max_images: int):
+    base = Path(preprocessed_dir)
+    landsat_dir = base / "landsat"
+    rgb_dir = base / "fmow_rgb"
+
+    landsat_by_idx = {_get_index(p): p for p in landsat_dir.glob("image_*.pt") if _get_index(p) is not None}
+    rgb_by_idx = {_get_index(p): p for p in rgb_dir.glob("rgb_img_*.pt") if _get_index(p) is not None}
+    paired_idxs = set(landsat_by_idx) & set(rgb_by_idx)
+    if not paired_idxs:
+        raise FileNotFoundError(f"No matching index pairs found in {landsat_dir} and {rgb_dir}")
+
+    class_to_idxs = _build_class_index(metadata_csv, paired_idxs)
+    classes = sorted(class_to_idxs.keys())
+
+    while True:
+        print(f"\n{'='*60}")
+        print(f"Found {len(paired_idxs)} paired images across {len(classes)} classes")
+        print(f"{'='*60}")
+        for i, cls in enumerate(classes):
+            print(f"  {i:3d}  {cls} ({len(class_to_idxs[cls])} images)")
+        print(f"{'='*60}")
+        choice = input("Enter class number (or 'q' to quit): ").strip()
+        if choice.lower() == "q":
+            break
+        try:
+            cls_idx = int(choice)
+            if not (0 <= cls_idx < len(classes)):
+                print(f"Invalid number. Enter 0–{len(classes) - 1}.")
+                continue
+        except ValueError:
+            print("Please enter a number or 'q'.")
+            continue
+
+        cls_name = classes[cls_idx]
+        idxs = sorted(class_to_idxs[cls_name])
+        _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images, title_prefix=cls_name)
 
 
 def display_images(preprocessed_dir: str, modality: str, max_images: int):
@@ -77,18 +180,28 @@ def display_images(preprocessed_dir: str, modality: str, max_images: int):
         print(f"Displaying {len(common_idxs)} paired images (Landsat + RGB)")
 
         plt.ion()
-        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+        fig = plt.figure(figsize=(14, 12))
+        gs = fig.add_gridspec(2, 2)
+        ax_ls = fig.add_subplot(gs[0, 0])
+        ax_rgb = fig.add_subplot(gs[0, 1])
+        ax_fc = fig.add_subplot(gs[1, :])
         for i, idx in enumerate(common_idxs, start=1):
-            ls_img = _landsat_to_display(_load_pt(landsat_by_idx[idx]))
+            ls_tensor = _load_pt(landsat_by_idx[idx])
+            ls_img = _landsat_to_display(ls_tensor)
+            fc_img = _landsat_to_false_color(ls_tensor)
             rgb_img = _rgb_to_display(_load_pt(rgb_by_idx[idx]))
-            axes[0].clear()
-            axes[0].imshow(ls_img)
-            axes[0].set_title(f"Landsat — image_{idx}.pt")
-            axes[0].axis("off")
-            axes[1].clear()
-            axes[1].imshow(rgb_img)
-            axes[1].set_title(f"RGB — rgb_img_{idx}.pt")
-            axes[1].axis("off")
+            ax_ls.clear()
+            ax_ls.imshow(ls_img)
+            ax_ls.set_title(f"Landsat — image_{idx}.pt")
+            ax_ls.axis("off")
+            ax_rgb.clear()
+            ax_rgb.imshow(rgb_img)
+            ax_rgb.set_title(f"RGB — rgb_img_{idx}.pt")
+            ax_rgb.axis("off")
+            ax_fc.clear()
+            ax_fc.imshow(fc_img)
+            ax_fc.set_title(f"Landsat false color — R: max(R,G,B)  G: NIR  B: max(SWIR_1,SWIR_2)")
+            ax_fc.axis("off")
             fig.suptitle(f"{i}/{len(common_idxs)}", fontsize=12)
             fig.tight_layout()
             fig.canvas.draw_idle()
@@ -141,6 +254,11 @@ if __name__ == "__main__":
     parser.add_argument("--modality", choices=["landsat", "rgb", "both"], default="both",
                         help="Which modality to display (default: both)")
     parser.add_argument("--max-images", type=int, default=1000)
+    parser.add_argument("--metadata-csv", type=str, default=None,
+                        help="Path to rgb_metadata_extended.csv. When provided, enables interactive class browsing.")
     args = parser.parse_args()
 
-    display_images(args.preprocessed_dir, args.modality, args.max_images)
+    if args.metadata_csv:
+        browse_by_class(args.preprocessed_dir, args.metadata_csv, args.max_images)
+    else:
+        display_images(args.preprocessed_dir, args.modality, args.max_images)
