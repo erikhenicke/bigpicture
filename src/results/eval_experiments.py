@@ -264,7 +264,6 @@ def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict
 
 def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_directions: dict[str, str]) -> None:
     exp_col = df.columns[0]
-    exp_col = exp_col.replace("Experiment", "")  # Remove "Experiment" header for better display
     metric_cols = list(df.columns[1:])
 
     if len(metric_cols) > METRIC_CHUNK_SIZE:
@@ -283,10 +282,10 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_dir
             all_lines += [
                 f"\\begin{{tabular}}{{{col_fmt}}}",
                 "\\toprule",
-                " & ".join(cols) + " \\\\",
+                " & ".join([""] + chunk) + " \\\\",  # no header for experiment column
                 "\\midrule",
             ]
-            for i, (_, row) in enumerate(df[[exp_col] + chunk].iterrows()):
+            for i, (_, row) in enumerate(df[cols].iterrows()):
                 cells = []
                 for col, val in zip(cols, row):
                     s = str(val)
@@ -300,7 +299,7 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_dir
         html_parts = []
         for chunk in chunks:
             chunk_df = df[[exp_col] + chunk]
-            gt = GT(chunk_df).tab_header(title=title)
+            gt = GT(chunk_df).tab_header(title=title).cols_label(**{exp_col: ""})
             for col, row_idx in best.items():
                 if col in chunk:
                     gt = gt.tab_style(
