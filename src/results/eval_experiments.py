@@ -264,6 +264,7 @@ def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict
 
 def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_directions: dict[str, str]) -> None:
     exp_col = df.columns[0]
+    exp_col[0] = ""  # Remove "Experiment" header for better display
     metric_cols = list(df.columns[1:])
 
     if len(metric_cols) > METRIC_CHUNK_SIZE:
