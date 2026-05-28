@@ -7,8 +7,8 @@ summary_metrics:
   - test/test-od-hr-domain-acc
 
 primary_metrics:
-  - test/test-od-task-acc
   - test/test-id-task-acc
+  - test/test-od-task-acc
   - test/test-od-worst-group-task-acc
 
 groups:
@@ -18,8 +18,6 @@ groups:
       - baselines@deit_baseline
       - baselines@efficientnet_baseline
       - baselines@efficientformer_baseline
-    additional_metrics:
-      - param_count
 
   - name: HR LR Encoder Comparison
     runs:
@@ -33,8 +31,16 @@ groups:
       - baselines@densenet_satclip_film
       - baselines@densenet_satclip_d3g
       - baselines@densenet_satclip_geoprior
+    additional_metrics:
+      - test/test-od-lr-domain-acc
 
   - name: Fusion Comparison
+    runs:
+      - baselines@densenet_baseline
+      - concat_no_domain
+      - film_no_domain
+
+  - name: Fusion Comparison with Domain
     runs:
       - baselines@densenet_baseline
       - concat
@@ -42,22 +48,16 @@ groups:
       - geoprior
       - d3g
     additional_metrics:
-      - test/test-od-lr-ablated-worst-group-task-acc
-      - test/test-od-hr-ablated-worst-group-task-acc
+      - test/test-od-lr-domain-acc
 
   - name: Gradient Flow 
     runs:
       - film
       - film_detach
       - film_no_domain
-    additional_metrics:
-      - test/test-od-lr-ablated-worst-group-task-acc
-      - test/test-od-hr-ablated-worst-group-task-acc
   
   - name: ReLU Ablation
     runs:
-      - multsim
-      - multsim_no_relu
       - film
       - film_relu
     additional_metrics:
@@ -89,6 +89,13 @@ groups:
   - name: Spatial Encodings
     runs:
       - film
+      - film_om_gauss
+      - film_pe_freq
+      - film_om_gauss_pe_freq
+          
+  - name: Spatial Encodings Full
+    runs:
+      - film
       - film_om_bin
       - film_om_gauss
       - film_pe
@@ -97,9 +104,6 @@ groups:
       - film_om_gauss_pe_freq
       - film_om_bin_pe
       - film_om_gauss_pe
-    additional_metrics:
-      - test/test-od-lr-ablated-worst-group-task-acc
-      - test/test-od-hr-ablated-worst-group-task-acc
 
   - name: Alternating Branch Freezing
     runs:
@@ -108,7 +112,6 @@ groups:
       - multsim_alternate_om_gauss
       - film
       - film_alternate_branches
-
     additional_metrics:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc

@@ -100,6 +100,11 @@ experiments:
       model.lr_domain_loss_coeff: 0.0
       trainer.branch_ablation: true
 
+  d3g_no_domain:
+    model: densenet_d3g
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+
   # ---------------- ReLU ablation -----------------------------
   multsim_no_relu:
     model: densenet_multsim
