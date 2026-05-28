@@ -1,19 +1,19 @@
 # @package _global_
 model:
   landsat_in_channels: 6
-  hr_image_net: true
-  lr_image_net: true
+  hr_pretrained: true
+  lr_pretrained: true
   landsat_channel_init: average 
 
   hr_encoder:
     _target_: models.components.branches.DenseNetBranch
     in_channels: 3
-    image_net: ${model.hr_image_net}
+    pretrained: ${model.hr_pretrained}
 
   lr_encoder:
     _target_: models.components.branches.DenseNetBranch
     in_channels: ${model.landsat_in_channels}
-    image_net: ${model.lr_image_net}
+    pretrained: ${model.lr_pretrained}
     landsat_channel_init: ${model.landsat_channel_init}
 
   branches:

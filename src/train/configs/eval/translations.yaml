@@ -9,10 +9,10 @@ models:
   deit_baseline: "DeiT-Tiny"
   efficientformer_baseline: "EfficientFormerV2-S1"
   efficientnet_baseline: "EffNetV2-B1"
-  densenet_satclip_concat: "Concat SatCLIP"
-  densenet_satclip_film: "FiLM SatCLIP"
-  densenet_satclip_d3g: "D3G SatCLIP"
-  densenet_satclip_geoprior: "GeoPrior SatCLIP"
+  densenet_le_concat: "Concat w. LE"
+  densenet_le_film: "FiLM w. LE"
+  densenet_le_d3g: "D3G w. LE"
+  densenet_le_geoprior: "GeoPrior w. LE"
 
 
 params:
