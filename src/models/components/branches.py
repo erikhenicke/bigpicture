@@ -337,8 +337,7 @@ class DINOv3Branch(Branch):
         landsat_channel_init: str = "zero",
         model_size: str = "base",
     ):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
-        self.model_size = model_size
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained, model_size=model_size)
 
     def forward(self, x):
         return self.model(x).pooler_output
@@ -347,11 +346,11 @@ class DINOv3Branch(Branch):
     def out_dim(self) -> int:
         return self.model.config.hidden_size
 
-    def _get_model(self, pretrained: bool = True):
+    def _get_model(self, pretrained: bool = True, model_size: str = "base"):
         from transformers import AutoModel, AutoConfig
 
         if pretrained:
-            if self.model_size == "base":
+            if model_size == "base":
                 return AutoModel.from_pretrained(self.HF_MODEL_BASE)
             else:
                 return AutoModel.from_pretrained(self.HF_MODEL_LARGE)
