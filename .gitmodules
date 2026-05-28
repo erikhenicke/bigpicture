@@ -4,3 +4,6 @@
 [submodule "lib/wilds-geoshift"]
 	path = lib/wilds-geoshift
 	url = git@github.com:crastoru/wilds-geoshift.git
+[submodule "lib/dinov3"]
+	path = lib/dinov3
+	url = https://github.com/facebookresearch/dinov3.git

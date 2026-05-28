@@ -1,11 +1,11 @@
 # @package _global_
 model:
-  hr_image_net: true
+  hr_pretrained: true
 
   hr_encoder:
     _target_: models.components.branches.DenseNetBranch
     in_channels: 3
-    image_net: ${model.hr_image_net}
+    pretrained: ${model.hr_pretrained}
 
   lr_encoder:
     _target_: models.components.branches.SatCLIPLocationBranch
@@ -18,10 +18,11 @@ model:
     _target_: models.components.branches.CoordDualBranch
 
   fusion:
-    _target_: models.components.fusion.ConcatFusion
+    _target_: models.components.fusion.GeoPriorFusion
     hr_dim: 1024
     lr_dim: 512
-    out_dim: 512
+    out_dim: 62
+    pre_fusion_relu: true
 
   model:
     _target_: models.components.fusion_model.LateFusionModel
@@ -30,6 +31,6 @@ model:
   domain_optimizer_lr_factor: 0.1
   detach_lr_for_task: false
 
-run_name: train-densenet-satclip-loc
+run_name: train-densenet-satclip-geoprior
 data:
   batch_size: 80

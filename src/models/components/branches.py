@@ -53,8 +53,8 @@ class Branch(nn.Module):
 
 
 class DenseNetBranch(Branch):
-    def __init__(self, in_channels: int = 3, image_net: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, image_net=image_net)
+    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
     
     def forward(self, x):
         features = self.model.features(x)
@@ -67,9 +67,9 @@ class DenseNetBranch(Branch):
     def out_dim(self) -> int:
         return self.model.classifier.in_features
 
-    def _get_model(self, image_net=True):
+    def _get_model(self, pretrained=True):
         from torchvision.models import densenet121
-        weights = 'IMAGENET1K_V1' if image_net else None
+        weights = 'IMAGENET1K_V1' if pretrained else None
         return densenet121(weights=weights)
 
     def _adapt_input_channels(self, in_channels):
@@ -100,8 +100,8 @@ class DenseNetBranch(Branch):
         self.model.features.conv0 = new_conv
 
 class DeitBranch(Branch):
-    def __init__(self, in_channels: int = 3, image_net: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, image_net=image_net)
+    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
 
     def forward(self, x):
         tokens = self.model.vit(x).last_hidden_state
@@ -111,10 +111,10 @@ class DeitBranch(Branch):
     def out_dim(self) -> int:
         return self.model.config.hidden_size
 
-    def _get_model(self, image_net=True):
+    def _get_model(self, pretrained=True):
         from transformers import ViTForImageClassification, ViTConfig
 
-        if image_net:
+        if pretrained:
             return ViTForImageClassification.from_pretrained(
                 'facebook/deit-tiny-patch16-224',
                 output_hidden_states=True,
@@ -167,8 +167,8 @@ class TimmBranch(Branch):
     and ``tf_efficientnetv2_b1`` (and most other timm backbones).
     """
 
-    def __init__(self, model_name: str, in_channels: int = 3, image_net: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, model_name=model_name, image_net=image_net)
+    def __init__(self, model_name: str, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, model_name=model_name, pretrained=pretrained)
 
     def forward(self, x):
         return self.model(x)
@@ -177,12 +177,12 @@ class TimmBranch(Branch):
     def out_dim(self) -> int:
         return self.model.num_features
 
-    def _get_model(self, model_name: str, image_net: bool = True) -> nn.Module:
+    def _get_model(self, model_name: str, pretrained: bool = True) -> nn.Module:
         import timm
 
         return timm.create_model(
             model_name,
-            pretrained=image_net,
+            pretrained=pretrained,
             in_chans=self.in_channels,
             num_classes=0,
             global_pool="avg",
@@ -242,6 +242,86 @@ class DualBranch(nn.Module):
         return hr_features, lr_features
 
 
+class SatCLIPImageBranch(Branch):
+    """Pretrained ViT branch initialized with SatCLIP weights.
+    
+    > Image encoder: We train SatCLIP models with ViT16, ResNet18 and ResNet50 image encoders, all pretrained on Sentinel-2 imagery and published by Wang et al. (2022b). We keep the image encoders frozen during training, and only train a last projection layer that maps the image embeddings into the desired output space. We find this to be ideal for training at a size of 256–this is equivalent to the embedding size used by CSP Mai et al. (2023).
+
+    See lib/satclip/satclip/model.py:304 for details on the SatCLIP vision model initialisation.
+    """
+
+    # Sentinel-2 band order (torchgeo): B1,B2,B3,B4,B5,B6,B7,B8,B8a,B9,B10,B11,B12
+    # RGB = B4(Red) idx 3, B3(Green) idx 2, B2(Blue) idx 1
+    S2_RGB_INDICES = [3, 2, 1]
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        pretrained: bool = True,
+        landsat_channel_init: str = "zero",
+        unfreeze_first_block: bool = False,
+        unfreeze_head: bool = False,
+        num_unfreeze_last: int = 0,
+    ):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
+        if pretrained:
+            self._freeze(unfreeze_first_block, unfreeze_head, num_unfreeze_last)
+
+    def _freeze(self, unfreeze_first_block: bool, unfreeze_head: bool, num_unfreeze_last: int) -> None:
+        self.model.requires_grad_(False)
+
+        self.model.patch_embed.proj.requires_grad_(True)
+
+        blocks = self.model.blocks
+        if unfreeze_first_block:
+            blocks[0].requires_grad_(True)
+        if unfreeze_head: 
+            self.model.head.requires_grad_(True)
+        if num_unfreeze_last > 0:
+            self.model.norm.requires_grad_(True)
+            for block in blocks[-num_unfreeze_last:]:
+                block.requires_grad_(True)
+
+    def forward(self, x):
+        return self.model(x)
+
+    @property
+    def out_dim(self) -> int:
+        return self.model.head.out_features
+
+    def _get_model(self, pretrained=True):
+        import timm
+        from huggingface_hub import hf_hub_download
+
+        ckpt_path = hf_hub_download(
+            "microsoft/SatCLIP-ViT16-L10",
+            filename="satclip-vit16-l10.ckpt",
+        )
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        hp = ckpt["hyper_parameters"]
+
+        model = timm.create_model(
+            "vit_small_patch16_224",
+            in_chans=3,
+            num_classes=hp["embed_dim"],
+        )
+
+        state_dict = {
+            k.removeprefix("model.visual."): v
+            for k, v in ckpt["state_dict"].items()
+            if k.startswith("model.visual.")
+        }
+        state_dict["patch_embed.proj.weight"] = (
+            state_dict["patch_embed.proj.weight"][:, self.S2_RGB_INDICES, :, :]
+        )
+        model.load_state_dict(state_dict)
+
+        return model
+
+    def _adapt_input_channels(self, in_channels):
+        pass
+
+
 class SatCLIPLocationBranch(nn.Module):
     def __init__(
         self,
@@ -289,8 +369,8 @@ class CoordDualBranch(nn.Module):
 
 if __name__ == "__main__":
     # Example usage
-    hr_branch = DeitBranch(in_channels=3, image_net=True)
-    lr_branch = DeitBranch(in_channels=6, image_net=True)
+    hr_branch = DeitBranch(in_channels=3, pretrained=True)
+    lr_branch = DeitBranch(in_channels=6, pretrained=True)
     model = DualBranch(hr_encoder=hr_branch, lr_encoder=lr_branch, landsat_channels=6)
 
     # Dummy input

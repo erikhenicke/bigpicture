@@ -27,10 +27,10 @@ groups:
   - name: SatCLIP Fusion
     runs:
       - baselines@densenet_baseline
-      - baselines@densenet_satclip_concat
-      - baselines@densenet_satclip_film
-      - baselines@densenet_satclip_d3g
-      - baselines@densenet_satclip_geoprior
+      - baselines@densenet_le_concat
+      - baselines@densenet_le_film
+      - baselines@densenet_le_d3g
+      - baselines@densenet_le_geoprior
     additional_metrics:
       - test/test-od-lr-domain-acc
 

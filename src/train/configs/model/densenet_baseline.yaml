@@ -3,7 +3,7 @@ model:
   hr_encoder:
     _target_: models.components.branches.DenseNetBranch
     in_channels: 3
-    image_net: true
+    pretrained: true
 
   model:
     _target_: models.components.fusion_model.SingleBranchModel
