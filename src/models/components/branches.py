@@ -338,6 +338,7 @@ class DINOv3Branch(Branch):
         model_size: str = "base",
     ):
         super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
+        self.model_size = model_size
 
     def forward(self, x):
         return self.model(x).pooler_output
