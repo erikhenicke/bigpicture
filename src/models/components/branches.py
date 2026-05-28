@@ -322,6 +322,75 @@ class SatCLIPImageBranch(Branch):
         pass
 
 
+class DINOv3Branch(Branch):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        checkpoint_path: Optional[str] = None,
+        landsat_channel_init: str = "zero",
+    ):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, checkpoint_path=checkpoint_path)
+
+    def forward(self, x):
+        return self.model(x)
+
+    @property
+    def out_dim(self) -> int:
+        return self.model.embed_dim
+
+    def _get_model(self, checkpoint_path: Optional[str] = None):
+        sys.path.append(os.path.join(os.getcwd(), "lib/dinov3"))
+        from dinov3.models.vision_transformer import vit_large
+
+        # See lib/dinov3/dinov3/configs/train/dinov3_vitl16_lvd1689m_distilled.yaml
+        model = vit_large(
+            patch_size=16,
+            n_storage_tokens=4,
+            mask_k_bias=True,
+            norm_layer="layernormbf16",
+            layerscale_init=1e-5,
+            untie_global_and_local_cls_norm=True,
+            pos_embed_rope_base=100,
+            pos_embed_rope_normalize_coords="separate",
+            pos_embed_rope_rescale_coords=2,
+            pos_embed_rope_dtype="bf16",
+        )
+        model.init_weights()
+
+        if checkpoint_path is not None:
+            state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            model.load_state_dict(state)
+
+        return model
+
+    def _adapt_input_channels(self, in_channels: int) -> None:
+        old_proj = self.model.patch_embed.proj
+
+        if old_proj.in_channels == in_channels:
+            return
+
+        new_proj = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=old_proj.out_channels,
+            kernel_size=old_proj.kernel_size,
+            stride=old_proj.stride,
+            padding=old_proj.padding,
+            bias=old_proj.bias is not None,
+        )
+
+        with torch.no_grad():
+            new_proj.weight[:, :old_proj.in_channels, :, :] = old_proj.weight
+            if in_channels > old_proj.in_channels:
+                self._init_extra_weights(
+                    new_proj.weight[:, old_proj.in_channels:, :, :],
+                    old_proj.weight,
+                )
+            if old_proj.bias is not None:
+                new_proj.bias.copy_(old_proj.bias)
+
+        self.model.patch_embed.proj = new_proj
+
+
 class SatCLIPLocationBranch(nn.Module):
     def __init__(
         self,

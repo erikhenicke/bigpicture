@@ -26,6 +26,9 @@ experiments:
   satclip_image_enc_baseline:
     model: satclip_image_enc_baseline
 
+  dinov3_baseline:
+    model: dinov3_baseline
+
   # ---------------- LR features only -------------------------------
   densenet_lr_baseline:
     model: densenet_lr_baseline
