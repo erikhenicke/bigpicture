@@ -323,48 +323,39 @@ class SatCLIPImageBranch(Branch):
 
 
 class DINOv3Branch(Branch):
+    HF_MODEL_LARGE = "facebook/dinov3-vitl16-pretrain-sat493m"
+    HF_MODEL_BASE = "facebook/dinov3-vitb16-pretrain-lvd1689m"
+
     def __init__(
         self,
         in_channels: int = 3,
-        checkpoint_path: Optional[str] = None,
+        pretrained: bool = True,
         landsat_channel_init: str = "zero",
+        model_size: str = "base",
     ):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, checkpoint_path=checkpoint_path)
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
 
     def forward(self, x):
-        return self.model(x)
+        return self.model(x).pooler_output
 
     @property
     def out_dim(self) -> int:
-        return self.model.embed_dim
+        return self.model.config.hidden_size
 
-    def _get_model(self, checkpoint_path: Optional[str] = None):
-        sys.path.append(os.path.join(os.getcwd(), "lib/dinov3"))
-        from dinov3.models.vision_transformer import vit_large
+    def _get_model(self, pretrained: bool = True):
+        from transformers import AutoModel, AutoConfig
 
-        # See lib/dinov3/dinov3/configs/train/dinov3_vitl16_lvd1689m_distilled.yaml
-        model = vit_large(
-            patch_size=16,
-            n_storage_tokens=4,
-            mask_k_bias=True,
-            norm_layer="layernormbf16",
-            layerscale_init=1e-5,
-            untie_global_and_local_cls_norm=True,
-            pos_embed_rope_base=100,
-            pos_embed_rope_normalize_coords="separate",
-            pos_embed_rope_rescale_coords=2,
-            pos_embed_rope_dtype="bf16",
-        )
-        model.init_weights()
+        if pretrained:
+            if self.model_size == "base":
+                return AutoModel.from_pretrained(self.HF_MODEL_BASE)
+            else:
+                return AutoModel.from_pretrained(self.HF_MODEL_LARGE)
 
-        if checkpoint_path is not None:
-            state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            model.load_state_dict(state)
-
-        return model
+        config = AutoConfig.from_pretrained(self.HF_MODEL_NAME)
+        return AutoModel.from_config(config)
 
     def _adapt_input_channels(self, in_channels: int) -> None:
-        old_proj = self.model.patch_embed.proj
+        old_proj = self.model.embeddings.patch_embeddings
 
         if old_proj.in_channels == in_channels:
             return
@@ -388,7 +379,7 @@ class DINOv3Branch(Branch):
             if old_proj.bias is not None:
                 new_proj.bias.copy_(old_proj.bias)
 
-        self.model.patch_embed.proj = new_proj
+        self.model.embeddings.patch_embeddings = new_proj
 
 
 class SatCLIPLocationBranch(nn.Module):
