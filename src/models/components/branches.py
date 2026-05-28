@@ -259,13 +259,17 @@ class SatCLIPImageBranch(Branch):
         in_channels: int = 3,
         pretrained: bool = True,
         landsat_channel_init: str = "zero",
+        unfreeze_all: bool = False,
         unfreeze_first_block: bool = False,
         unfreeze_head: bool = False,
         num_unfreeze_last: int = 0,
     ):
         super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
         if pretrained:
-            self._freeze(unfreeze_first_block, unfreeze_head, num_unfreeze_last)
+            if unfreeze_all:
+                self.model.requires_grad_(True)
+            else:
+                self._freeze(unfreeze_first_block, unfreeze_head, num_unfreeze_last)
 
     def _freeze(self, unfreeze_first_block: bool, unfreeze_head: bool, num_unfreeze_last: int) -> None:
         self.model.requires_grad_(False)
