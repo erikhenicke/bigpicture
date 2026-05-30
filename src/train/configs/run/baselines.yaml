@@ -1,11 +1,9 @@
 slurm:
   partition: robolab
-  cpus_per_task: 4
-  mem_per_cpu: 8GB
+  cpus_per_task: 9 
+  mem_per_cpu: 6GB
 
 global_overrides:
-  data.frac: 1.0
-  trainer.max_epochs: 50
   optim: adam_warmup_cosine
   data.preprocessed_dir: FMoW_LandSat_Norm
 
