@@ -36,6 +36,7 @@ def find_run_dir(exp_key: str) -> Path | None:
     if not candidates:
         return None
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    print(f"Found {candidates} for experiment '{exp_key}':")
     return candidates[0][2]
 
 
@@ -60,52 +61,45 @@ def load_hydra_config(run_dir: Path):
     if not config_path.exists():
         raise FileNotFoundError(f"No .hydra/config.yaml found in {run_dir}")
     cfg = OmegaConf.load(config_path)
-    if not hasattr(cfg, "trainer") or not hasattr(cfg.trainer, "alternating_freeze"):
-        cfg.trainer.alternating_freeze = False
-        cfg.trainer.alternating_freeze_period = 1
+    # Backfill trainer fields that make_model reads but older runs didn't persist.
+    trainer_defaults = {
+        "alternating_freeze": False,
+        "alternating_freeze_period": 1,
+        "branch_ablation": False,
+    }
+    for key, default in trainer_defaults.items():
+        if key not in cfg.trainer:
+            cfg.trainer[key] = default
     return cfg
 
 
-class NoWandbModule:
-    """Mixin that skips _log_domain_confusion_matrix (requires wandb logger)."""
+def _strip_compile_prefix(state_dict: dict) -> dict:
+    """Drop torch.compile's '_orig_mod.' prefix so weights load into an uncompiled model.
 
-    def _log_domain_confusion_matrix(self, *args, **kwargs):
-        pass
+    Runs trained with trainer.compile=true wrap self.model in torch.compile during fit,
+    which prefixes the saved keys. We test uncompiled, so normalize the keys.
+    """
+    return {k.replace("._orig_mod.", "."): v for k, v in state_dict.items()}
 
 
 def evaluate_checkpoint(ckpt_path: Path, cfg) -> list[dict]:
-    """Run trainer.test() on a checkpoint, return the Lightning test metrics."""
-    from train.run_experiment import make_data_loaders, make_model
-    from models.late_fusion import LateFusionModule
+    """Run trainer.test() on a checkpoint, reproducing run_experiment.py's test metrics.
 
-    class EvalModule(NoWandbModule, LateFusionModule):
-        pass
+    Mirrors `_run_once` in run_experiment.py: same cfg -> same model -> best weights ->
+    make_data_loaders(cfg) -> trainer.test(). Metrics are computed in
+    LateFusionModule.on_test_epoch_end, independent of the logger.
+    """
+    from train.run_experiment import make_data_loaders, make_model
 
     module = make_model(cfg)
-    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    module.load_state_dict(checkpoint["state_dict"])
 
-    eval_module = EvalModule.__new__(EvalModule)
-    LateFusionModule.__init__(
-        eval_module,
-        model=module.model,
-        optimizer=module.optimizer_factory,
-        scheduler=module.scheduler_factory,
-        domain_optimizer=module.domain_optimizer_factory,
-        domain_scheduler=module.domain_scheduler_factory,
-        num_task_labels=module.hparams.num_task_labels,
-        num_domain_labels=module.hparams.num_domain_labels,
-        domain_index=module.hparams.domain_index,
-        ece_n_bins=module.hparams.ece_n_bins,
-        val_loader_names=module.val_loader_names,
-        test_loader_names=module.test_loader_names,
-        key_metric=module.hparams.key_metric,
-        compile=False,
-        label_smoothing=module.hparams.label_smoothing,
-        branch_ablation=module.hparams.branch_ablation,
-        alternating_freeze=module.hparams.alternating_freeze,
-        alternating_freeze_period=module.hparams.alternating_freeze_period,
-    )
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = _strip_compile_prefix(checkpoint["state_dict"])
+    module.load_state_dict(state_dict)
+
+    # The training run logs domain confusion matrices to W&B in on_test_epoch_end.
+    # We test with logger=False, so no-op it to avoid a None-logger crash for domain models.
+    module._log_domain_confusion_matrix = lambda *args, **kwargs: None
 
     _, _, test_loaders = make_data_loaders(cfg)
 
@@ -116,8 +110,7 @@ def evaluate_checkpoint(ckpt_path: Path, cfg) -> list[dict]:
         enable_checkpointing=False,
     )
 
-    results = trainer.test(model=eval_module, dataloaders=test_loaders, ckpt_path=None)
-    return results
+    return trainer.test(model=module, dataloaders=test_loaders)
 
 
 def load_run_config(config_path: Path) -> tuple[dict, str]:
@@ -180,8 +173,7 @@ def main() -> None:
         results = evaluate_checkpoint(ckpt_path, cfg)
         for result_dict in results:
             for key, value in sorted(result_dict.items()):
-                if "task-acc" in key:
-                    print(f"  {key}: {value:.4f}")
+                print(f"  {key}: {value:.4f}")
 
 
 if __name__ == "__main__":
