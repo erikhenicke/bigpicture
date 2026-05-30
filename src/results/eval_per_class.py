@@ -7,6 +7,7 @@ Step 2 (TODO): Add per-class collection once metrics match.
 """
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -113,6 +114,62 @@ def evaluate_checkpoint(ckpt_path: Path, cfg) -> list[dict]:
     return trainer.test(model=module, dataloaders=test_loaders)
 
 
+def load_original_test_metrics(run_dir: Path, seed_idx: int) -> dict[str, float]:
+    """Read the original test metrics that run_experiment.py wrote via CSVLogger.
+
+    During training, `trainer.test(...)` logs one final row of `test/...` columns to
+    `run{seed_idx}/version_0/metrics.csv`. We return that row as a flat metric->value dict.
+    """
+    metrics_path = run_dir / f"run{seed_idx}" / "version_0" / "metrics.csv"
+    if not metrics_path.exists():
+        return {}
+
+    with metrics_path.open() as f:
+        rows = list(csv.DictReader(f))
+
+    test_cols = [c for c in (rows[0].keys() if rows else []) if c.startswith("test/")]
+    # The test row is the last one with any non-empty test column.
+    for row in reversed(rows):
+        if any(row.get(c) not in (None, "") for c in test_cols):
+            return {c: float(row[c]) for c in test_cols if row.get(c) not in (None, "")}
+    return {}
+
+
+def compare_metrics(original: dict[str, float], rerun: dict[str, float]) -> None:
+    """Print a side-by-side comparison of original vs. rerun test metrics."""
+    if not original:
+        print("  (no original test metrics found in metrics.csv - skipping comparison)")
+        return
+
+    keys = sorted(set(original) | set(rerun))
+    name_w = max(len(k) for k in keys)
+    print(f"  {'metric':<{name_w}}  {'original':>12}  {'rerun':>12}  {'diff':>12}")
+    print(f"  {'-' * name_w}  {'-' * 12}  {'-' * 12}  {'-' * 12}")
+
+    max_abs_diff = 0.0
+    max_abs_key = ""
+    n_missing = 0
+    for key in keys:
+        orig = original.get(key)
+        new = rerun.get(key)
+        if orig is None or new is None:
+            n_missing += 1
+            o_str = f"{orig:>12.6f}" if orig is not None else f"{'-':>12}"
+            n_str = f"{new:>12.6f}" if new is not None else f"{'-':>12}"
+            print(f"  {key:<{name_w}}  {o_str}  {n_str}  {'-':>12}")
+            continue
+        diff = new - orig
+        if abs(diff) > max_abs_diff:
+            max_abs_diff = abs(diff)
+            max_abs_key = key
+        print(f"  {key:<{name_w}}  {orig:>12.6f}  {new:>12.6f}  {diff:>+12.6f}")
+
+    print(f"  {'-' * name_w}  {'-' * 12}  {'-' * 12}  {'-' * 12}")
+    print(f"  max |diff| = {max_abs_diff:.6f} ({max_abs_key})")
+    if n_missing:
+        print(f"  {n_missing} metric(s) present in only one of the two sets")
+
+
 def load_run_config(config_path: Path) -> tuple[dict, str]:
     """Load a run config YAML from the given path."""
     if not config_path.exists():
@@ -171,9 +228,15 @@ def main() -> None:
     for i, ckpt_path in enumerate(checkpoints):
         print(f"\n--- Evaluating seed {i} ({ckpt_path.name}) ---")
         results = evaluate_checkpoint(ckpt_path, cfg)
+        # trainer.test() returns one dict per dataloader; flatten into a single metric map.
+        rerun_metrics: dict[str, float] = {}
         for result_dict in results:
-            for key, value in sorted(result_dict.items()):
-                print(f"  {key}: {value:.4f}")
+            rerun_metrics.update(result_dict)
+
+        # Seed i was trained as run{i}; its original test metrics live in run{i}/version_0/metrics.csv.
+        original_metrics = load_original_test_metrics(run_dir, i)
+        print(f"\n  Original vs. rerun (seed {i}):")
+        compare_metrics(original_metrics, rerun_metrics)
 
 
 if __name__ == "__main__":
