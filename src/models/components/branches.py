@@ -336,8 +336,12 @@ class DINOv3Branch(Branch):
         pretrained: bool = True,
         landsat_channel_init: str = "zero",
         model_size: str = "base",
+        freeze: bool = False,
     ):
         super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained, model_size=model_size)
+
+        if freeze:
+            self.model.requires_grad_(False)
 
     def forward(self, x):
         return self.model(x).pooler_output
@@ -346,7 +350,7 @@ class DINOv3Branch(Branch):
     def out_dim(self) -> int:
         return self.model.config.hidden_size
 
-    def _get_model(self, pretrained: bool = True, model_size: str = "base"):
+    def _get_model(self, pretrained: bool = True, model_size: str = "base") -> nn.Module:
         from transformers import AutoModel, AutoConfig
 
         if pretrained:
