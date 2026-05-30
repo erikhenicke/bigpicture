@@ -83,14 +83,25 @@ def _strip_compile_prefix(state_dict: dict) -> dict:
     return {k.replace("._orig_mod.", "."): v for k, v in state_dict.items()}
 
 
-def evaluate_checkpoint(ckpt_path: Path, cfg) -> list[dict]:
+def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     """Run trainer.test() on a checkpoint, reproducing run_experiment.py's test metrics.
 
-    Mirrors `_run_once` in run_experiment.py: same cfg -> same model -> best weights ->
-    make_data_loaders(cfg) -> trainer.test(). Metrics are computed in
+    Mirrors `_run_once` in run_experiment.py: seed -> make_data_loaders(cfg) -> model ->
+    best weights -> trainer.test(). Metrics are computed in
     LateFusionModule.on_test_epoch_end, independent of the logger.
+
+    Reproducing the seed and the loader-build order matters when cfg.data.frac < 1.0:
+    WILDS draws the random frac subset via the global np.random RNG inside get_subset,
+    so the exact test images depend on seed_everything(cfg.seed + run_idx) and the order
+    of the get_subset calls. The subset is drawn before training, so it is fully
+    determined by these two things (not by the trained weights). `seed_idx` is the
+    original run index (run{seed_idx}) for this checkpoint.
     """
     from train.run_experiment import make_data_loaders, make_model
+
+    # Recreate the RNG state the original run used right before it built its loaders.
+    seed_everything(cfg.seed + seed_idx, workers=True)
+    _, _, test_loaders = make_data_loaders(cfg)
 
     module = make_model(cfg)
 
@@ -101,8 +112,6 @@ def evaluate_checkpoint(ckpt_path: Path, cfg) -> list[dict]:
     # The training run logs domain confusion matrices to W&B in on_test_epoch_end.
     # We test with logger=False, so no-op it to avoid a None-logger crash for domain models.
     module._log_domain_confusion_matrix = lambda *args, **kwargs: None
-
-    _, _, test_loaders = make_data_loaders(cfg)
 
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
@@ -221,13 +230,14 @@ def main() -> None:
     for cp in checkpoints:
         print(f"  {cp.name}")
 
-    seed_everything(111, workers=True)
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("medium")
 
     for i, ckpt_path in enumerate(checkpoints):
+        # Seed i was trained as run{i} with seed_everything(cfg.seed + i); evaluate_checkpoint
+        # re-seeds with the same value so the frac<1.0 test subset matches the original run.
         print(f"\n--- Evaluating seed {i} ({ckpt_path.name}) ---")
-        results = evaluate_checkpoint(ckpt_path, cfg)
+        results = evaluate_checkpoint(ckpt_path, cfg, seed_idx=i)
         # trainer.test() returns one dict per dataloader; flatten into a single metric map.
         rerun_metrics: dict[str, float] = {}
         for result_dict in results:
