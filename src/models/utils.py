@@ -183,7 +183,6 @@ def update_task_metrics(
     task_criterion_per_sample: torch.nn.Module,
     task_ece_metric: MulticlassCalibrationError,
     task_logits: torch.Tensor,
-    task_loss: torch.Tensor,
     task_preds: torch.Tensor,
     y: torch.Tensor,
     metadata: torch.Tensor,
@@ -196,7 +195,9 @@ def update_task_metrics(
     per_sample_loss = task_criterion_per_sample(task_logits, y)
     correct_mask = task_preds == y
 
-    state["task_loss_sum"] += task_loss.item()
+    # Accumulate the per-sample loss sum (not the batch mean) so the final task
+    # loss is sample-weighted and therefore invariant to batch size / batching.
+    state["task_loss_sum"] += per_sample_loss.sum().item()
     state["task_correct"] += correct_mask.sum().item()
 
     update_task_entropy_metrics(state, probs, correct_mask)
@@ -208,7 +209,7 @@ def compute_final_task_metrics(state: Dict[str, Any], region_names: List[str], e
     Compute the final task-specific metrics from the state dictionary.
     """
     total = state["total"]
-    task_loss = state["task_loss_sum"] / state["batch_count"] if state["batch_count"] > 0 else torch.nan
+    task_loss = state["task_loss_sum"] / total if total > 0 else torch.nan
     task_acc = state["task_correct"] / total if total > 0 else torch.nan
     task_ece = ece_metric.compute().item()
 
@@ -228,7 +229,6 @@ def update_eval_metrics(
     task_criterion_per_sample: torch.nn.Module,
     task_ece_metric: MulticlassCalibrationError,
     task_logits: torch.Tensor,
-    task_loss: torch.Tensor,
     task_preds: torch.Tensor,
     y: torch.Tensor,
     metadata: torch.Tensor,
@@ -240,7 +240,7 @@ def update_eval_metrics(
     state["batch_count"] += 1
     state["total"] += y.size(0)
 
-    update_task_metrics(state, task_criterion_per_sample, task_ece_metric, task_logits, task_loss, task_preds, y, metadata, region_index)
+    update_task_metrics(state, task_criterion_per_sample, task_ece_metric, task_logits, task_preds, y, metadata, region_index)
 
 
 def compute_final_eval_metrics(
