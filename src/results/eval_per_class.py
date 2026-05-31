@@ -109,6 +109,11 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     state_dict = _strip_compile_prefix(checkpoint["state_dict"])
     module.load_state_dict(state_dict)
 
+    # Disable Dropout and use BatchNorm running stats so the forward pass is
+    # deterministic. on_test_epoch_start also enforces this, but set it here too
+    # so the module is in the right mode regardless of how it is driven.
+    module.eval()
+
     # The training run logs domain confusion matrices to W&B in on_test_epoch_end.
     # We test with logger=False, so no-op it to avoid a None-logger crash for domain models.
     module._log_domain_confusion_matrix = lambda *args, **kwargs: None
