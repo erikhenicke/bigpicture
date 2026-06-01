@@ -1,7 +1,7 @@
 slurm:
   partition: robolab
-  cpus_per_task: 9 
-  mem_per_cpu: 6GB
+  cpus_per_task: 4 
+  mem_per_cpu: 8GB
 
 global_overrides:
   optim: adam_warmup_cosine

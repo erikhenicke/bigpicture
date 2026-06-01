@@ -5,11 +5,13 @@ model:
     in_channels: 3
     pretrained: true
     model_size: base
-    freeze: true
+    freeze: false 
 
   model:
     _target_: models.components.fusion_model.SingleBranchModel
 
 run_name: train-dinov3-baseline
 data:
-  batch_size: 256 
+  batch_size: 16 
+trainer:
+  max_epochs: 10
