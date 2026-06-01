@@ -12,6 +12,11 @@ model:
 
 run_name: train-dinov3-baseline
 data:
-  batch_size: 16 
+  batch_size: 64 
+  num_workers: 8
 trainer:
   max_epochs: 10
+optim:
+  optimizer:
+    lr: 1e-5
+

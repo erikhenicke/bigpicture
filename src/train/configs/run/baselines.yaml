@@ -1,7 +1,7 @@
 slurm:
   partition: robolab
-  cpus_per_task: 4 
-  mem_per_cpu: 8GB
+  cpus_per_task: 8 
+  mem_per_cpu: 6GB
 
 global_overrides:
   optim: adam_warmup_cosine
@@ -26,6 +26,14 @@ experiments:
 
   dinov3_baseline:
     model: dinov3_baseline
+
+  dinov3_lr_baseline:
+    model: dinov3_lr_baseline
+  
+  dinov3_lr_baseline_no_domain:
+    model: dinov3_lr_baseline
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
 
   # ---------------- LR features only -------------------------------
   densenet_lr_baseline:
