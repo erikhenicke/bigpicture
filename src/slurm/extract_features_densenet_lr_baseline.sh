@@ -18,6 +18,21 @@ if [ -z "$RUN_DIR" ]; then
   echo "No run directory found for densenet_lr_baseline under log/runs/" >&2
   exit 1
 fi
-echo "Using run directory: $RUN_DIR"
 
-srun uv run --env-file .env src/train/extract_features.py "$RUN_DIR"
+echo "Using run directory: $RUN_DIR"
+start_ts=$(date -Iseconds)
+start_epoch=$(date +%s)
+echo "srun start: $start_ts"
+
+if ! srun uv run --env-file .env src/results/extract_features.py "$RUN_DIR"; then
+  end_ts=$(date -Iseconds)
+  end_epoch=$(date +%s)
+  elapsed=$((end_epoch - start_epoch))
+  echo "srun end: $end_ts (failed, elapsed ${elapsed}s)" >&2
+  exit 1
+fi
+
+end_ts=$(date -Iseconds)
+end_epoch=$(date +%s)
+elapsed=$((end_epoch - start_epoch))
+echo "srun end: $end_ts (elapsed ${elapsed}s)"
