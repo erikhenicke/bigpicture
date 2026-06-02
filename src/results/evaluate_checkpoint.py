@@ -19,19 +19,21 @@ DATA_LOADER_NUM_WORKERS = 4
 
 
 def resolve_checkpoint_path(path: Path) -> Path:
+    """Resolve a single checkpoint, preferring the best (``late-fusion-*.ckpt``)
+    over ``last.ckpt`` — same priority as eval_reproduce.find_best_checkpoints.
+    run_experiment.py saves best checkpoints as ``late-fusion-epoch*.ckpt``.
+    """
     if path.is_file():
         return path
 
     if not path.is_dir():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
 
-    candidates = list(path.rglob("best*.ckpt"))
+    candidates = list(path.rglob("late-fusion-*.ckpt"))
     if not candidates:
         candidates = list(path.rglob("last.ckpt"))
     if not candidates:
-        candidates = list(path.rglob("*.ckpt"))
-    if not candidates:
-        raise FileNotFoundError(f"No .ckpt files found under: {path}")
+        raise FileNotFoundError(f"No checkpoints found under: {path}")
 
     return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
 

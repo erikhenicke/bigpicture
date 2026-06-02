@@ -14,7 +14,8 @@ from pathlib import Path
 import torch
 import yaml
 from lightning import Trainer, seed_everything
-from omegaconf import OmegaConf
+
+from results.utils import find_best_checkpoints, load_hydra_config, strip_compile_prefix
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_RUNS = REPO_ROOT / "log" / "runs"
@@ -41,48 +42,6 @@ def find_run_dir(exp_key: str) -> Path | None:
     return candidates[0][2]
 
 
-def find_best_checkpoints(run_dir: Path) -> list[Path]:
-    """Find best checkpoint for each seed run."""
-    checkpoints = []
-    ckpt_root = run_dir / "checkpoints"
-    for seed_dir in sorted(ckpt_root.glob("run*")):
-        best = list(seed_dir.glob("late-fusion-*.ckpt"))
-        if best:
-            checkpoints.append(best[0])
-        else:
-            last = seed_dir / "last.ckpt"
-            if last.exists():
-                checkpoints.append(last)
-    return checkpoints
-
-
-def load_hydra_config(run_dir: Path):
-    """Load the hydra config from a run directory."""
-    config_path = run_dir / ".hydra" / "config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"No .hydra/config.yaml found in {run_dir}")
-    cfg = OmegaConf.load(config_path)
-    # Backfill trainer fields that make_model reads but older runs didn't persist.
-    trainer_defaults = {
-        "alternating_freeze": False,
-        "alternating_freeze_period": 1,
-        "branch_ablation": False,
-    }
-    for key, default in trainer_defaults.items():
-        if key not in cfg.trainer:
-            cfg.trainer[key] = default
-    return cfg
-
-
-def _strip_compile_prefix(state_dict: dict) -> dict:
-    """Drop torch.compile's '_orig_mod.' prefix so weights load into an uncompiled model.
-
-    Runs trained with trainer.compile=true wrap self.model in torch.compile during fit,
-    which prefixes the saved keys. We test uncompiled, so normalize the keys.
-    """
-    return {k.replace("._orig_mod.", "."): v for k, v in state_dict.items()}
-
-
 def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     """Run trainer.test() on a checkpoint, reproducing run_experiment.py's test metrics.
 
@@ -106,7 +65,7 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     module = make_model(cfg)
 
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    state_dict = _strip_compile_prefix(checkpoint["state_dict"])
+    state_dict = strip_compile_prefix(checkpoint["state_dict"])
     module.load_state_dict(state_dict)
 
     # Disable Dropout and use BatchNorm running stats so the forward pass is
