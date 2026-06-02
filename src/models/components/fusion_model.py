@@ -14,10 +14,7 @@ class SingleBranchModel(nn.Module):
     def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
         super().__init__()
         self.encoder = encoder
-        self.task_classifier = nn.Sequential(
-                nn.Dropout(0.1),
-                nn.Linear(encoder.out_dim, num_task_labels),
-        )
+        self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
         self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
