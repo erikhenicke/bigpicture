@@ -13,15 +13,22 @@ Usage:
     uv run python src/dataset_creation/display_spatial_encoding.py \
         --preprocessed-dir /path/to/fmow_preprocessed \
         --metadata-csv /home/datasets4/FMoW_LandSat/fmow_landsat/rgb_metadata_extended.csv \
+        --fourier-channels --fourier-bands 4
+
+    uv run python src/dataset_creation/display_spatial_encoding.py \
+        --preprocessed-dir /path/to/fmow_preprocessed \
+        --metadata-csv /home/datasets4/FMoW_LandSat/fmow_landsat/rgb_metadata_extended.csv \
         --overlap-mask --overlap-mask-type gaussian
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import pandas as pd
 import torch
 
@@ -88,6 +95,26 @@ def build_coord_grids(img_span_km: float, lr_span_km: float):
     return coord_grid_hr, coord_grid_lr
 
 
+FOURIER_COMPONENT_LABELS = ["sin(f·x)", "cos(f·x)", "sin(f·y)", "cos(f·y)"]
+
+
+def build_fourier_channels(coord_grid: torch.Tensor, num_bands: int) -> torch.Tensor:
+    """Compute raw Fourier channels (before learned projection) from a coordinate grid.
+
+    Returns (4, num_bands, H, W): dim 0 = component [sin_x, cos_x, sin_y, cos_y],
+    dim 1 = frequency band.
+    """
+    freqs = math.pi * (2.0 ** torch.arange(num_bands, dtype=torch.float32))
+    x, y = coord_grid[0:1], coord_grid[1:2]  # (1, H, W)
+    f = freqs[:, None, None]  # (L, 1, 1)
+    return torch.stack([
+        torch.sin(f * x),  # (L, H, W)
+        torch.cos(f * x),
+        torch.sin(f * y),
+        torch.cos(f * y),
+    ], dim=0)  # (4, L, H, W)
+
+
 def build_overlap_mask(img_span_km: float, lr_span_km: float, mask_type: str):
     S = IMG_SIZE
     ratio = img_span_km / lr_span_km
@@ -103,7 +130,8 @@ def build_overlap_mask(img_span_km: float, lr_span_km: float, mask_type: str):
     return mask
 
 
-def display(pairs, span_lookup, lr_span_km, show_coord, show_mask, mask_type):
+def display(pairs, span_lookup, lr_span_km, show_coord, show_mask, mask_type,
+            show_fourier, fourier_bands):
     plt.ion()
 
     for pos, (idx, rgb_path, ls_path) in enumerate(pairs, start=1):
@@ -111,34 +139,80 @@ def display(pairs, span_lookup, lr_span_km, show_coord, show_mask, mask_type):
         ls_img = _landsat_to_display(_load_pt(ls_path))
         img_span_km = span_lookup.get(idx)
 
-        panels = []
-        panels.append(("RGB", rgb_img, None))
-        panels.append(("Landsat", ls_img, None))
+        base_panels = []
+        base_panels.append(("RGB", rgb_img, None))
+        base_panels.append(("Landsat", ls_img, None))
 
         if show_coord and img_span_km is not None:
             hr_grid, lr_grid = build_coord_grids(img_span_km, lr_span_km)
-            panels.append(("HR coord X", hr_grid[0], "viridis"))
-            panels.append(("HR coord Y", hr_grid[1], "viridis"))
-            panels.append(("LR coord X", lr_grid[0], "viridis"))
-            panels.append(("LR coord Y", lr_grid[1], "viridis"))
+            base_panels.append(("HR coord X", hr_grid[0], "viridis"))
+            base_panels.append(("HR coord Y", hr_grid[1], "viridis"))
+            base_panels.append(("LR coord X", lr_grid[0], "viridis"))
+            base_panels.append(("LR coord Y", lr_grid[1], "viridis"))
 
         if show_mask and img_span_km is not None:
             mask = build_overlap_mask(img_span_km, lr_span_km, mask_type)
-            panels.append(("Overlap mask", mask, "gray"))
+            base_panels.append(("Overlap mask", mask, "gray"))
 
-        ncols = len(panels)
-        fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 4))
-        if ncols == 1:
-            axes = [axes]
+        has_fourier = show_fourier and img_span_km is not None
 
-        for ax, (title, img, cmap) in zip(axes, panels):
-            if isinstance(img, torch.Tensor):
-                img = img.detach().cpu()
-            im = ax.imshow(img, cmap=cmap)
-            ax.set_title(title, fontsize=9)
-            ax.axis("off")
-            if cmap is not None:
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if not has_fourier:
+            ncols = len(base_panels)
+            fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 4))
+            if ncols == 1:
+                axes = [axes]
+            for ax, (title, img, cmap) in zip(axes, base_panels):
+                if isinstance(img, torch.Tensor):
+                    img = img.detach().cpu()
+                im = ax.imshow(img, cmap=cmap)
+                ax.set_title(title, fontsize=9)
+                ax.axis("off")
+                if cmap is not None:
+                    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        else:
+            hr_grid, lr_grid = build_coord_grids(img_span_km, lr_span_km)
+            hr_fourier = build_fourier_channels(hr_grid, fourier_bands)  # (4, L, H, W)
+            lr_fourier = build_fourier_channels(lr_grid, fourier_bands)
+
+            n_components = 4
+            ncols = max(len(base_panels), fourier_bands)
+            nrows = 1 + 2 * n_components  # base row + HR block + LR block
+            fig = plt.figure(figsize=(3.5 * ncols, 3 * nrows))
+            gs = GridSpec(nrows, ncols, figure=fig, hspace=0.35, wspace=0.3)
+
+            for col, (title, img, cmap) in enumerate(base_panels):
+                ax = fig.add_subplot(gs[0, col])
+                if isinstance(img, torch.Tensor):
+                    img = img.detach().cpu()
+                im = ax.imshow(img, cmap=cmap)
+                ax.set_title(title, fontsize=9)
+                ax.axis("off")
+                if cmap is not None:
+                    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            for col in range(len(base_panels), ncols):
+                fig.add_subplot(gs[0, col]).axis("off")
+
+            freqs = math.pi * (2.0 ** torch.arange(fourier_bands, dtype=torch.float32))
+            for branch_idx, (branch_name, fourier) in enumerate([
+                ("HR", hr_fourier), ("LR", lr_fourier)
+            ]):
+                row_offset = 1 + branch_idx * n_components
+                for comp_idx in range(n_components):
+                    for band_idx in range(fourier_bands):
+                        ax = fig.add_subplot(gs[row_offset + comp_idx, band_idx])
+                        channel = fourier[comp_idx, band_idx].detach().cpu()
+                        im = ax.imshow(channel, cmap="RdBu_r", vmin=-1, vmax=1)
+                        ax.axis("off")
+                        if comp_idx == 0:
+                            ax.set_title(f"f={freqs[band_idx]:.1f}", fontsize=8)
+                        if band_idx == 0:
+                            ax.set_ylabel(
+                                f"{branch_name} {FOURIER_COMPONENT_LABELS[comp_idx]}",
+                                fontsize=8, rotation=0, labelpad=80, va="center",
+                            )
+                            ax.yaxis.set_visible(True)
+                    for col in range(fourier_bands, ncols):
+                        fig.add_subplot(gs[row_offset + comp_idx, col]).axis("off")
 
         span_str = f"HR span={img_span_km:.2f} km" if img_span_km is not None else "HR span=?"
         fig.suptitle(
@@ -151,8 +225,11 @@ def display(pairs, span_lookup, lr_span_km, show_coord, show_mask, mask_type):
         plt.pause(0.001)
 
         if pos < len(pairs):
-            input("Press Enter for the next sample...")
+            resp = input("Press Enter for the next sample (q to quit)... ")
             plt.close(fig)
+            if resp.strip().lower() == "q":
+                plt.close("all")
+                return
 
     plt.ioff()
     plt.show()
@@ -165,6 +242,8 @@ if __name__ == "__main__":
     parser.add_argument("--metadata-csv", type=str,
                         default="/home/datasets4/FMoW_LandSat/fmow_landsat/rgb_metadata_extended.csv")
     parser.add_argument("--coord-channels", action="store_true")
+    parser.add_argument("--fourier-channels", action="store_true")
+    parser.add_argument("--fourier-bands", type=int, default=4)
     parser.add_argument("--overlap-mask", action="store_true")
     parser.add_argument("--overlap-mask-type", choices=["binary", "gaussian"], default="binary")
     parser.add_argument("--lr-extension-factor", type=float, default=3.0)
@@ -197,4 +276,5 @@ if __name__ == "__main__":
     print(f"Found {len(pairs)} paired images")
     print(f"max(img_span_km) = {max_hr_span:.4f} km, lr_span_km = {lr_span_km:.4f} km")
 
-    display(pairs, span_lookup, lr_span_km, args.coord_channels, args.overlap_mask, args.overlap_mask_type)
+    display(pairs, span_lookup, lr_span_km, args.coord_channels, args.overlap_mask, args.overlap_mask_type,
+            args.fourier_channels, args.fourier_bands)
