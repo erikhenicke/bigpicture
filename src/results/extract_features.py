@@ -133,7 +133,7 @@ def resolve_output_base(cfg, preprocessed_dir) -> Path:
         raise ValueError(
             "cfg.data.preprocessed_dir is None; cannot derive the output location."
         )
-    run_name = cfg.run_name
+    run_name = cfg.run_name.replace("train_", "")
     return Path(preprocessed_dir).parent / f"FMoW_LandSat_{run_name.title()}_Features"
 
 
