@@ -10,6 +10,7 @@
 #SBATCH --output=log/slurm/extract_features_densenet_lr_baseline.%j.out
 #SBATCH --error=log/slurm/extract_features_densenet_lr_baseline.%j.err
 cd /home/henicke/git/bigpicture
+echo "hostname: $(hostname)"
 
 # extract_features.py takes the run directory positionally; resolve the most
 # recent log dir for this experiment (same selection as eval_reproduce.find_run_dir).

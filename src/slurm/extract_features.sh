@@ -10,6 +10,7 @@
 #SBATCH --output=log/slurm/extract_features.%j.out
 #SBATCH --error=log/slurm/extract_features.%j.err
 cd /home/henicke/git/bigpicture
+echo "hostname: $(hostname)"
 
 # extract_features.py takes the run directory positionally; resolve the most
 # recent log dir per experiment (same selection as eval_reproduce.find_run_dir).
