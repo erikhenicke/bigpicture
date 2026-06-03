@@ -46,7 +46,6 @@ class LateFusionModule(LightningModule):
         val_loader_names: List[str] = ["val"],
         test_loader_names: List[str] = ["test"],
         key_metric: str = "val/val-od-worst-group-task-acc",
-        compile: bool = False,
         label_smoothing: float = 0.0,
         branch_ablation: bool = False,
         alternating_freeze: bool = False,
@@ -756,18 +755,6 @@ class LateFusionModule(LightningModule):
             self.log(
                 key, value, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
             )
-
-    def setup(self, stage: str) -> None:
-        """Lightning hook that is called at the beginning of fit (train + validate), validate,
-        test, or predict.
-
-        This is a good hook when you need to build models dynamically or adjust something about
-        them. This hook is called on every process when using DDP.
-
-        :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
-        """
-        if self.hparams.compile and stage == "fit":
-            self.model = torch.compile(self.model)
 
     def configure_optimizers(self) -> Any:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.

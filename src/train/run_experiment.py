@@ -18,7 +18,7 @@ from models.components.spatial_encoding import SpatialEncoding
 from models.late_fusion import LateFusionModule
 from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
 
-def _has_device_tensor_cores() -> bool:
+def has_device_tensor_cores() -> bool:
     """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
     if not torch.cuda.is_available():
         return False
@@ -214,7 +214,6 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         val_loader_names=list(cfg.data.val_loader_names),
         test_loader_names=list(cfg.data.test_loader_names),
         key_metric=cfg.trainer.monitor_metric,
-        compile=cfg.trainer.compile,
         label_smoothing=cfg.trainer.label_smoothing,
         branch_ablation=cfg.trainer.branch_ablation,
         alternating_freeze=cfg.trainer.alternating_freeze,
@@ -281,7 +280,7 @@ def _best_run_score(test_results: list[dict], metric: str) -> float:
 
 @hydra.main(version_base=None, config_path="configs", config_name="setup")
 def run_experiment(cfg: DictConfig) -> None:
-    if _has_device_tensor_cores():
+    if has_device_tensor_cores():
         torch.set_float32_matmul_precision("medium")
 
     default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))

@@ -15,7 +15,9 @@ import torch
 import yaml
 from lightning import Trainer, seed_everything
 
-from results.utils import find_best_checkpoints, load_hydra_config, strip_compile_prefix
+from train.run_experiment import make_data_loaders, make_model, has_device_tensor_cores
+from results.utils import find_best_checkpoints, load_hydra_config 
+
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_RUNS = REPO_ROOT / "log" / "runs"
@@ -56,8 +58,6 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     determined by these two things (not by the trained weights). `seed_idx` is the
     original run index (run{seed_idx}) for this checkpoint.
     """
-    from train.run_experiment import make_data_loaders, make_model
-
     # Recreate the RNG state the original run used right before it built its loaders.
     seed_everything(cfg.seed + seed_idx, workers=True)
     _, _, test_loaders = make_data_loaders(cfg)
@@ -65,7 +65,7 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     module = make_model(cfg)
 
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    state_dict = strip_compile_prefix(checkpoint["state_dict"])
+    state_dict = checkpoint["state_dict"]
     module.load_state_dict(state_dict)
 
     # Disable Dropout and use BatchNorm running stats so the forward pass is
@@ -194,7 +194,7 @@ def main() -> None:
     for cp in checkpoints:
         print(f"  {cp.name}")
 
-    if torch.cuda.is_available():
+    if has_device_tensor_cores():
         torch.set_float32_matmul_precision("medium")
 
     for i, ckpt_path in enumerate(checkpoints):

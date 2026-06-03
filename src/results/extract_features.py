@@ -38,7 +38,7 @@ from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel
-from results.utils import find_best_checkpoints, load_hydra_config, strip_compile_prefix
+from results.utils import find_best_checkpoints, load_hydra_config
 from train.run_experiment import _parse_spatial_cfg, make_model
 from train.utils import make_multiscale_dataset, resolve_preprocessed_dir
 
@@ -250,7 +250,7 @@ def main() -> None:
     for seed_idx, ckpt_path in seed_checkpoints:
         print(f"\n--- seed {seed_idx} ({ckpt_path}) ---")
         checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        module.load_state_dict(strip_compile_prefix(checkpoint["state_dict"]))
+        module.load_state_dict(checkpoint["state_dict"])
         module.eval()
 
         out_dir = out_base / f"run{seed_idx}" / "fmow_features" / subdir

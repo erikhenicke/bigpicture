@@ -43,10 +43,3 @@ def load_hydra_config(run_dir: Path):
         if key not in cfg.trainer:
             cfg.trainer[key] = default
     return cfg
-
-
-def strip_compile_prefix(state_dict: dict) -> dict:
-    """Drop torch.compile's ``_orig_mod.`` prefix so weights load into an uncompiled
-    model. Runs trained with ``trainer.compile=true`` wrap ``self.model`` in
-    torch.compile during fit, which prefixes the saved keys."""
-    return {k.replace("._orig_mod.", "."): v for k, v in state_dict.items()}
