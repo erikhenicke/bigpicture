@@ -280,9 +280,6 @@ def _best_run_score(test_results: list[dict], metric: str) -> float:
 
 @hydra.main(version_base=None, config_path="configs", config_name="setup")
 def run_experiment(cfg: DictConfig) -> None:
-    if has_device_tensor_cores():
-        torch.set_float32_matmul_precision("medium")
-
     default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
 
     wandb.login()
