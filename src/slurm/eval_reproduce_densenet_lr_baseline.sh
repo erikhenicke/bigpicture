@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=robolab
-#SBATCH --nodelist=gaia4,gaia5
+#SBATCH --nodelist=gaia4,gaia5,gaia7
 #SBATCH --job-name=reproduce_densenet_lr_baseline
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

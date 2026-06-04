@@ -19,8 +19,8 @@ EXPERIMENTS=(
   train_densenet_baseline
   train_densenet_lr_baseline_no_domain
   train_dinov3_baseline
-  train_dinov3_lr_baseline
-  train_dinov3_lr_baseline_no_domain
+#   train_dinov3_lr_baseline
+#   train_dinov3_lr_baseline_no_domain
 )
 
 for experiment in "${EXPERIMENTS[@]}"; do
