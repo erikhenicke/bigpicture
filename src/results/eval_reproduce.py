@@ -72,6 +72,8 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     # deterministic. on_test_epoch_start also enforces this, but set it here too
     # so the module is in the right mode regardless of how it is driven.
     module.eval()
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False 
 
     # The training run logs domain confusion matrices to W&B in on_test_epoch_end.
     # We test with logger=False, so no-op it to avoid a None-logger crash for domain models.
@@ -194,8 +196,8 @@ def main() -> None:
     for cp in checkpoints:
         print(f"  {cp.name}")
 
-    if has_device_tensor_cores():
-        torch.set_float32_matmul_precision("medium")
+    # if has_device_tensor_cores():
+    #     torch.set_float32_matmul_precision("medium")
 
     for i, ckpt_path in enumerate(checkpoints):
         # Seed i was trained as run{i} with seed_everything(cfg.seed + i); evaluate_checkpoint
