@@ -137,6 +137,15 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
             landsat_channels=cfg.model.landsat_in_channels,
         )
+    elif model_target.endswith("SingleBranchLocationModel"):
+        encoder = instantiate(cfg.model.encoder)
+        model = instantiate(
+            cfg.model.model,
+            encoder=encoder,
+            num_task_labels=cfg.num_task_labels,
+            num_domain_labels=cfg.num_domain_labels,
+            lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
+        )
     else:
         branches_target = cfg.model.branches.get("_target_", "")
         is_dual_branch = branches_target.endswith(".DualBranch")

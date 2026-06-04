@@ -13,6 +13,7 @@ import wandb
 from models.components.fusion_model import (
     SingleBranchModel,
     SingleBranchLRModel,
+    SingleBranchLocationModel,
     LateFusionModel,
 )
 from models.utils import (
@@ -32,7 +33,7 @@ class LateFusionModule(LightningModule):
 
     def __init__(
         self,
-        model: LateFusionModel | SingleBranchModel | SingleBranchLRModel,
+        model: LateFusionModel | SingleBranchModel | SingleBranchLRModel | SingleBranchLocationModel,
         optimizer: Callable[..., torch.optim.Optimizer],
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,

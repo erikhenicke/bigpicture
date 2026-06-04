@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 
-from models.components.branches import Branch, DualBranch
+from models.components.branches import Branch, DualBranch, SatCLIPLocationBranch
 from models.components.fusion import Fusion
 from models.components.domain_relations import D3GRelation
 
@@ -86,6 +86,47 @@ class SingleBranchLRModel(nn.Module):
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []
 
+
+class SingleBranchLocationModel(nn.Module):
+    """Location-only model: SatCLIP encoder + task classifier + LR domain head."""
+
+    def __init__(
+        self,
+        encoder: SatCLIPLocationBranch,
+        num_task_labels: int,
+        num_domain_labels: int = 6,
+        lr_domain_loss_coeff: float = 0.1667,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.lr_domain_loss_coeff = lr_domain_loss_coeff
+        self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
+        self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
+
+    def supports_d3g_objective(self) -> bool:
+        return False
+
+    def supports_lr_domain_classification(self) -> bool:
+        return True
+
+    def supports_hr_domain_classification(self) -> bool:
+        return False
+
+    def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        features = self.encoder(x["coords"])
+        return {
+            "task_logits": self.task_classifier(features),
+            "lr_domain_logits": self.lr_domain_classifier(features),
+        }
+
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
 
 class LateFusionModel(nn.Module):
     def __init__(
