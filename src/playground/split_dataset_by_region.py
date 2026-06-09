@@ -13,14 +13,17 @@ FIVE_REGIONS = ["Europe", "Americas", "Asia", "Africa", "Oceania"]
 def get_data(frac: float = 0.1):
     fmow_dir = '/home/henicke/data'
     landsat_dir = '/home/datasets4/FMoW_LandSat'
+    source = 'raw'
     preprocessed_dir = None
 
     if platform.node() == 'gaia4' or platform.node() == 'gaia5':
-        preprocessed_dir = '/data/henicke/FMoW_LandSat'
+        source = 'preprocessed'
+        preprocessed_dir = 'FMoW_LandSat'  # host-resolved inside the dataset
 
     dataset = FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
+        source=source,
         preprocessed_dir=preprocessed_dir
     )
     return dataset.get_subset(split='train', frac=frac), dataset.get_subset(split='val', frac=frac)

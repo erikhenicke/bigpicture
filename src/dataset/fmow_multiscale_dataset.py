@@ -1,3 +1,4 @@
+import platform
 from pathlib import Path
 import torch
 import numpy as np
@@ -6,6 +7,45 @@ from PIL import Image
 from torchvision.transforms import v2 as transforms
 import rasterio
 from wilds.datasets.wilds_dataset import WILDSDataset
+
+
+DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
+
+
+def _host_data_root() -> str:
+    """Host-specific directory holding the preprocessed and feature datasets."""
+    node = platform.node()
+    if node in {"gaia4", "gaia5", "gaia6", "gaia7"}:
+        return "/data/henicke"
+    if node in {"nyx"}:
+        return "/home/nyx_data1/henicke"
+    if node in {"gaia1"}:
+        return "/users/henicke"
+    if node in {"kallisto", "io"}:
+        return "/home/datasets4/FMoW_LandSat"
+    raise ValueError(f"Unknown host {node}, cannot resolve data path.")
+
+
+def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str | None:
+    if preprocessed_dir is None:
+        return None
+    return f"{_host_data_root()}/{preprocessed_dir}"
+
+
+def resolve_feature_dir(run_name: str, run_idx: int, branch_subdir: str) -> Path:
+    """Locate cached features on the current host (written by extract_features.py).
+
+    Mirrors resolve_preprocessed_dir's host map:
+    ``<data-root>/FMoW_LandSat_<run_name>_Features/run<run_idx>/fmow_features/<branch_subdir>``,
+    where ``branch_subdir`` is ``fmow_rgb`` (HR) or ``landsat`` (LR).
+    """
+    return (
+        Path(_host_data_root())
+        / f"FMoW_LandSat_{run_name.title()}_Features"
+        / f"run{run_idx}"
+        / "fmow_features"
+        / branch_subdir
+    )
 
 
 class FMoWMultiScaleDataset(WILDSDataset):
@@ -21,10 +61,14 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     _IMG_SIZE = 224
 
+    # Mutually-exclusive input modes; ``source`` selects exactly one (see __init__).
+    _SOURCES = ("raw", "preprocessed", "features")
+
     def __init__(
         self,
         fmow_dir="data",
         landsat_dir="data",
+        source="raw",
         preprocessed_dir=None,
         extended_metadata_csv="rgb_metadata_extended.csv",
         split_scheme="official",
@@ -36,22 +80,48 @@ class FMoWMultiScaleDataset(WILDSDataset):
         hflip_prob=0.5,
         vflip_prob=0.5,
         image_norm="fmow-statistics",
+        scale_to_img_size=True,
         spatial_coord_grid=False,
         spatial_overlap_mask=False,
         overlap_mask_type="binary",
         lr_extension_factor=None,
+        hr_feature_run=None,
+        lr_feature_run=None,
+        feature_run_idx=None,
     ):
         """
         Args:
-            root_dir: Root directory containing the dataset
-            fmow_rgb_dir: Subdirectory with FMoW RGB images (relative to root_dir)
-            landsat_dir: Subdirectory with Landsat GeoTIFF files (relative to root_dir)
-            metadata_csv: CSV file with metadata (relative to root_dir)
             split_scheme: 'official' (time_after_2016) or other WILDS split schemes
             use_ood_val: Whether to use OOD validation set
             seed: Random seed
             transform_rgb: Transforms for RGB images
             transform_landsat: Transforms for Landsat images
+            scale_to_img_size: If True (default), Landsat images are resized to
+                ``_IMG_SIZE`` (224). If False, they are kept at their native
+                resolution (e.g. 498x498) — still normalized, just not downscaled.
+                Only valid with ``source="raw"`` (the preprocessed/feature paths
+                serve already-sized tensors); raises otherwise. Used by the
+                full-res preprocessing step for the spatial-extent ablation.
+            source: Which input mode to serve (mutually exclusive):
+                - ``"raw"``: read raw images from ``fmow_dir`` (HR) and
+                  ``landsat_dir`` (LR); transforms applied on the fly.
+                - ``"preprocessed"``: read pre-transformed tensors from the single
+                  ``preprocessed_dir`` (``fmow_preprocessed/{fmow_rgb,landsat}``).
+                - ``"features"``: read cached encoder features (written by
+                  extract_features.py); see ``hr_feature_run``/``lr_feature_run``.
+                Only the dirs for the active mode are read; the others are ignored.
+            preprocessed_dir: Base dir name for ``source="preprocessed"`` (required
+                there); host-resolved internally via resolve_preprocessed_dir, so
+                pass the config name (e.g. ``"FMoW_LandSat"``), not an absolute path.
+            hr_feature_run: For ``source="features"``: run-name of the cached HR
+                features (the ``<run>`` in ``FMoW_LandSat_<run>_Features``). When
+                set, ``x["rgb"]`` is the precomputed HR feature vector.
+            lr_feature_run: As ``hr_feature_run`` for the LR/landsat branch
+                (``x["landsat"]``).
+            feature_run_idx: For ``source="features"``: index of the rerun to load
+                (0/1/2 -> run0/run1/run2). Required there. Leaving one of the two
+                run-names ``None`` yields a ``None`` tensor for that branch (e.g.
+                retraining a single-branch classifier on the other modality).
         """
         from wilds import get_dataset
 
@@ -61,13 +131,57 @@ class FMoWMultiScaleDataset(WILDSDataset):
         )
 
         self.root_fmow = Path(fmow_dir) / f"fmow_v{self.base_dataset.version}"
-        self.fmow_images = self.root_fmow / "images"
         self.root_landsat = Path(landsat_dir) / "fmow_landsat"
-        self.landsat_images = self.root_landsat / "images"
-        if preprocessed_dir is not None:
-            self.fmow_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "fmow_rgb"
-            self.landsat_images_preprocessed = Path(preprocessed_dir) / "fmow_preprocessed" / "landsat"
         self.image_norm = image_norm
+
+        # Input mode. Exactly one of raw / preprocessed / features is active; each
+        # reads only its own dirs (see get_rgb_input / get_landsat_input). The base
+        # roots above are still needed for metadata regardless of mode.
+        if source not in self._SOURCES:
+            raise ValueError(f"source must be one of {self._SOURCES}, got {source!r}")
+        self.source = source
+
+        # Full-res toggle for the Landsat branch; only the raw path resizes images,
+        # so disabling the downscale is meaningful only there.
+        if not scale_to_img_size and source != "raw":
+            raise ValueError("scale_to_img_size=False is only valid with source='raw'.")
+        self.scale_to_img_size = scale_to_img_size
+
+        # raw: per-branch image dirs.
+        self.fmow_images = self.root_fmow / "images"
+        self.landsat_images = self.root_landsat / "images"
+        # preprocessed: one base dir serving both branches.
+        self.fmow_images_preprocessed = None
+        self.landsat_images_preprocessed = None
+        # features: per-branch cached-feature dirs (None side -> None tensor).
+        self.hr_features_dir = None
+        self.lr_features_dir = None
+
+        if source == "preprocessed":
+            if preprocessed_dir is None:
+                raise ValueError("preprocessed_dir is required when source='preprocessed'.")
+
+            base = Path(resolve_preprocessed_dir(preprocessed_dir))
+            self.fmow_images_preprocessed = base / "fmow_preprocessed" / "fmow_rgb"
+            self.landsat_images_preprocessed = base / "fmow_preprocessed" / "landsat"
+        elif source == "features":
+            if feature_run_idx is None or feature_run_idx < 0:
+                raise ValueError(
+                    f"feature_run_idx (0/1/2) is required when source='features'; got {feature_run_idx!r}."
+                )
+            if hr_feature_run is None and lr_feature_run is None:
+                raise ValueError(
+                    "source='features' requires at least one of hr_feature_run/lr_feature_run."
+                )
+
+            if hr_feature_run is not None:
+                self.hr_features_dir = resolve_feature_dir(hr_feature_run, feature_run_idx, "fmow_rgb")
+                if not self.hr_features_dir.is_dir():
+                    raise FileNotFoundError(f"HR feature dir not found: {self.hr_features_dir}")
+            if lr_feature_run is not None:
+                self.lr_features_dir = resolve_feature_dir(lr_feature_run, feature_run_idx, "landsat")
+                if not self.lr_features_dir.is_dir():
+                    raise FileNotFoundError(f"LR feature dir not found: {self.lr_features_dir}")
 
         # Inherit attributes from base dataset
         self._dataset_name = "fmow_multiscale"
@@ -267,7 +381,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         spatial = self._build_spatial_tensors(img_span_km)
 
-        if self.augment:
+        # Features are pooled vectors (and may be None), so spatial flips don't apply.
+        if self.augment and self.source != "features":
             rgb_img, landsat_img, spatial = self._apply_augmentation(rgb_img, landsat_img, spatial)
 
         x = {
@@ -281,9 +396,17 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return x, y, metadata
 
     def get_rgb_input(self, idx):
-        """Load RGB FMoW image"""
+        """Load the HR input for the active ``source`` mode.
 
-        if hasattr(self, 'fmow_images_preprocessed') and self.fmow_images_preprocessed is not None:
+        features: cached HR feature vector (or None if no HR run was given).
+        preprocessed: pre-transformed RGB tensor. raw: RGB image + transforms.
+        """
+        if self.source == "features":
+            if self.hr_features_dir is None:
+                return None
+            return torch.load(self.hr_features_dir / f"rgb_img_{idx}.pt", weights_only=False)
+
+        if self.source == "preprocessed":
             return torch.load(self.fmow_images_preprocessed / f"rgb_img_{idx}.pt", weights_only=False)
 
         img_path = self.fmow_images / f"rgb_img_{idx}.png"
@@ -295,11 +418,17 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return img
 
     def get_landsat_input(self, idx):
+        """Load the LR input for the active ``source`` mode.
+
+        features: cached LR feature vector (or None if no LR run was given).
+        preprocessed: pre-transformed LR tensor. raw: Landsat GeoTIFF (6, 224, 224).
         """
-        Load Landsat GeoTIFF image with all 6 bands.
-        Returns tensor of shape (6, 224, 224).
-        """
-        if hasattr(self, 'landsat_images_preprocessed') and self.landsat_images_preprocessed is not None:
+        if self.source == "features":
+            if self.lr_features_dir is None:
+                return None
+            return torch.load(self.lr_features_dir / f"image_{idx}.pt", weights_only=False)
+
+        if self.source == "preprocessed":
             return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt", weights_only=False)
 
         tif_path = self.landsat_images / f"image_{idx}.tif"
@@ -311,9 +440,10 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         landsat_tensor = torch.from_numpy(data).float()
 
-        if landsat_tensor.shape[1] != 224 or landsat_tensor.shape[2] != 224:
+        S = self._IMG_SIZE
+        if self.scale_to_img_size and (landsat_tensor.shape[1] != S or landsat_tensor.shape[2] != S):
             landsat_tensor = torch.nn.functional.interpolate(
-                landsat_tensor.unsqueeze(0), size=(224, 224), mode="bilinear", align_corners=False
+                landsat_tensor.unsqueeze(0), size=(S, S), mode="bilinear", align_corners=False, antialias=True
             ).squeeze(0)
 
         if self.transform_landsat is not None:
@@ -344,7 +474,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
 def collate_multiscale(batch):
     xs, ys, metas = zip(*batch)
     keys = xs[0].keys()
-    x_batch = {k: torch.stack([x[k] for x in xs], dim=0) for k in keys}
+    # A key is None for every sample (e.g. an unused branch in feature mode); keep
+    # it None rather than stacking, so single-branch feature loading works.
+    x_batch = {
+        k: None if xs[0][k] is None else torch.stack([x[k] for x in xs], dim=0)
+        for k in keys
+    }
     return x_batch, torch.stack(ys, dim=0), torch.stack(metas, dim=0)
 
 

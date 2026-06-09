@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import platform
-
 from torch.utils.data import DataLoader
 
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multiscale
@@ -9,28 +7,13 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multi
 
 DEFAULT_FMOW_DIR = "/home/henicke/data"
 DEFAULT_LANDSAT_DIR = "/home/datasets4/FMoW_LandSat"
-DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
 DEFAULT_NUM_WORKERS = 4
-
-
-def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str | None:
-    if preprocessed_dir is None:
-        return None
-    elif platform.node() in {"gaia4", "gaia5", "gaia6", "gaia7"}:
-        return f"/data/henicke/{preprocessed_dir}"
-    elif platform.node() in {"nyx"}:
-        return f"/home/nyx_data1/henicke/{preprocessed_dir}"
-    elif platform.node() in {"gaia1"}:
-        return f"/users/henicke/{preprocessed_dir}"
-    elif platform.node() in {"kallisto", "io"}:
-        return f"/home/datasets4/FMoW_LandSat/{preprocessed_dir}"
-    else:
-        raise ValueError(f"Unknown host {platform.node()}, cannot resolve preprocessed_dir path.")
 
 
 def make_multiscale_dataset(
     fmow_dir: str = DEFAULT_FMOW_DIR,
     landsat_dir: str = DEFAULT_LANDSAT_DIR,
+    source: str = "raw",
     preprocessed_dir: str | None = None,
     augment: bool = False,
     image_norm: str = "fmow-statistics",
@@ -38,10 +21,14 @@ def make_multiscale_dataset(
     spatial_overlap_mask: bool = False,
     overlap_mask_type: str = "binary",
     lr_extension_factor: float | None = None,
+    hr_feature_run: str | None = None,
+    lr_feature_run: str | None = None,
+    feature_run_idx: int | None = None,
 ) -> FMoWMultiScaleDataset:
     return FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
         landsat_dir=landsat_dir,
+        source=source,
         preprocessed_dir=preprocessed_dir,
         augment=augment,
         image_norm=image_norm,
@@ -49,6 +36,9 @@ def make_multiscale_dataset(
         spatial_overlap_mask=spatial_overlap_mask,
         overlap_mask_type=overlap_mask_type,
         lr_extension_factor=lr_extension_factor,
+        hr_feature_run=hr_feature_run,
+        lr_feature_run=lr_feature_run,
+        feature_run_idx=feature_run_idx,
     )
 
 

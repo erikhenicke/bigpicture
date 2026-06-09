@@ -16,7 +16,7 @@ import wandb
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 from models.components.spatial_encoding import SpatialEncoding
 from models.late_fusion import LateFusionModule
-from train.utils import make_multiscale_dataset, make_multiscale_loader, resolve_preprocessed_dir
+from train.utils import make_multiscale_dataset, make_multiscale_loader
 
 def has_device_tensor_cores() -> bool:
     """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
@@ -77,7 +77,6 @@ def _parse_spatial_cfg(cfg: DictConfig):
 
 
 def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
-    preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
     sc = _parse_spatial_cfg(cfg)
 
     spatial_kwargs = dict(
@@ -90,7 +89,8 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
     dataset_train = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
-        preprocessed_dir=preprocessed_dir,
+        source=cfg.data.source,
+        preprocessed_dir=cfg.data.preprocessed_dir,
         augment=cfg.data.augment_train,
         image_norm=cfg.data.image_norm,
         **spatial_kwargs,
@@ -98,7 +98,8 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
     dataset_eval = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
-        preprocessed_dir=preprocessed_dir,
+        source=cfg.data.source,
+        preprocessed_dir=cfg.data.preprocessed_dir,
         image_norm=cfg.data.image_norm,
         **spatial_kwargs,
     )
