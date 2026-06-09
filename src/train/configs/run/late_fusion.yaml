@@ -10,6 +10,9 @@ global_overrides:
   data.frac: 1.0
   trainer.max_epochs: 50
   optim: adam_warmup_cosine
+  # This was added on 2026-06-09
+  data.source: preprocessed
+  data.preprocessed_dir: FMoW_LandSat_
 
 experiments:
   # ---------------- Baselines (HR-only, 3 backbones) ----------------

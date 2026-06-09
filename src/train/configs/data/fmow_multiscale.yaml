@@ -1,3 +1,4 @@
+source: raw  # raw | preprocessed | features
 fmow_dir: /home/henicke/data
 landsat_dir: /home/datasets4/FMoW_LandSat
 preprocessed_dir: FMoW_LandSat

@@ -9,7 +9,6 @@ from omegaconf import OmegaConf
 
 from models.late_fusion import LateFusionModule
 from train.run_experiment import make_data_loaders, make_model
-from train.utils import resolve_preprocessed_dir
 
 
 SEED = 111

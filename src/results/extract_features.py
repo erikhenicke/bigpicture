@@ -37,10 +37,15 @@ from lightning import seed_everything
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
+<<<<<<< HEAD
 from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel, SingleBranchLocationModel
+=======
+from dataset.fmow_multiscale_dataset import resolve_preprocessed_dir
+from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel
+>>>>>>> 5621d00af5e55ef8f223a8efc4ab9b4fda8d1957
 from results.utils import find_best_checkpoints, load_hydra_config
 from train.run_experiment import _parse_spatial_cfg, make_model
-from train.utils import make_multiscale_dataset, resolve_preprocessed_dir
+from train.utils import make_multiscale_dataset
 
 
 SEED = 111
@@ -111,12 +116,12 @@ def find_seed_checkpoints(path: Path) -> list[tuple[int, Path]]:
 def build_dataset(cfg):
     """Build the eval-mode (augment=False) multiscale dataset, matching the
     spatial-feature configuration the checkpoint was trained with."""
-    preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
     sc = _parse_spatial_cfg(cfg)
-    dataset = make_multiscale_dataset(
+    return make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
-        preprocessed_dir=preprocessed_dir,
+        source=cfg.data.get("source", "preprocessed"),
+        preprocessed_dir=cfg.data.preprocessed_dir,
         augment=False,
         image_norm=cfg.data.image_norm,
         spatial_coord_grid=sc["needs_coord_grid"],
@@ -124,11 +129,14 @@ def build_dataset(cfg):
         overlap_mask_type=sc["overlap_mask_type"],
         lr_extension_factor=sc["lr_extension_factor"],
     )
-    return dataset, preprocessed_dir
 
 
-def resolve_output_base(cfg, preprocessed_dir) -> Path:
-    """The ``FMoW_LandSat_<run-name>_Features`` dir; per-seed run<i> is added later."""
+def resolve_output_base(cfg) -> Path:
+    """The ``FMoW_LandSat_<run-name>_Features`` dir; per-seed run<i> is added later.
+
+    Sits next to the (host-resolved) preprocessed dir, mirroring resolve_feature_dir.
+    """
+    preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
     if preprocessed_dir is None:
         raise ValueError(
             "cfg.data.preprocessed_dir is None; cannot derive the output location."
