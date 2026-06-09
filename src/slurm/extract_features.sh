@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=robolab
-#SBATCH --nodelist=gaia4,gaia5,gaia7
+#SBATCH --nodelist=gaia7
 #SBATCH --job-name=extract_features
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -15,12 +15,14 @@ echo "hostname: $(hostname)"
 # extract_features.py takes the run directory positionally; resolve the most
 # recent log dir per experiment (same selection as eval_reproduce.find_run_dir).
 EXPERIMENTS=(
-  train_densenet_lr_baseline
-  train_densenet_baseline
-  train_densenet_lr_baseline_no_domain
-  train_dinov3_baseline
-#   train_dinov3_lr_baseline
-#   train_dinov3_lr_baseline_no_domain
+  # train_densenet_baseline
+  # train_densenet_lr_baseline
+  # train_densenet_lr_baseline_no_domain
+  # train_dinov3_baseline
+  # train_dinov3_lr_baseline
+  # train_dinov3_lr_baseline_no_domain
+  train_satclip_le_enc_baseline
+  train_satclip_le_enc_baseline_no_domain
 )
 
 for experiment in "${EXPERIMENTS[@]}"; do
