@@ -6,7 +6,7 @@ disk so a downstream fusion module can be trained on precomputed features instea
 of re-running the encoder each epoch.
 
 The model decides which branch is exported: ``SingleBranchModel`` (HR) writes
-``fmow_rgb`` features, ``SingleBranchLRModel`` (LR) writes ``landsat`` features.
+``fmow_rgb`` features, ``SingleBranchLRModel`` (LR) and ``SingleBranchLocationModel`` (Coordinates)  write ``landsat`` features.
 For each seed run, features are written under the parent directory of
 ``preprocessed_dir``:
 
@@ -37,8 +37,12 @@ from lightning import seed_everything
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
+<<<<<<< HEAD
+from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel, SingleBranchLocationModel
+=======
 from dataset.fmow_multiscale_dataset import resolve_preprocessed_dir
 from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel
+>>>>>>> 5621d00af5e55ef8f223a8efc4ab9b4fda8d1957
 from results.utils import find_best_checkpoints, load_hydra_config
 from train.run_experiment import _parse_spatial_cfg, make_model
 from train.utils import make_multiscale_dataset
@@ -157,6 +161,12 @@ def resolve_branch(model):
             lambda file_idx: f"image_{file_idx}.pt",
             lambda x: model.encoder(x["landsat"][:, :n, :, :]),
         )
+    if isinstance(model, SingleBranchLocationModel):
+        return (
+            "landsat",
+            lambda file_idx: f"image_{file_idx}.pt",
+            lambda x: model.encoder(x["coords"]),
+        )
     if isinstance(model, SingleBranchModel):
         return (
             "fmow_rgb",
@@ -165,7 +175,7 @@ def resolve_branch(model):
         )
     raise ValueError(
         "Feature extraction supports single-branch models "
-        f"(SingleBranchModel / SingleBranchLRModel); got {type(model).__name__}."
+        f"(SingleBranchModel / SingleBranchLRModel / SingleBranchLocationModel); got {type(model).__name__}."
     )
 
 

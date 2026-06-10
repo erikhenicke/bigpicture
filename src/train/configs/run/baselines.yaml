@@ -1,7 +1,7 @@
 slurm:
   partition: robolab
-  cpus_per_task: 8 
-  mem_per_cpu: 6GB
+  cpus_per_task: 4   
+  mem_per_cpu: 8GB
 
 global_overrides:
   optim: adam_warmup_cosine
@@ -31,6 +31,17 @@ experiments:
   satclip_le_enc_baseline_no_domain:
     model: satclip_le_enc_baseline
     overrides:
+      model.lr_domain_loss_coeff: 0.0
+
+  satclip_le_enc_baseline_l_40:
+    model: satclip_le_enc_baseline
+    overrides:
+      model.encoder.legendre_polys: 40
+
+  satclip_le_enc_baseline_l_40_no_domain:
+    model: satclip_le_enc_baseline
+    overrides:
+      model.encoder.legendre_polys: 40
       model.lr_domain_loss_coeff: 0.0
 
   dinov3_baseline:
