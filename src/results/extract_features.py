@@ -37,12 +37,8 @@ from lightning import seed_everything
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-<<<<<<< HEAD
 from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel, SingleBranchLocationModel
-=======
 from dataset.fmow_multiscale_dataset import resolve_preprocessed_dir
-from models.components.fusion_model import SingleBranchLRModel, SingleBranchModel
->>>>>>> 5621d00af5e55ef8f223a8efc4ab9b4fda8d1957
 from results.utils import find_best_checkpoints, load_hydra_config
 from train.run_experiment import _parse_spatial_cfg, make_model
 from train.utils import make_multiscale_dataset
