@@ -11,7 +11,6 @@ from wilds.datasets.wilds_dataset import WILDSDataset
 
 DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
 
-
 def _host_data_root() -> str:
     """Host-specific directory holding the preprocessed and feature datasets."""
     node = platform.node()
@@ -61,6 +60,9 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     _IMG_SIZE = 224
 
+    # Stored full-res Landsat image size (see save_fullres_landsat.py): 498x498.
+    _LANDSAT_FULLRES_SIZE = 498
+
     # Mutually-exclusive input modes; ``source`` selects exactly one (see __init__).
     _SOURCES = ("raw", "preprocessed", "features")
 
@@ -81,12 +83,13 @@ class FMoWMultiScaleDataset(WILDSDataset):
         vflip_prob=0.5,
         image_norm="fmow-statistics",
         scale_to_img_size=True,
+        lr_crop_km=None,
         spatial_coord_grid=False,
         spatial_overlap_mask=False,
         overlap_mask_type="binary",
-        lr_extension_factor=None,
-        hr_feature_run=None,
-        lr_feature_run=None,
+        lr_extension_factor=3.0,
+        hr_feature_run_name=None,
+        lr_feature_run_name=None,
         feature_run_idx=None,
     ):
         """
@@ -102,21 +105,31 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 Only valid with ``source="raw"`` (the preprocessed/feature paths
                 serve already-sized tensors); raises otherwise. Used by the
                 full-res preprocessing step for the spatial-extent ablation.
+            lr_crop_km: If set, center-crop the stored full-res Landsat tensor to
+                this spatial extent (km) and resize the crop back to ``_IMG_SIZE``.
+                Only valid with ``source="preprocessed"`` pointing at the full-res
+                set (normalized 498x498). Must lie in ``(0, full_span]`` where the
+                full footprint is inferred from metadata (max HR span x
+                ``lr_extension_factor``), so ``lr_extension_factor`` is required.
+                This is the knob for the spatial-extent ablation: a smaller value
+                keeps a tighter centered patch (then up/downsampled to 224). When
+                spatial features are on, it also defines ``lr_span_km`` so the coord
+                grid / overlap mask track the cropped footprint.
             source: Which input mode to serve (mutually exclusive):
                 - ``"raw"``: read raw images from ``fmow_dir`` (HR) and
                   ``landsat_dir`` (LR); transforms applied on the fly.
                 - ``"preprocessed"``: read pre-transformed tensors from the single
                   ``preprocessed_dir`` (``fmow_preprocessed/{fmow_rgb,landsat}``).
                 - ``"features"``: read cached encoder features (written by
-                  extract_features.py); see ``hr_feature_run``/``lr_feature_run``.
+                  extract_features.py); see ``hr_feature_run_name``/``lr_feature_run_name``.
                 Only the dirs for the active mode are read; the others are ignored.
             preprocessed_dir: Base dir name for ``source="preprocessed"`` (required
                 there); host-resolved internally via resolve_preprocessed_dir, so
                 pass the config name (e.g. ``"FMoW_LandSat"``), not an absolute path.
-            hr_feature_run: For ``source="features"``: run-name of the cached HR
-                features (the ``<run>`` in ``FMoW_LandSat_<run>_Features``). When
+            hr_feature_run_name: For ``source="features"``: run-name of the cached HR
+                features (the ``<run>`` in ``FMoW_LandSat_<hr_feature_run_name>_Features``). When
                 set, ``x["rgb"]`` is the precomputed HR feature vector.
-            lr_feature_run: As ``hr_feature_run`` for the LR/landsat branch
+            lr_feature_run_name: As ``hr_feature_run_name`` for the LR/landsat branch
                 (``x["landsat"]``).
             feature_run_idx: For ``source="features"``: index of the rerun to load
                 (0/1/2 -> run0/run1/run2). Required there. Leaving one of the two
@@ -143,8 +156,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
         # Full-res toggle for the Landsat branch; only the raw path resizes images,
         # so disabling the downscale is meaningful only there.
-        if not scale_to_img_size and source != "raw":
-            raise ValueError("scale_to_img_size=False is only valid with source='raw'.")
+        if not scale_to_img_size and self.source != "raw":
+            raise ValueError("scale_to_img_size=False is only valid with self.source='raw'.")
         self.scale_to_img_size = scale_to_img_size
 
         # raw: per-branch image dirs.
@@ -157,29 +170,29 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.hr_features_dir = None
         self.lr_features_dir = None
 
-        if source == "preprocessed":
+        if self.source == "preprocessed":
             if preprocessed_dir is None:
-                raise ValueError("preprocessed_dir is required when source='preprocessed'.")
+                raise ValueError("preprocessed_dir is required when self.source='preprocessed'.")
 
             base = Path(resolve_preprocessed_dir(preprocessed_dir))
             self.fmow_images_preprocessed = base / "fmow_preprocessed" / "fmow_rgb"
             self.landsat_images_preprocessed = base / "fmow_preprocessed" / "landsat"
-        elif source == "features":
+        elif self.source == "features":
             if feature_run_idx is None or feature_run_idx < 0:
                 raise ValueError(
-                    f"feature_run_idx (0/1/2) is required when source='features'; got {feature_run_idx!r}."
+                    f"feature_run_idx (0/1/2) is required when self.source='features'; got {feature_run_idx!r}."
                 )
-            if hr_feature_run is None and lr_feature_run is None:
+            if hr_feature_run_name is None and lr_feature_run_name is None:
                 raise ValueError(
-                    "source='features' requires at least one of hr_feature_run/lr_feature_run."
+                    "self.source='features' requires at least one of hr_feature_run/lr_feature_run."
                 )
 
-            if hr_feature_run is not None:
-                self.hr_features_dir = resolve_feature_dir(hr_feature_run, feature_run_idx, "fmow_rgb")
+            if hr_feature_run_name is not None:
+                self.hr_features_dir = resolve_feature_dir(hr_feature_run_name, feature_run_idx, "fmow_rgb")
                 if not self.hr_features_dir.is_dir():
                     raise FileNotFoundError(f"HR feature dir not found: {self.hr_features_dir}")
-            if lr_feature_run is not None:
-                self.lr_features_dir = resolve_feature_dir(lr_feature_run, feature_run_idx, "landsat")
+            if lr_feature_run_name is not None:
+                self.lr_features_dir = resolve_feature_dir(lr_feature_run_name, feature_run_idx, "landsat")
                 if not self.lr_features_dir.is_dir():
                     raise FileNotFoundError(f"LR feature dir not found: {self.lr_features_dir}")
 
@@ -225,16 +238,42 @@ class FMoWMultiScaleDataset(WILDSDataset):
         self.hflip_prob = hflip_prob
         self.vflip_prob = vflip_prob
 
+        # Infer the full Landsat footprint in km from the metadata 
+        img_span_idx = self._metadata_fields.index("img_span_km")
+        max_hr_span = self._metadata_array[:, img_span_idx].max().item()
+        fullres_span_km = max_hr_span * lr_extension_factor
+
+        # Load-time spatial-extent crop for the Landsat branch. Operates on the
+        # full-res tensors saved by save_fullres_landsat.py (normalized 498x498),
+        # so it is meaningful only on the preprocessed path. 
+        self.lr_crop_km = lr_crop_km
+        if self.lr_crop_km is not None:
+            if self.source != "preprocessed":
+                raise ValueError("lr_crop_km is only valid with self.source='preprocessed'.")
+            if not 0 < self.lr_crop_km <= fullres_span_km:
+                raise ValueError(
+                    f"lr_crop_km must be in (0, {fullres_span_km:g}] km (the stored "
+                    f"{self._LANDSAT_FULLRES_SIZE}px full-res footprint); got {self.lr_crop_km}."
+                )
+            self._crop_px = max(1, min(
+                self._LANDSAT_FULLRES_SIZE,
+                round(self.lr_crop_km / fullres_span_km * self._LANDSAT_FULLRES_SIZE),
+            ))
+
         self.spatial_coord_grid = spatial_coord_grid
         self.spatial_overlap_mask = spatial_overlap_mask
         self.overlap_mask_type = overlap_mask_type
 
-        if spatial_coord_grid or spatial_overlap_mask:
-            if lr_extension_factor is None:
-                raise ValueError("lr_extension_factor is required when spatial features are enabled.")
-            img_span_idx = self._metadata_fields.index("img_span_km")
-            max_hr_span = self._metadata_array[:, img_span_idx].max().item()
-            self.lr_span_km = max_hr_span * lr_extension_factor
+        if self.spatial_coord_grid or self.spatial_overlap_mask:
+            if self.source == "features":
+                raise ValueError("Spatial encodings are not compatible with self.source='features'.")
+
+            if self.lr_crop_km is not None:
+                # The crop sets the physical LR footprint, so the coord grid and
+                # overlap mask must key off the cropped extent, not the factor.
+                self.lr_span_km = self.lr_crop_km
+            else:
+                self.lr_span_km = fullres_span_km
             S = self._IMG_SIZE
             self._lr_res = self.lr_span_km * 1000.0 / S
             self._coord_scale = (S - 1) * self._lr_res / 2.0  # half-extent for [-1, 1]
@@ -243,7 +282,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
             py, px = torch.meshgrid(pixel * self._lr_res, pixel * self._lr_res, indexing="ij")
             self._coord_grid_lr = (torch.stack([px, py], dim=0) - self._coord_center) / self._coord_scale  # (2, S, S), in [-1, 1]
         else:
-            self.lr_span_km = None
+            self.lr_span_km = fullres_span_km 
 
 
     def get_default_transform_rgb(self):
@@ -429,7 +468,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
             return torch.load(self.lr_features_dir / f"image_{idx}.pt", weights_only=False)
 
         if self.source == "preprocessed":
-            return torch.load(self.landsat_images_preprocessed / f"image_{idx}.pt", weights_only=False)
+            landsat_tensor = torch.load(
+                self.landsat_images_preprocessed / f"image_{idx}.pt", weights_only=False
+            )
+            if self.lr_crop_km is not None:
+                landsat_tensor = self._crop_resize_landsat(landsat_tensor)
+            return landsat_tensor
 
         tif_path = self.landsat_images / f"image_{idx}.tif"
 
@@ -449,6 +493,37 @@ class FMoWMultiScaleDataset(WILDSDataset):
         if self.transform_landsat is not None:
             landsat_tensor = self.transform_landsat(landsat_tensor)
 
+        return landsat_tensor
+
+    def _crop_resize_landsat(self, landsat_tensor):
+        """Center-crop a stored full-res Landsat tensor to ``lr_crop_km`` and
+        resize the crop back to ``_IMG_SIZE``.
+
+        The full-res set is normalized fp16 at ``_LANDSAT_FULLRES_SIZE`` px. We
+        cast to fp32, take the centered ``_crop_px`` window, and antialias-resize
+        down (or plain bilinear up) to 224. ``_crop_px`` is precomputed from
+        ``lr_crop_km`` and the metadata-inferred footprint in ``__init__``.
+        """
+        landsat_tensor = landsat_tensor.float()
+        _, H, W = landsat_tensor.shape
+        if H != self._LANDSAT_FULLRES_SIZE or W != self._LANDSAT_FULLRES_SIZE:
+            raise ValueError(
+                f"lr_crop_km expects {self._LANDSAT_FULLRES_SIZE}x{self._LANDSAT_FULLRES_SIZE} "
+                f"full-res tensors, got {H}x{W}."
+            )
+
+        crop = self._crop_px
+        if crop < H:
+            top = (H - crop) // 2
+            left = (W - crop) // 2
+            landsat_tensor = landsat_tensor[:, top:top + crop, left:left + crop]
+
+        S = self._IMG_SIZE
+        if landsat_tensor.shape[1] != S or landsat_tensor.shape[2] != S:
+            landsat_tensor = torch.nn.functional.interpolate(
+                landsat_tensor.unsqueeze(0), size=(S, S),
+                mode="bilinear", align_corners=False, antialias=(crop > S),
+            ).squeeze(0)
         return landsat_tensor
 
     def get_input(self, idx):
@@ -487,6 +562,7 @@ if __name__ == "__main__":
     dataset = FMoWMultiScaleDataset(
         fmow_dir="/home/henicke/data",
         landsat_dir="/home/datasets4/FMoW_LandSat",
+        lr_extension_factor=DEFAULT_LR_EXTENSION_FACTOR,
     )
 
     sample, y, metadata = dataset[271258]

@@ -120,10 +120,11 @@ def build_dataset(cfg):
         preprocessed_dir=cfg.data.preprocessed_dir,
         augment=False,
         image_norm=cfg.data.image_norm,
+        lr_crop_km=cfg.data.get("lr_crop_km", None),
         spatial_coord_grid=sc["needs_coord_grid"],
         spatial_overlap_mask=sc["needs_overlap_mask"],
         overlap_mask_type=sc["overlap_mask_type"],
-        lr_extension_factor=sc["lr_extension_factor"],
+        lr_extension_factor=cfg.data.lr_extension_factor,
     )
 
 

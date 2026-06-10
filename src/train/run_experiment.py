@@ -45,7 +45,6 @@ def _parse_spatial_cfg(cfg: DictConfig):
     fourier_bands = spatial_cfg.get("fourier_bands", 0)
     fourier_proj_dim = spatial_cfg.get("fourier_proj_dim", 0)
     overlap_mask_type = spatial_cfg.get("overlap_mask_type", "binary")
-    lr_extension_factor = cfg.data.get("lr_extension_factor", None)
 
     hr_extra, lr_extra = 0, 0
     if coord_channels:
@@ -68,7 +67,6 @@ def _parse_spatial_cfg(cfg: DictConfig):
         "fourier_bands": fourier_bands,
         "fourier_proj_dim": fourier_proj_dim,
         "use_fourier": use_fourier,
-        "lr_extension_factor": lr_extension_factor,
         "hr_extra": hr_extra,
         "lr_extra": lr_extra,
         "needs_coord_grid": needs_coord_grid,
@@ -83,7 +81,6 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         spatial_coord_grid=sc["needs_coord_grid"],
         spatial_overlap_mask=sc["needs_overlap_mask"],
         overlap_mask_type=sc["overlap_mask_type"],
-        lr_extension_factor=sc["lr_extension_factor"],
     )
 
     dataset_train = make_multiscale_dataset(
@@ -93,6 +90,11 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         preprocessed_dir=cfg.data.preprocessed_dir,
         augment=cfg.data.augment_train,
         image_norm=cfg.data.image_norm,
+        lr_crop_km=cfg.data.get("lr_crop_km", None),
+        lr_extension_factor=cfg.data.lr_extension_factor,
+        hr_feature_run_name= cfg.data.get("hr_feature_run_name", None),
+        lr_feature_run_name= cfg.data.get("lr_feature_run_name", None),
+        feature_run_idx=cfg.data.get("feature_run_idx", None),
         **spatial_kwargs,
     )
     dataset_eval = make_multiscale_dataset(
@@ -100,7 +102,13 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         landsat_dir=cfg.data.landsat_dir,
         source=cfg.data.source,
         preprocessed_dir=cfg.data.preprocessed_dir,
+        augment=False,
         image_norm=cfg.data.image_norm,
+        lr_crop_km=cfg.data.get("lr_crop_km", None),
+        lr_extension_factor=cfg.data.lr_extension_factor,
+        hr_feature_run_name= cfg.data.get("hr_feature_run_name", None),
+        lr_feature_run_name= cfg.data.get("lr_feature_run_name", None),
+        feature_run_idx=cfg.data.get("feature_run_idx", None),
         **spatial_kwargs,
     )
 

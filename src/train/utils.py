@@ -8,6 +8,7 @@ from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset, collate_multi
 DEFAULT_FMOW_DIR = "/home/henicke/data"
 DEFAULT_LANDSAT_DIR = "/home/datasets4/FMoW_LandSat"
 DEFAULT_NUM_WORKERS = 4
+DEFAULT_LR_EXTENSION_FACTOR = 3.0
 
 
 def make_multiscale_dataset(
@@ -17,12 +18,13 @@ def make_multiscale_dataset(
     preprocessed_dir: str | None = None,
     augment: bool = False,
     image_norm: str = "fmow-statistics",
+    lr_crop_km: float | None = None,
     spatial_coord_grid: bool = False,
     spatial_overlap_mask: bool = False,
     overlap_mask_type: str = "binary",
-    lr_extension_factor: float | None = None,
-    hr_feature_run: str | None = None,
-    lr_feature_run: str | None = None,
+    lr_extension_factor: float = DEFAULT_LR_EXTENSION_FACTOR,
+    hr_feature_run_name: str | None = None,
+    lr_feature_run_name: str | None = None,
     feature_run_idx: int | None = None,
 ) -> FMoWMultiScaleDataset:
     return FMoWMultiScaleDataset(
@@ -32,12 +34,13 @@ def make_multiscale_dataset(
         preprocessed_dir=preprocessed_dir,
         augment=augment,
         image_norm=image_norm,
+        lr_crop_km=lr_crop_km,
         spatial_coord_grid=spatial_coord_grid,
         spatial_overlap_mask=spatial_overlap_mask,
         overlap_mask_type=overlap_mask_type,
         lr_extension_factor=lr_extension_factor,
-        hr_feature_run=hr_feature_run,
-        lr_feature_run=lr_feature_run,
+        hr_feature_run_name=hr_feature_run_name,
+        lr_feature_run_name=lr_feature_run_name,
         feature_run_idx=feature_run_idx,
     )
 
