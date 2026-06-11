@@ -86,7 +86,7 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
     dataset_train = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
-        source=cfg.data.source,
+        source=cfg.data.get("source", "preprocessed" if "preprocessed_dir" in cfg.data else "raw"),
         preprocessed_dir=cfg.data.preprocessed_dir,
         augment=cfg.data.augment_train,
         image_norm=cfg.data.image_norm,
@@ -100,7 +100,7 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
     dataset_eval = make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
         landsat_dir=cfg.data.landsat_dir,
-        source=cfg.data.source,
+        source=cfg.data.get("source", "preprocessed" if "preprocessed_dir" in cfg.data else "raw"),
         preprocessed_dir=cfg.data.preprocessed_dir,
         augment=False,
         image_norm=cfg.data.image_norm,
