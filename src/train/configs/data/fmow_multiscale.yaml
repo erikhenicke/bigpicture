@@ -2,6 +2,9 @@ source: raw  # raw | preprocessed | features
 fmow_dir: /home/henicke/data
 landsat_dir: /home/datasets4/FMoW_LandSat
 preprocessed_dir: FMoW_LandSat
+hr_feature_run_name: null
+lr_feature_run_name: null
+feature_run_idx: null
 image_norm: null
 
 batch_size: 64
@@ -9,6 +12,7 @@ num_workers: 4
 frac: 1.0 
 augment_train: true
 lr_extension_factor: 3.0
+lr_crop_km: null
 
 train_split: train
 val_splits: [val, id_val]
