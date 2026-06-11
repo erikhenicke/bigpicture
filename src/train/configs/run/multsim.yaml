@@ -317,4 +317,4 @@ experiments:
     overrides:
       spatial: om_gauss_pe_freq
       data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 14.948290712586628
+      data.lr_crop_km: 14.91

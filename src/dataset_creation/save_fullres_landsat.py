@@ -1,5 +1,5 @@
 """
-Preprocess and save Landsat images at their *native* resolution (498x498),
+Preprocess and save Landsat images at their *native* resolution (497x497),
 normalized but NOT downscaled to 224x224.
 
 This is the storage step for the spatial-extent ablation: keeping the full-res

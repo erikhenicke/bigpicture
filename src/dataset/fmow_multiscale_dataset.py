@@ -60,8 +60,8 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
     _IMG_SIZE = 224
 
-    # Stored full-res Landsat image size (see save_fullres_landsat.py): 498x498.
-    _LANDSAT_FULLRES_SIZE = 498
+    # Stored full-res Landsat image size (see save_fullres_landsat.py): 497x497.
+    _LANDSAT_FULLRES_SIZE = 497
 
     # Mutually-exclusive input modes; ``source`` selects exactly one (see __init__).
     _SOURCES = ("raw", "preprocessed", "features")
@@ -101,14 +101,14 @@ class FMoWMultiScaleDataset(WILDSDataset):
             transform_landsat: Transforms for Landsat images
             scale_to_img_size: If True (default), Landsat images are resized to
                 ``_IMG_SIZE`` (224). If False, they are kept at their native
-                resolution (e.g. 498x498) — still normalized, just not downscaled.
+                resolution (e.g. 497x497) — still normalized, just not downscaled.
                 Only valid with ``source="raw"`` (the preprocessed/feature paths
                 serve already-sized tensors); raises otherwise. Used by the
                 full-res preprocessing step for the spatial-extent ablation.
             lr_crop_km: If set, center-crop the stored full-res Landsat tensor to
                 this spatial extent (km) and resize the crop back to ``_IMG_SIZE``.
                 Only valid with ``source="preprocessed"`` pointing at the full-res
-                set (normalized 498x498). Must lie in ``(0, full_span]`` where the
+                set (normalized 497x497). Must lie in ``(0, full_span]`` where the
                 full footprint is inferred from metadata (max HR span x
                 ``lr_extension_factor``), so ``lr_extension_factor`` is required.
                 This is the knob for the spatial-extent ablation: a smaller value
@@ -244,7 +244,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         fullres_span_km = max_hr_span * lr_extension_factor
 
         # Load-time spatial-extent crop for the Landsat branch. Operates on the
-        # full-res tensors saved by save_fullres_landsat.py (normalized 498x498),
+        # full-res tensors saved by save_fullres_landsat.py (normalized 497x497),
         # so it is meaningful only on the preprocessed path. 
         self.lr_crop_km = lr_crop_km
         if self.lr_crop_km is not None:
@@ -252,8 +252,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 raise ValueError("lr_crop_km is only valid with self.source='preprocessed'.")
             if not 0 < self.lr_crop_km <= fullres_span_km:
                 raise ValueError(
-                    f"lr_crop_km must be in (0, {fullres_span_km:g}] km (the stored "
-                    f"{self._LANDSAT_FULLRES_SIZE}px full-res footprint); got {self.lr_crop_km}."
+                    f"lr_crop_km must be in (0, {fullres_span_km:g}] km; got {self.lr_crop_km}."
                 )
             self._crop_px = max(1, min(
                 self._LANDSAT_FULLRES_SIZE,
