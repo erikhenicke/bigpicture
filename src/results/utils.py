@@ -42,6 +42,4 @@ def load_hydra_config(run_dir: Path):
     for key, default in trainer_defaults.items():
         if key not in cfg.trainer:
             cfg.trainer[key] = default
-    if "source" not in cfg.data:
-        cfg.data["source"] = "preprocessed" if "preprocessed_dir" in cfg.data else "raw"
     return cfg
