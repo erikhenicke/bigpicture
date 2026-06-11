@@ -15,6 +15,7 @@ model:
     in_channels: ${model.landsat_in_channels}
     pretrained: ${model.lr_pretrained}
     landsat_channel_init: ${model.landsat_channel_init}
+    bgr_input: true
 
   branches:
     _target_: models.components.branches.DualBranch

@@ -13,7 +13,7 @@ VALID_EXTRA_CH_INITS = ("average", "zero", "he")
 
 
 class Branch(nn.Module):
-    def __init__(self, in_channels: int = 3, landsat_channel_init: str = "zero", **kwargs):
+    def __init__(self, in_channels: int = 3, landsat_channel_init: str = "zero", stacked: bool = False, bgr_input: bool = False, **kwargs):
         super().__init__()
 
         if in_channels < 3:
@@ -23,6 +23,8 @@ class Branch(nn.Module):
 
         self.in_channels = in_channels
         self.landsat_channel_init = landsat_channel_init
+        self.stacked = stacked
+        self.bgr_input = bgr_input
         self.model = self._get_model(**kwargs)
 
         if in_channels != 3:
@@ -41,20 +43,35 @@ class Branch(nn.Module):
     def out_dim(self) -> int:
         pass
 
+    def _reorder_pretrained_weights(self, weight: torch.Tensor) -> torch.Tensor:
+        if self.bgr_input:
+            return weight[:, [2, 1, 0], :, :]
+        return weight
+
     def _init_extra_weights(self, weight_slice: torch.Tensor, old_weight: torch.Tensor) -> None:
         with torch.no_grad():
+            if self.stacked and weight_slice.size(1) >= 3:
+                # Landsat visible bands (B, G, R): reuse pretrained RGB swapped to BGR
+                weight_slice[:, :3, :, :].copy_(old_weight[:, [2, 1, 0], :, :])
+                remaining = weight_slice[:, 3:, :, :]
+            else:
+                remaining = weight_slice
+
+            if remaining.numel() == 0:
+                return
+
             if self.landsat_channel_init == "average":
                 mean_weight = old_weight.mean(dim=1, keepdim=True)
-                weight_slice.copy_(mean_weight.repeat(1, weight_slice.size(1), 1, 1))
+                remaining.copy_(mean_weight.repeat(1, remaining.size(1), 1, 1))
             elif self.landsat_channel_init == "zero":
-                weight_slice.zero_()
+                remaining.zero_()
             elif self.landsat_channel_init == "he":
-                nn.init.kaiming_normal_(weight_slice, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(remaining, mode="fan_out", nonlinearity="relu")
 
 
 class DenseNetBranch(Branch):
-    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
+    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero", stacked: bool = False, bgr_input: bool = False):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, stacked=stacked, bgr_input=bgr_input, pretrained=pretrained)
     
     def forward(self, x):
         features = self.model.features(x)
@@ -88,7 +105,7 @@ class DenseNetBranch(Branch):
         )
 
         with torch.no_grad():
-            new_conv.weight[:, : old_conv.in_channels, :, :] = old_conv.weight
+            new_conv.weight[:, : old_conv.in_channels, :, :] = self._reorder_pretrained_weights(old_conv.weight)
             if in_channels > old_conv.in_channels:
                 self._init_extra_weights(
                     new_conv.weight[:, old_conv.in_channels:, :, :],
@@ -100,8 +117,8 @@ class DenseNetBranch(Branch):
         self.model.features.conv0 = new_conv
 
 class DeitBranch(Branch):
-    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
+    def __init__(self, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero", stacked: bool = False, bgr_input: bool = False):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, stacked=stacked, bgr_input=bgr_input, pretrained=pretrained)
 
     def forward(self, x):
         tokens = self.model.vit(x).last_hidden_state
@@ -143,7 +160,7 @@ class DeitBranch(Branch):
         )
 
         with torch.no_grad():
-            new_projection.weight[:, :old_projection.in_channels, :, :] = old_projection.weight
+            new_projection.weight[:, :old_projection.in_channels, :, :] = self._reorder_pretrained_weights(old_projection.weight)
             if in_channels > old_projection.in_channels:
                 self._init_extra_weights(
                     new_projection.weight[:, old_projection.in_channels:, :, :],
@@ -167,8 +184,8 @@ class TimmBranch(Branch):
     and ``tf_efficientnetv2_b1`` (and most other timm backbones).
     """
 
-    def __init__(self, model_name: str, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero"):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, model_name=model_name, pretrained=pretrained)
+    def __init__(self, model_name: str, in_channels: int = 3, pretrained: bool = True, landsat_channel_init: str = "zero", stacked: bool = False, bgr_input: bool = False):
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, stacked=stacked, bgr_input=bgr_input, model_name=model_name, pretrained=pretrained)
 
     def forward(self, x):
         return self.model(x)
@@ -259,12 +276,14 @@ class SatCLIPImageBranch(Branch):
         in_channels: int = 3,
         pretrained: bool = True,
         landsat_channel_init: str = "zero",
+        stacked: bool = False,
+        bgr_input: bool = False,
         unfreeze_all: bool = False,
         unfreeze_first_block: bool = False,
         unfreeze_head: bool = False,
         num_unfreeze_last: int = 0,
     ):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained)
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, stacked=stacked, bgr_input=bgr_input, pretrained=pretrained)
         if pretrained:
             if unfreeze_all:
                 self.model.requires_grad_(True)
@@ -335,10 +354,12 @@ class DINOv3Branch(Branch):
         in_channels: int = 3,
         pretrained: bool = True,
         landsat_channel_init: str = "zero",
+        stacked: bool = False,
+        bgr_input: bool = False,
         model_size: str = "base",
         freeze: bool = False,
     ):
-        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, pretrained=pretrained, model_size=model_size)
+        super().__init__(in_channels=in_channels, landsat_channel_init=landsat_channel_init, stacked=stacked, bgr_input=bgr_input, pretrained=pretrained, model_size=model_size)
 
         if freeze:
             self.model.requires_grad_(False)
@@ -378,7 +399,7 @@ class DINOv3Branch(Branch):
         )
 
         with torch.no_grad():
-            new_proj.weight[:, :old_proj.in_channels, :, :] = old_proj.weight
+            new_proj.weight[:, :old_proj.in_channels, :, :] = self._reorder_pretrained_weights(old_proj.weight)
             if in_channels > old_proj.in_channels:
                 self._init_extra_weights(
                     new_proj.weight[:, old_proj.in_channels:, :, :],

@@ -84,3 +84,7 @@ experiments:
     model: densenet_baseline
     overrides:
       data.preprocessed_dir: FMoW_LandSat_ 
+
+  # ---------------- Stacked Baseline -------------------------
+  densenet_stacked_baseline:
+    model: densenet_stacked

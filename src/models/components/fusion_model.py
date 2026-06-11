@@ -128,6 +128,51 @@ class SingleBranchLocationModel(nn.Module):
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []
 
+class SingleBranchStackedModel(nn.Module):
+    """Stacked-input model: concatenates HR RGB and Landsat along channels, feeds a single encoder."""
+
+    def __init__(
+        self,
+        encoder: Branch,
+        num_task_labels: int,
+        num_domain_labels: int = 6,
+        lr_domain_loss_coeff: float = 0.1667,
+        landsat_channels: int = 6,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.landsat_channels = landsat_channels
+        self.lr_domain_loss_coeff = lr_domain_loss_coeff
+        self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
+        self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
+
+    def supports_d3g_objective(self) -> bool:
+        return False
+
+    def supports_lr_domain_classification(self) -> bool:
+        return True
+
+    def supports_hr_domain_classification(self) -> bool:
+        return False
+
+    def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        stacked = torch.cat([x["rgb"], x["landsat"][:, :self.landsat_channels, :, :]], dim=1)
+        features = self.encoder(stacked)
+        return {
+            "task_logits": self.task_classifier(features),
+            "lr_domain_logits": self.lr_domain_classifier(features),
+        }
+
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
+
+
 class LateFusionModel(nn.Module):
     def __init__(
         self,
