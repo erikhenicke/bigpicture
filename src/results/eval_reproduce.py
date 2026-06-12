@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Evaluate a trained model per-class on both OOD and ID test splits.
+"""Re-evaluate a trained model on both OOD and ID test splits.
 
 Uses Lightning's trainer.test() to match the original training evaluation path.
-Step 1: Reproduce the original metrics.csv values via trainer.test().
-Step 2 (TODO): Add per-class collection once metrics match.
+The rerun goes through the same LateFusionModule.on_test_epoch_end as training,
+which now also emits per-class top-1 accuracy (overall and per region) and top-5
+task accuracy. Two things happen per seed:
+  1. The rerun is compared against the original metrics.csv to confirm the shared
+     metrics still reproduce.
+  2. The full rerun metric set (including the new per-class / top-5 metrics) is
+     written to ``metrics_rerun.csv`` next to the original ``metrics.csv``.
 """
 
 import argparse
@@ -108,6 +113,25 @@ def load_original_test_metrics(run_dir: Path, seed_idx: int) -> dict[str, float]
         if any(row.get(c) not in (None, "") for c in test_cols):
             return {c: float(row[c]) for c in test_cols if row.get(c) not in (None, "")}
     return {}
+
+
+def write_rerun_metrics(run_dir: Path, seed_idx: int, rerun_metrics: dict[str, float]) -> Path:
+    """Persist the full rerun test metrics next to the original metrics.csv.
+
+    Written as a long-format ``metric,value`` CSV sorted by metric name, so the
+    high-cardinality per-class rows (62 classes + region x class) stay readable
+    and greppable. Lives at ``run{seed_idx}/version_0/metrics_rerun.csv``,
+    alongside the original ``metrics.csv`` produced during training.
+    """
+    out_dir = run_dir / f"run{seed_idx}" / "version_0"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "metrics_rerun.csv"
+    with out_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["metric", "value"])
+        for key in sorted(rerun_metrics):
+            writer.writerow([key, rerun_metrics[key]])
+    return out_path
 
 
 def compare_metrics(original: dict[str, float], rerun: dict[str, float]) -> None:
@@ -259,6 +283,9 @@ def main() -> None:
         rerun_metrics: dict[str, float] = {}
         for result_dict in results:
             rerun_metrics.update(result_dict)
+
+        out_path = write_rerun_metrics(run_dir, i, rerun_metrics)
+        print(f"  Wrote {len(rerun_metrics)} rerun metrics to {out_path}")
 
         # Seed i was trained as run{i}; its original test metrics live in run{i}/version_0/metrics.csv.
         original_metrics = load_original_test_metrics(run_dir, i)

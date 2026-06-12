@@ -721,6 +721,7 @@ class LateFusionModule(LightningModule):
                 loader_name,
                 region_names,
                 self.test_ece_metrics[idx],
+                include_class_breakdown=True,
             )
             all_metrics.update({f"test/{k}": v for k, v in metrics.items()})
             if state["lr_domain_preds"]:

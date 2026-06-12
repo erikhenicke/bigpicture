@@ -3,10 +3,14 @@ from typing import Any, Dict, List
 
 import torch
 from torchmetrics.classification import MulticlassCalibrationError
+from wilds.datasets.fmow_dataset import categories as TASK_CLASSES
 
 
 REGIONS = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania", 5: "Other"}
 FIVE_REGION_NAMES = ["Asia", "Europe", "Africa", "Americas", "Oceania"]
+
+# Number of classes to consider for top-k task accuracy.
+TOPK = 5
 
 def make_eval_state() -> Dict[str, Any]:
     """
@@ -24,6 +28,12 @@ def make_eval_state() -> Dict[str, Any]:
         "hr_ablated_task_region_correct": defaultdict(int),
         "task_entropy_correct": 0.0,
         "task_entropy_incorrect": 0.0,
+        "task_top5_correct": 0,
+        "task_top5_region_correct": defaultdict(int),
+        "task_class_correct": defaultdict(int),
+        "task_class_total": defaultdict(int),
+        "task_region_class_correct": defaultdict(int),
+        "task_region_class_total": defaultdict(int),
         "task_region_correct": defaultdict(int),
         "task_region_loss_sum": defaultdict(float),
         "lr_domain_preds": [],
@@ -81,6 +91,7 @@ def update_task_region_metrics(
     metadata: torch.Tensor,
     region_index: int,
     correct_mask: torch.Tensor,
+    top5_correct_mask: torch.Tensor,
     per_sample_loss: torch.Tensor,
 ) -> None:
     """
@@ -92,7 +103,35 @@ def update_task_region_metrics(
         mask = region_ids == rid
         state["region_total"][rid_int] += int(mask.sum().item())
         state["task_region_correct"][rid_int] += int((correct_mask & mask).sum().item())
+        state["task_top5_region_correct"][rid_int] += int((top5_correct_mask & mask).sum().item())
         state["task_region_loss_sum"][rid_int] += float(per_sample_loss[mask].sum().item())
+
+
+def update_task_class_metrics(
+    state: Dict[str, Any],
+    y: torch.Tensor,
+    metadata: torch.Tensor,
+    region_index: int,
+    correct_mask: torch.Tensor,
+) -> None:
+    """
+    Update the per-class task accuracy counters (overall and per region) for the
+    current batch. Counters are accumulated every batch but only consumed at test
+    time (see ``compute_final_task_class_metrics``).
+    """
+    region_ids = metadata[:, region_index]
+    for c in torch.unique(y):
+        c_int = int(c.item())
+        cmask = y == c
+        state["task_class_total"][c_int] += int(cmask.sum().item())
+        state["task_class_correct"][c_int] += int((correct_mask & cmask).sum().item())
+        for rid in torch.unique(region_ids[cmask]):
+            rid_int = int(rid.item())
+            rcmask = cmask & (region_ids == rid)
+            state["task_region_class_total"][(rid_int, c_int)] += int(rcmask.sum().item())
+            state["task_region_class_correct"][(rid_int, c_int)] += int(
+                (correct_mask & rcmask).sum().item()
+            )
 
 def update_lr_domain_metrics(state: Dict[str, Any], lr_domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
     state["lr_domain_preds"].append(lr_domain_preds.cpu())
@@ -139,22 +178,54 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     Compute the final task-specific region metrics from the state dictionary.
     """
     worst_group_task_acc = 1.0
+    worst_group_top5_task_acc = 1.0
     per_region_task_acc: Dict[str, float] = {}
+    per_region_top5_task_acc: Dict[str, float] = {}
     per_region_task_loss: Dict[str, float] = {}
     for rid, rid_total in state["region_total"].items():
         region_name = region_names[rid]
         if rid_total == 0 or region_name not in FIVE_REGION_NAMES:
             continue
         per_region_task_acc[region_name] = state["task_region_correct"][rid] / rid_total
+        per_region_top5_task_acc[region_name] = state["task_top5_region_correct"][rid] / rid_total
         per_region_task_loss[region_name] = state["task_region_loss_sum"][rid] / rid_total
         if per_region_task_acc[region_name] < worst_group_task_acc:
             worst_group_task_acc = per_region_task_acc[region_name]
-     
+        if per_region_top5_task_acc[region_name] < worst_group_top5_task_acc:
+            worst_group_top5_task_acc = per_region_top5_task_acc[region_name]
+
     return {
         **{f"region-{name.lower()}-task-acc": acc for name, acc in per_region_task_acc.items()},
+        **{f"region-{name.lower()}-top5-task-acc": acc for name, acc in per_region_top5_task_acc.items()},
         **{f"region-{name.lower()}-task-loss": loss for name, loss in per_region_task_loss.items()},
         "worst-group-task-acc": worst_group_task_acc,
+        "worst-group-top5-task-acc": worst_group_top5_task_acc,
     }
+
+def compute_final_task_class_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    """
+    Compute per-class top-1 task accuracy, overall and per region. Classes (or
+    region/class combinations) with no samples are skipped. Class names come from
+    the FMoW ``categories`` list, whose index equals the integer label ``y``.
+    """
+    metrics: Dict[str, float] = {}
+    for c_int, total in state["task_class_total"].items():
+        if total == 0:
+            continue
+        class_name = TASK_CLASSES[c_int]
+        metrics[f"class-{class_name}-task-acc"] = state["task_class_correct"][c_int] / total
+    for (rid, c_int), total in state["task_region_class_total"].items():
+        if total == 0:
+            continue
+        region_name = region_names[rid] if rid < len(region_names) else None
+        if region_name not in FIVE_REGION_NAMES:
+            continue
+        class_name = TASK_CLASSES[c_int]
+        metrics[f"region-{region_name.lower()}-class-{class_name}-task-acc"] = (
+            state["task_region_class_correct"][(rid, c_int)] / total
+        )
+    return metrics
+
 
 def compute_final_branch_ablation_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
     total = state["total"]
@@ -194,14 +265,19 @@ def update_task_metrics(
     probs = torch.softmax(task_logits, dim=1)
     per_sample_loss = task_criterion_per_sample(task_logits, y)
     correct_mask = task_preds == y
+    top5_correct_mask = (
+        task_logits.topk(TOPK, dim=1).indices == y.unsqueeze(1)
+    ).any(dim=1)
 
     # Accumulate the per-sample loss sum (not the batch mean) so the final task
     # loss is sample-weighted and therefore invariant to batch size / batching.
     state["task_loss_sum"] += per_sample_loss.sum().item()
     state["task_correct"] += correct_mask.sum().item()
+    state["task_top5_correct"] += int(top5_correct_mask.sum().item())
 
     update_task_entropy_metrics(state, probs, correct_mask)
-    update_task_region_metrics(state, metadata, region_index, correct_mask, per_sample_loss)
+    update_task_region_metrics(state, metadata, region_index, correct_mask, top5_correct_mask, per_sample_loss)
+    update_task_class_metrics(state, y, metadata, region_index, correct_mask)
     task_ece_metric.update(probs, y)
 
 def compute_final_task_metrics(state: Dict[str, Any], region_names: List[str], ece_metric: MulticlassCalibrationError) -> Dict[str, float]:
@@ -211,6 +287,7 @@ def compute_final_task_metrics(state: Dict[str, Any], region_names: List[str], e
     total = state["total"]
     task_loss = state["task_loss_sum"] / total if total > 0 else torch.nan
     task_acc = state["task_correct"] / total if total > 0 else torch.nan
+    task_top5_acc = state["task_top5_correct"] / total if total > 0 else torch.nan
     task_ece = ece_metric.compute().item()
 
     task_entropy_metrics = compute_final_task_entropy_metrics(state)
@@ -219,6 +296,7 @@ def compute_final_task_metrics(state: Dict[str, Any], region_names: List[str], e
     return {
         "task-loss": task_loss,
         "task-acc": task_acc,
+        "top5-task-acc": task_top5_acc,
         "task-ece": task_ece,
         **task_entropy_metrics,
         **task_region_metrics,
@@ -248,16 +326,24 @@ def compute_final_eval_metrics(
     loader_name: str,
     region_names: List[str],
     ece_metric: MulticlassCalibrationError,
+    include_class_breakdown: bool = False,
 ) -> Dict[str, float]:
     """Compute final metrics for the evaluation phase.
 
     Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
+
+    :param include_class_breakdown: If True, also emit the high-cardinality
+        per-class (overall and per-region) task accuracies. Used at test time only.
     """
 
     metrics = {}
     metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
     })
+    if include_class_breakdown:
+        metrics.update({
+            f"{loader_name}-{k}": v for k, v in compute_final_task_class_metrics(state, region_names).items()
+        })
     if state["lr_domain_preds"]:  # Empty, if no LR domain classifier
         metrics.update({
             f"{loader_name}-{k}": v for k, v in compute_final_lr_domain_metrics(state, region_names).items()
