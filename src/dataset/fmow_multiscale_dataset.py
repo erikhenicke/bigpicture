@@ -486,7 +486,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         S = self._IMG_SIZE
         if self.scale_to_img_size and (landsat_tensor.shape[1] != S or landsat_tensor.shape[2] != S):
             landsat_tensor = torch.nn.functional.interpolate(
-                landsat_tensor.unsqueeze(0), size=(S, S), mode="bilinear", align_corners=False, antialias=True
+                landsat_tensor.unsqueeze(0), size=(S, S), mode="bilinear", align_corners=False
             ).squeeze(0)
 
         if self.transform_landsat is not None:
@@ -499,7 +499,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         resize the crop back to ``_IMG_SIZE``.
 
         The full-res set is normalized fp16 at ``_LANDSAT_FULLRES_SIZE`` px. We
-        cast to fp32, take the centered ``_crop_px`` window, and antialias-resize
+        cast to fp32, take the centered ``_crop_px`` window, and resize
         down (or plain bilinear up) to 224. ``_crop_px`` is precomputed from
         ``lr_crop_km`` and the metadata-inferred footprint in ``__init__``.
         """
@@ -521,7 +521,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         if landsat_tensor.shape[1] != S or landsat_tensor.shape[2] != S:
             landsat_tensor = torch.nn.functional.interpolate(
                 landsat_tensor.unsqueeze(0), size=(S, S),
-                mode="bilinear", align_corners=False, antialias=(crop > S),
+                mode="bilinear", align_corners=False,
             ).squeeze(0)
         return landsat_tensor
 
