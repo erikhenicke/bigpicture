@@ -11,8 +11,3 @@
 #SBATCH --error=log/slurm/reproduce.%j.err
 cd /home/henicke/git/bigpicture
 srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_gauss_pe_freq
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_detach
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_no_domain
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_pe_freq
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_gauss
