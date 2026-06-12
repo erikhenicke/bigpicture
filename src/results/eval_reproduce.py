@@ -145,6 +145,54 @@ def compare_metrics(original: dict[str, float], rerun: dict[str, float]) -> None
         print(f"  {n_missing} metric(s) present in only one of the two sets")
 
 
+CATEGORIES = ("Acc", "ECE", "Loss", "Entropy", "Other")
+
+
+def categorize_metric(name: str) -> str:
+    """Bin a test metric into a scale-consistent category by its name.
+
+    Checked in this order so substrings don't collide (a domain-acc metric still
+    counts as Acc, but ece/entropy/loss are matched first since none of them are
+    accuracies)."""
+    n = name.lower()
+    if "ece" in n:
+        return "ECE"
+    if "entropy" in n:
+        return "Entropy"
+    if "loss" in n:
+        return "Loss"
+    if "acc" in n:
+        return "Acc"
+    return "Other"
+
+
+def compute_abs_diffs(original: dict[str, float], rerun: dict[str, float]) -> dict[str, float]:
+    """Absolute deviation per metric present in both the original and rerun results."""
+    return {k: abs(rerun[k] - original[k]) for k in set(original) & set(rerun)}
+
+
+def print_run_summary(exp_key: str, n_seeds: int, category_diffs: dict[str, list[float]]) -> None:
+    """Print the per-category reproduction summary pooled across all seeds.
+
+    For each category two absolute-deviation averages are reported:
+      - ``avg|diff| all``: mean over every metric in the category (diluted by the
+        metrics that reproduce bitwise-exactly, i.e. diff == 0).
+      - ``avg|diff| dev``: mean over only the metrics that deviate (diff > 0).
+    No threshold is applied; precision noise vs. significant divergence is read off
+    the magnitudes directly."""
+    print(f"\n=== Reproduction summary: {exp_key}  ({n_seeds} seed(s)) ===")
+    print(f"  {'category':<9}  {'metrics':>7}  {'deviating':>9}  {'avg|diff| all':>14}  {'avg|diff| dev':>14}")
+    print(f"  {'-' * 9}  {'-' * 7}  {'-' * 9}  {'-' * 14}  {'-' * 14}")
+    for cat in CATEGORIES:
+        diffs = category_diffs.get(cat, [])
+        if not diffs:
+            continue
+        deviating = [d for d in diffs if d > 0]
+        all_mean = sum(diffs) / len(diffs)
+        dev_mean = sum(deviating) / len(deviating) if deviating else 0.0
+        print(f"  {cat:<9}  {len(diffs):>7}  {len(deviating):>9}  {all_mean:>14.2e}  {dev_mean:>14.2e}")
+
+
 def load_run_config(config_path: Path) -> tuple[dict, str]:
     """Load a run config YAML from the given path."""
     if not config_path.exists():
@@ -199,6 +247,9 @@ def main() -> None:
     # if has_device_tensor_cores():
     #     torch.set_float32_matmul_precision("medium")
 
+    # Absolute deviations pooled across all seeds, grouped by metric category.
+    category_diffs: dict[str, list[float]] = {c: [] for c in CATEGORIES}
+
     for i, ckpt_path in enumerate(checkpoints):
         # Seed i was trained as run{i} with seed_everything(cfg.seed + i); evaluate_checkpoint
         # re-seeds with the same value so the frac<1.0 test subset matches the original run.
@@ -213,6 +264,11 @@ def main() -> None:
         original_metrics = load_original_test_metrics(run_dir, i)
         print(f"\n  Original vs. rerun (seed {i}):")
         compare_metrics(original_metrics, rerun_metrics)
+
+        for name, diff in compute_abs_diffs(original_metrics, rerun_metrics).items():
+            category_diffs[categorize_metric(name)].append(diff)
+
+    print_run_summary(exp_key, len(checkpoints), category_diffs)
 
 
 if __name__ == "__main__":
