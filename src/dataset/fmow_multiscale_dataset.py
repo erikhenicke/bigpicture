@@ -258,6 +258,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 self._LANDSAT_FULLRES_SIZE,
                 round(self.lr_crop_km / fullres_span_km * self._LANDSAT_FULLRES_SIZE),
             ))
+            print(f"Full Landsat span inferred from metadata: {fullres_span_km:.1f} km; cropping to {self.lr_crop_km} km -> {self._crop_px}px.")
 
         self.spatial_coord_grid = spatial_coord_grid
         self.spatial_overlap_mask = spatial_overlap_mask
