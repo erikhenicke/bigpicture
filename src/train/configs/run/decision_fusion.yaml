@@ -6,9 +6,6 @@ slurm:
   mem_per_cpu: 8GB
   nodelist: gaia4,gaia5,gaia7
 
-global_overrides:
-  data.frac: 1.0
-
 experiments:
   # ---------------- DenseNet ------------------------------------
   densenet_sum:
@@ -31,6 +28,85 @@ experiments:
     overrides:
       model.decision_rule: product
 
+  # ---------------- DenseNet No Prior ------------------------------------
+  densenet_sum_no_prior:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+
+  densenet_max_no_prior:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+
+  densenet_min_no_prior:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+
+  densenet_geoprior_no_prior:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+
+  # ---------------- DenseNet No Domain ------------------------------------
+  densenet_sum_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_max_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_min_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_geoprior_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  # ---------------- DenseNet No Prior No Domain ------------------------------------
+  densenet_sum_no_prior_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_max_no_prior_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_min_no_prior_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
+  densenet_geoprior_no_prior_no_domain:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: densenet_lr_baseline_no_domain
+
   # ---------------- DINOv3 --------------------------------------
   dinov3_sum:
     model: dinov3_decision_fusion
@@ -51,3 +127,83 @@ experiments:
     model: dinov3_decision_fusion
     overrides:
       model.decision_rule: product
+
+  # ---------------- DINOv3 No Prior --------------------------------------
+  dinov3_sum_no_prior:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false  
+
+  dinov3_max_no_prior:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false 
+
+  dinov3_min_no_prior:    
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+
+  dinov3_geoprior_no_prior:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+
+  # ---------------- DINOv3 No Domain --------------------------------------
+  dinov3_sum_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain  
+
+  dinov3_max_no_domain: 
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain
+
+  dinov3_min_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain
+
+  dinov3_geoprior_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain  
+
+  # ---------------- DINOv3 No Prior No Domain --------------------------------------
+  dinov3_sum_no_prior_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain
+
+  dinov3_max_no_prior_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain
+
+  dinov3_min_no_prior_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain  
+
+  dinov3_geoprior_no_prior_no_domain:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: dinov3_lr_baseline_no_domain
+

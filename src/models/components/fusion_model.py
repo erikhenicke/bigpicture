@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Protocol, runtime_checkable
 
 import torch
 import torch.nn as nn
@@ -8,7 +8,39 @@ from models.components.fusion import Fusion, DecisionRule
 from models.components.domain_relations import D3GRelation
 
 
-class SingleBranchModel(nn.Module):
+@runtime_checkable
+class MultiScaleModel(Protocol):
+    """Structural contract every model wrapped by ``MultiScaleClassificationModule``
+    fulfills. The wrapper is fusion-agnostic: it depends only on this interface, not on
+    any concrete class.
+
+    Implementations: ``SingleBranchModel`` / ``SingleBranchLRModel`` /
+    ``SingleBranchLocationModel`` (single-scale), ``EarlyFusionModel`` (early
+    fusion), ``FeatureFusionModel`` (feature fusion), ``D3GModel`` (domain-gated feature
+    fusion), and ``DecisionFusionModel`` (decision fusion).
+
+    ``forward`` always returns a dict containing ``task_logits``. The capability-gated
+    keys (``lr_domain_logits`` / ``hr_domain_logits`` / ``rel_logits``) and the optional
+    members (``forward_branch_ablation``, ``lr_domain_loss_coeff``,
+    ``consistency_loss_coeff``) are present only when the matching ``supports_*`` method
+    returns True.
+    """
+
+    def forward(
+        self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None
+    ) -> Dict[str, torch.Tensor]: ...
+
+    def supports_d3g_objective(self) -> bool: ...
+    def supports_lr_domain_classification(self) -> bool: ...
+    def supports_hr_domain_classification(self) -> bool: ...
+    def supports_branch_ablation(self) -> bool: ...
+
+    def task_parameters(self) -> List[torch.nn.Parameter]: ...
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
+
+
+class SingleBranchModel(nn.Module, MultiScaleModel):
     """HR-only baseline: single encoder + task classifier, no fusion."""
 
     def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
@@ -25,6 +57,9 @@ class SingleBranchModel(nn.Module):
 
     def supports_hr_domain_classification(self) -> bool:
         return True
+
+    def supports_branch_ablation(self) -> bool:
+        return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         features = self.encoder(x["rgb"])
@@ -43,7 +78,7 @@ class SingleBranchModel(nn.Module):
         return list(self.hr_domain_classifier.parameters())
 
 
-class SingleBranchLRModel(nn.Module):
+class SingleBranchLRModel(nn.Module, MultiScaleModel):
     """LR-only model: single LR encoder + task classifier + LR domain head."""
 
     def __init__(
@@ -70,6 +105,9 @@ class SingleBranchLRModel(nn.Module):
     def supports_hr_domain_classification(self) -> bool:
         return False
 
+    def supports_branch_ablation(self) -> bool:
+        return False
+
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         features = self.encoder(x["landsat"][:, :self.landsat_channels, :, :])
         return {
@@ -87,7 +125,7 @@ class SingleBranchLRModel(nn.Module):
         return []
 
 
-class SingleBranchLocationModel(nn.Module):
+class SingleBranchLocationModel(nn.Module, MultiScaleModel):
     """Location-only model: SatCLIP encoder + task classifier + LR domain head."""
 
     def __init__(
@@ -112,6 +150,9 @@ class SingleBranchLocationModel(nn.Module):
     def supports_hr_domain_classification(self) -> bool:
         return False
 
+    def supports_branch_ablation(self) -> bool:
+        return False
+
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         features = self.encoder(x["coords"])
         return {
@@ -128,8 +169,8 @@ class SingleBranchLocationModel(nn.Module):
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []
 
-class SingleBranchStackedModel(nn.Module):
-    """Stacked-input model: concatenates HR RGB and Landsat along channels, feeds a single encoder."""
+class EarlyFusionModel(nn.Module, MultiScaleModel):
+    """Early fusion model: concatenates HR RGB and Landsat along channels, feeds a single encoder."""
 
     def __init__(
         self,
@@ -155,6 +196,9 @@ class SingleBranchStackedModel(nn.Module):
     def supports_hr_domain_classification(self) -> bool:
         return False
 
+    def supports_branch_ablation(self) -> bool:
+        return False
+
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         stacked = torch.cat([x["rgb"], x["landsat"][:, :self.landsat_channels, :, :]], dim=1)
         features = self.encoder(stacked)
@@ -173,7 +217,7 @@ class SingleBranchStackedModel(nn.Module):
         return []
 
 
-class DecisionFusionModel(nn.Module):
+class DecisionFusionModel(nn.Module, MultiScaleModel):
     """Parameter-free decision fusion over precomputed single-branch features.
 
     Holds the two *frozen* single-branch task heads (HR + LR) and a
@@ -226,8 +270,8 @@ class DecisionFusionModel(nn.Module):
 
         Both ``SingleBranchModel`` (HR) and ``SingleBranchLRModel`` (LR) store their
         head under ``model.task_classifier.*`` (the ``model.`` prefix comes from the
-        ``LateFusionModule`` wrapper). Each head's input width is read from the saved
-        weight, so the feature dimension never has to be configured.
+        ``MultiScaleClassificationModule`` wrapper). Each head's input width is read from
+        the saved weight, so the feature dimension never has to be configured.
         """
         device = self.rule.log_class_prior.device
         self.hr_head = self._build_head(hr_state_dict).to(device)
@@ -259,7 +303,7 @@ class DecisionFusionModel(nn.Module):
         return []
 
 
-class LateFusionModel(nn.Module):
+class FeatureFusionModel(nn.Module, MultiScaleModel):
     def __init__(
         self,
         branches: DualBranch,
@@ -301,7 +345,7 @@ class LateFusionModel(nn.Module):
         region_ids: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         if self.fusion is None:
-            raise RuntimeError("LateFusionModel requires a fusion module for forward().")
+            raise RuntimeError("FeatureFusionModel requires a fusion module for forward().")
 
         hr_branch_out, lr_branch_out = self.branches(x)
         lr_for_domain = lr_branch_out
@@ -348,7 +392,7 @@ class LateFusionModel(nn.Module):
         return list(self.hr_domain_classifier.parameters())
 
 
-class D3GModel(LateFusionModel):
+class D3GModel(FeatureFusionModel):
     def __init__(
         self,
         branches: DualBranch,

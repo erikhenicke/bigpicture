@@ -11,11 +11,8 @@ from torchmetrics.classification.accuracy import Accuracy
 import wandb
 
 from models.components.fusion_model import (
-    SingleBranchModel,
-    SingleBranchLRModel,
-    SingleBranchStackedModel,
-    SingleBranchLocationModel,
-    LateFusionModel,
+    FeatureFusionModel,
+    MultiScaleModel,
 )
 from models.utils import (
     make_eval_state,
@@ -29,12 +26,23 @@ from models.utils import (
 )
 
 
-class LateFusionModule(LightningModule):
-    """Class for late fusion of satellite image features for FMoW classification."""
+class MultiScaleClassificationModule(LightningModule):
+    """Fusion-agnostic training/eval harness for multi-scale FMoW classification.
+
+    Wraps any model that fulfills the :class:`MultiScaleModel` contract -- single-scale
+    (``SingleBranchModel`` / ``SingleBranchLRModel`` / ``SingleBranchLocationModel``),
+    early fusion (``EarlyFusionModel``), feature fusion (``FeatureFusionModel``),
+    domain-gated feature fusion (``D3GModel``), or decision fusion
+    (``DecisionFusionModel``) -- and provides the multi-objective training (task +
+    LR/HR domain + D3G consistency) and the shared evaluation suite (ID/OOD, ECE,
+    worst-group, per-class/region, branch ablation). The wrapper depends only on the
+    model's ``task_logits`` output and ``supports_*`` capability flags, never on its
+    concrete architecture.
+    """
 
     def __init__(
         self,
-        model: LateFusionModel | SingleBranchModel | SingleBranchLRModel | SingleBranchStackedModel | SingleBranchLocationModel,
+        model: MultiScaleModel,
         optimizer: Callable[..., torch.optim.Optimizer],
         scheduler: Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]] = None,
         domain_optimizer: Optional[Callable[..., torch.optim.Optimizer]] = None,
@@ -53,9 +61,9 @@ class LateFusionModule(LightningModule):
         alternating_freeze: bool = False,
         alternating_freeze_period: int = 1,
     ) -> None:
-        """Initialize a `LateFusionModule`.
+        """Initialize a `MultiScaleClassificationModule`.
 
-        :param model: The fusion classifier.
+        :param model: A `MultiScaleModel` (any fusion strategy or single-branch model).
         """
         super().__init__()
 
@@ -261,7 +269,7 @@ class LateFusionModule(LightningModule):
         self._force_train_mode()
 
         if not self.hparams.alternating_freeze or not isinstance(
-            self.model, LateFusionModel
+            self.model, FeatureFusionModel
         ):
             return
 
@@ -288,7 +296,7 @@ class LateFusionModule(LightningModule):
 
     def _unfreeze_all_branches(self) -> None:
         if not self.hparams.alternating_freeze or not isinstance(
-            self.model, LateFusionModel
+            self.model, FeatureFusionModel
         ):
             return
         self._set_branch_freeze(self.model.branches.hr_encoder, frozen=False)
@@ -553,7 +561,7 @@ class LateFusionModule(LightningModule):
         if dataloader_idx >= len(self.val_ece_metrics):
             raise ValueError(
                 "Received more validation dataloaders than configured ECE metrics. "
-                "Provide matching val_loader_names when initializing LateFusionModule."
+                "Provide matching val_loader_names when initializing MultiScaleClassificationModule."
             )
 
         x, y, metadata = batch
@@ -675,7 +683,7 @@ class LateFusionModule(LightningModule):
         if dataloader_idx >= len(self.test_ece_metrics):
             raise ValueError(
                 "Received more test dataloaders than configured ECE metrics. "
-                "Provide matching test_loader_names when initializing LateFusionModule."
+                "Provide matching test_loader_names when initializing MultiScaleClassificationModule."
             )
 
         x, y, metadata = batch
@@ -844,4 +852,4 @@ class LateFusionModule(LightningModule):
 
 
 if __name__ == "__main__":
-    _ = LateFusionModule(None, None, optimizer=torch.optim.AdamW)
+    _ = MultiScaleClassificationModule(None, None, optimizer=torch.optim.AdamW)

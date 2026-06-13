@@ -7,7 +7,7 @@ import torch
 from lightning import Trainer, seed_everything
 from omegaconf import OmegaConf
 
-from models.late_fusion import LateFusionModule
+from models.multi_scale_classification import MultiScaleClassificationModule
 from train.run_experiment import make_data_loaders, make_model
 
 
@@ -59,7 +59,7 @@ def load_hydra_config(config_path: Path) -> tuple:
     return cfg, overrides
 
 
-def load_model_from_checkpoint(checkpoint_path: Path, cfg) -> LateFusionModule:
+def load_model_from_checkpoint(checkpoint_path: Path, cfg) -> MultiScaleClassificationModule:
     module = make_model(cfg)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     module.load_state_dict(checkpoint["state_dict"])

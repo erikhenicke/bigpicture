@@ -15,7 +15,7 @@ import wandb
 
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 from models.components.spatial_encoding import SpatialEncoding
-from models.late_fusion import LateFusionModule
+from models.multi_scale_classification import MultiScaleClassificationModule
 from results.utils import find_best_checkpoints, find_run_dir
 from train.utils import make_multiscale_dataset, make_multiscale_loader
 
@@ -128,7 +128,7 @@ def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[D
     return train_loader, val_loaders, test_loaders
 
 
-def make_model(cfg: DictConfig) -> LateFusionModule:
+def make_model(cfg: DictConfig) -> MultiScaleClassificationModule:
 
     model_target = cfg.model.model.get("_target_", "")
 
@@ -150,7 +150,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
             landsat_channels=cfg.model.landsat_in_channels,
         )
-    elif model_target.endswith("SingleBranchStackedModel"):
+    elif model_target.endswith("EarlyFusionModel"):
         encoder = instantiate(cfg.model.encoder)
         model = instantiate(
             cfg.model.model,
@@ -243,7 +243,7 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
         else None
     )
 
-    return LateFusionModule(
+    return MultiScaleClassificationModule(
         model=model,
         optimizer=optimizer_factory,
         scheduler=scheduler_factory,
@@ -285,7 +285,7 @@ def _compute_class_prior(metadata_path: Path, split: str, num_classes: int) -> t
     return prior
 
 
-def _prepare_decision_fusion(model: LateFusionModule, cfg: DictConfig, run_idx: int) -> None:
+def _prepare_decision_fusion(model: MultiScaleClassificationModule, cfg: DictConfig, run_idx: int) -> None:
     """Build this seed's frozen heads and set the class prior (no training involved).
 
     The HR/LR heads come from the same single-branch runs that produced the cached

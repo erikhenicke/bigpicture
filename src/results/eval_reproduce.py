@@ -2,7 +2,7 @@
 """Re-evaluate a trained model on both OOD and ID test splits.
 
 Uses Lightning's trainer.test() to match the original training evaluation path.
-The rerun goes through the same LateFusionModule.on_test_epoch_end as training,
+The rerun goes through the same MultiScaleClassificationModule.on_test_epoch_end as training,
 which now also emits per-class top-1 accuracy (overall and per region) and top-5
 task accuracy. Two things happen per seed:
   1. The rerun is compared against the original metrics.csv to confirm the shared
@@ -54,7 +54,7 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
 
     Mirrors `_run_once` in run_experiment.py: seed -> make_data_loaders(cfg, run_idx) -> model ->
     best weights -> trainer.test(). Metrics are computed in
-    LateFusionModule.on_test_epoch_end, independent of the logger.
+    MultiScaleClassificationModule.on_test_epoch_end, independent of the logger.
 
     Reproducing the seed and the loader-build order matters when cfg.data.frac < 1.0:
     WILDS draws the random frac subset via the global np.random RNG inside get_subset,
