@@ -74,7 +74,7 @@ def _parse_spatial_cfg(cfg: DictConfig):
     }
 
 
-def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
+def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
     sc = _parse_spatial_cfg(cfg)
 
     spatial_kwargs = dict(
@@ -92,9 +92,9 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         image_norm=cfg.data.image_norm,
         lr_crop_km=cfg.data.get("lr_crop_km", None),
         lr_extension_factor=cfg.data.get("lr_extension_factor", 3.0),
-        hr_feature_run_name= cfg.data.get("hr_feature_run_name", None),
-        lr_feature_run_name= cfg.data.get("lr_feature_run_name", None),
-        feature_run_idx=cfg.data.get("feature_run_idx", None),
+        hr_feature_run_name=cfg.data.get("hr_feature_run_name", None),
+        lr_feature_run_name=cfg.data.get("lr_feature_run_name", None),
+        feature_run_idx=run_idx if cfg.data.get("source", None) == "features" else None,
         **spatial_kwargs,
     )
     dataset_eval = make_multiscale_dataset(
@@ -106,9 +106,9 @@ def make_data_loaders(cfg: DictConfig) -> Tuple[DataLoader, List[DataLoader], Li
         image_norm=cfg.data.image_norm,
         lr_crop_km=cfg.data.get("lr_crop_km", None),
         lr_extension_factor=cfg.data.get("lr_extension_factor", 3.0),
-        hr_feature_run_name= cfg.data.get("hr_feature_run_name", None),
-        lr_feature_run_name= cfg.data.get("lr_feature_run_name", None),
-        feature_run_idx=cfg.data.get("feature_run_idx", None),
+        hr_feature_run_name=cfg.data.get("hr_feature_run_name", None),
+        lr_feature_run_name=cfg.data.get("lr_feature_run_name", None),
+        feature_run_idx=run_idx if cfg.data.get("source", None) == "features" else None,
         **spatial_kwargs,
     )
 
@@ -270,7 +270,7 @@ def _run_once(
     )
     csv_logger = CSVLogger(save_dir=default_root_dir, name=f"run{run_idx}")
 
-    train_loader, val_loaders, test_loaders = make_data_loaders(cfg)
+    train_loader, val_loaders, test_loaders = make_data_loaders(cfg, run_idx)
     model = make_model(cfg)
 
     checkpoint_callback = ModelCheckpoint(

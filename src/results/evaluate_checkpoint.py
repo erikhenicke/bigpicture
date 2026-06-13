@@ -120,7 +120,7 @@ def evaluate_lightning_checkpoint() -> None:
     if args.frac is not None:
         cfg.data.frac = args.frac
 
-    _, _, test_loaders = make_data_loaders(cfg)
+    _, _, test_loaders = make_data_loaders(cfg, 0)
 
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",

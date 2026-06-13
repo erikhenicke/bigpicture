@@ -49,10 +49,10 @@ def find_run_dir(exp_key: str) -> Path | None:
     return candidates[0][2]
 
 
-def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
+def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
     """Run trainer.test() on a checkpoint, reproducing run_experiment.py's test metrics.
 
-    Mirrors `_run_once` in run_experiment.py: seed -> make_data_loaders(cfg) -> model ->
+    Mirrors `_run_once` in run_experiment.py: seed -> make_data_loaders(cfg, run_idx) -> model ->
     best weights -> trainer.test(). Metrics are computed in
     LateFusionModule.on_test_epoch_end, independent of the logger.
 
@@ -60,12 +60,12 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     WILDS draws the random frac subset via the global np.random RNG inside get_subset,
     so the exact test images depend on seed_everything(cfg.seed + run_idx) and the order
     of the get_subset calls. The subset is drawn before training, so it is fully
-    determined by these two things (not by the trained weights). `seed_idx` is the
-    original run index (run{seed_idx}) for this checkpoint.
+    determined by these two things (not by the trained weights). `run_idx` is the
+    original run index (run{run_idx}) for this checkpoint.
     """
     # Recreate the RNG state the original run used right before it built its loaders.
-    seed_everything(cfg.seed + seed_idx, workers=True)
-    _, _, test_loaders = make_data_loaders(cfg)
+    seed_everything(cfg.seed + run_idx, workers=True)
+    _, _, test_loaders = make_data_loaders(cfg, run_idx)
 
     module = make_model(cfg)
 
@@ -94,13 +94,13 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, seed_idx: int) -> list[dict]:
     return trainer.test(model=module, dataloaders=test_loaders)
 
 
-def load_original_test_metrics(run_dir: Path, seed_idx: int) -> dict[str, float]:
+def load_original_test_metrics(run_dir: Path, run_idx: int) -> dict[str, float]:
     """Read the original test metrics that run_experiment.py wrote via CSVLogger.
 
     During training, `trainer.test(...)` logs one final row of `test/...` columns to
-    `run{seed_idx}/version_0/metrics.csv`. We return that row as a flat metric->value dict.
+    `run{run_idx}/version_0/metrics.csv`. We return that row as a flat metric->value dict.
     """
-    metrics_path = run_dir / f"run{seed_idx}" / "version_0" / "metrics.csv"
+    metrics_path = run_dir / f"run{run_idx}" / "version_0" / "metrics.csv"
     if not metrics_path.exists():
         return {}
 
@@ -115,15 +115,15 @@ def load_original_test_metrics(run_dir: Path, seed_idx: int) -> dict[str, float]
     return {}
 
 
-def write_rerun_metrics(run_dir: Path, seed_idx: int, rerun_metrics: dict[str, float]) -> Path:
+def write_rerun_metrics(run_dir: Path, run_idx: int, rerun_metrics: dict[str, float]) -> Path:
     """Persist the full rerun test metrics next to the original metrics.csv.
 
     Written as a long-format ``metric,value`` CSV sorted by metric name, so the
     high-cardinality per-class rows (62 classes + region x class) stay readable
-    and greppable. Lives at ``run{seed_idx}/version_0/metrics_rerun.csv``,
+    and greppable. Lives at ``run{run_idx}/version_0/metrics_rerun.csv``,
     alongside the original ``metrics.csv`` produced during training.
     """
-    out_dir = run_dir / f"run{seed_idx}" / "version_0"
+    out_dir = run_dir / f"run{run_idx}" / "version_0"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "metrics_rerun.csv"
     with out_path.open("w", newline="") as f:
@@ -278,7 +278,7 @@ def main() -> None:
         # Seed i was trained as run{i} with seed_everything(cfg.seed + i); evaluate_checkpoint
         # re-seeds with the same value so the frac<1.0 test subset matches the original run.
         print(f"\n--- Evaluating seed {i} ({ckpt_path.name}) ---")
-        results = evaluate_checkpoint(ckpt_path, cfg, seed_idx=i)
+        results = evaluate_checkpoint(ckpt_path, cfg, run_idx=i)
         # trainer.test() returns one dict per dataloader; flatten into a single metric map.
         rerun_metrics: dict[str, float] = {}
         for result_dict in results:
