@@ -1,0 +1,47 @@
+# Decision-fusion experiments (Sum / Max / Min / GeoPrior rules).
+
+global_overrides:
+  data.frac: 1.0
+
+experiments:
+  # ---------------- DenseNet ------------------------------------
+  densenet_sum:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+
+  densenet_max:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+
+  densenet_min:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+
+  densenet_geoprior:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+
+  # ---------------- DINOv3 --------------------------------------
+  dinov3_sum:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+
+  dinov3_max:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+
+  dinov3_min:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+
+  dinov3_geoprior:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product

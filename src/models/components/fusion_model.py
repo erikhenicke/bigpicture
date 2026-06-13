@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from models.components.branches import Branch, DualBranch, SatCLIPLocationBranch
-from models.components.fusion import Fusion
+from models.components.fusion import Fusion, DecisionRule
 from models.components.domain_relations import D3GRelation
 
 
@@ -168,6 +168,92 @@ class SingleBranchStackedModel(nn.Module):
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return list(self.lr_domain_classifier.parameters())
+
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
+
+
+class DecisionFusionModel(nn.Module):
+    """Parameter-free decision fusion over precomputed single-branch features.
+
+    Holds the two *frozen* single-branch task heads (HR + LR) and a
+    :class:`DecisionRule`. It consumes cached encoder features served by
+    ``source="features"`` -- ``x["rgb"]`` is the HR feature vector and
+    ``x["landsat"]`` the LR feature vector -- applies each frozen head to get
+    per-branch logits, and combines them with the decision rule.
+
+    There is nothing to train: the heads are loaded from the single-branch
+    checkpoints via :meth:`load_heads` (mirroring extract_features.py's
+    "build once, reload weights per seed" pattern), so the model exposes no task /
+    domain parameters and supports neither the domain nor the D3G objectives. The
+    domain metrics already live in each single-branch run folder and worst-group
+    accuracy uses the ground-truth region, so no domain head is needed here.
+
+    The heads are built lazily in :meth:`load_heads`, which reads each branch's
+    feature width straight from the saved classifier weight -- so the feature
+    dimension is never configured, it is inferred from the checkpoint.
+    """
+
+    def __init__(self, num_task_labels: int, rule: DecisionRule):
+        super().__init__()
+        self.num_task_labels = num_task_labels
+        self.rule = rule
+        # Built (and frozen) lazily from the checkpoints in load_heads().
+        self.hr_head: Optional[nn.Linear] = None
+        self.lr_head: Optional[nn.Linear] = None
+
+    def supports_d3g_objective(self) -> bool:
+        return False
+
+    def supports_lr_domain_classification(self) -> bool:
+        return False
+
+    def supports_hr_domain_classification(self) -> bool:
+        return False
+
+    def supports_branch_ablation(self) -> bool:
+        return False
+
+    def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        if self.hr_head is None or self.lr_head is None:
+            raise RuntimeError("DecisionFusionModel.load_heads() must be called before forward().")
+        hr_logits = self.hr_head(x["rgb"])
+        lr_logits = self.lr_head(x["landsat"])
+        return {"task_logits": self.rule(hr_logits, lr_logits)}
+
+    def load_heads(self, hr_state_dict: Dict[str, torch.Tensor], lr_state_dict: Dict[str, torch.Tensor]) -> None:
+        """Build the two frozen task heads from single-branch checkpoint state dicts.
+
+        Both ``SingleBranchModel`` (HR) and ``SingleBranchLRModel`` (LR) store their
+        head under ``model.task_classifier.*`` (the ``model.`` prefix comes from the
+        ``LateFusionModule`` wrapper). Each head's input width is read from the saved
+        weight, so the feature dimension never has to be configured.
+        """
+        device = self.rule.log_class_prior.device
+        self.hr_head = self._build_head(hr_state_dict).to(device)
+        self.lr_head = self._build_head(lr_state_dict).to(device)
+        # Frozen: loaded from trained checkpoints, never optimized.
+        self.requires_grad_(False)
+
+    def _build_head(self, state_dict: Dict[str, torch.Tensor]) -> nn.Linear:
+        weight = state_dict["model.task_classifier.weight"]
+        bias = state_dict["model.task_classifier.bias"]
+        out_dim, in_dim = weight.shape
+        if out_dim != self.num_task_labels:
+            raise ValueError(
+                f"Head has {out_dim} outputs but num_task_labels={self.num_task_labels}."
+            )
+        head = nn.Linear(in_dim, out_dim)
+        with torch.no_grad():
+            head.weight.copy_(weight)
+            head.bias.copy_(bias)
+        return head
+
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        return []
+
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        return []
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []

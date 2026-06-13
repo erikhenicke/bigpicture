@@ -145,6 +145,77 @@ class MultSimFusion(Fusion):
         return self.lr_projection(lr_features)
 
 
+class DecisionRule(nn.Module):
+    """Parameter-free decision fusion of two classifiers' posteriors.
+
+    Combines the per-branch posteriors ``P(y|HR)`` and ``P(y|LR)`` (softmax of each
+    frozen head's logits) by a fixed rule and returns the *log* of the renormalized
+    fused posterior, so the downstream softmax/argmax/ECE see a proper distribution.
+
+    Rules follow Kittler et al. (1998) - here with R = 2:
+      - ``sum``:     ``q(y) = P(y|HR) + P(y|LR) - P(y)`` 
+      - ``max``:     ``q(y) = 2 * max(P(y|HR), P(y|LR)) - P(y)`` 
+      - ``min``:     ``q(y) = min(P(y|HR), P(y|LR)) / P(y)``
+      - ``product``: ``q(y) = P(y|HR) * P(y|LR) / P(y)`` -- GeoPrior
+        rule. Each trained classifier's posterior already embeds the train-set class
+        prior ``P(y)``; multiplying the two double-counts it, so the product rule
+        divides ``P(y)`` back out once. ``P(y)`` is set via :meth:`set_class_prior`
+        (default uniform -> no correction, i.e. a plain product).
+
+    Set ``use_class_prior=False`` to drop the ``P(y)`` term entirely (an ablation):
+    ``sum`` -> ``P(y|HR) + P(y|LR)``, ``max`` -> ``max(P(y|HR), P(y|LR))``,
+    ``min`` -> ``min(P(y|HR), P(y|LR))``, ``product`` -> ``P(y|HR) * P(y|LR)``.
+
+    Multiplicative rules (``min`` / ``product``) keep their numerics in log space;
+    ``sum`` / ``max`` are computed on the posteriors because their prior term is a
+    subtraction. Everything is renormalized to a proper distribution at the end.
+    """
+
+    VALID_RULES = ("sum", "max", "min", "product")
+
+    def __init__(self, rule: str, num_task_labels: int, use_class_prior: bool = True):
+        super().__init__()
+        if rule not in self.VALID_RULES:
+            raise ValueError(f"rule must be one of {self.VALID_RULES}, got {rule!r}")
+        self.rule = rule
+        self.use_class_prior = use_class_prior
+        # log P(y); zeros == uniform prior, which leaves the product rule unchanged
+        # after the final renormalization.
+        self.register_buffer("log_class_prior", torch.zeros(num_task_labels))
+
+    def set_class_prior(self, prior: torch.Tensor) -> None:
+        """Set the class prior P(y) (only used by the ``product`` rule).
+
+        ``prior`` is a length-``num_task_labels`` vector of (unnormalized) class
+        frequencies; it is normalized to a distribution and stored as ``log P(y)``.
+        """
+        prior = prior.to(self.log_class_prior)
+        prior = prior / prior.sum()
+        self.log_class_prior = torch.log(prior.clamp_min(1e-12))
+
+    def forward(self, hr_logits: torch.Tensor, lr_logits: torch.Tensor) -> torch.Tensor:
+        log_p_hr = F.log_softmax(hr_logits, dim=1)
+        log_p_lr = F.log_softmax(lr_logits, dim=1)
+
+        if self.rule in ("sum", "max"):
+            prior = self.log_class_prior.exp() if self.use_class_prior else 0.0
+            if self.rule == "sum":
+                q = log_p_hr.exp() + log_p_lr.exp() - prior
+            else:
+                q = 2.0 * torch.maximum(log_p_hr.exp(), log_p_lr.exp()) - prior
+            log_q = q.clamp_min(1e-12).log()
+        elif self.rule == "min":
+            log_q = torch.minimum(log_p_hr, log_p_lr)
+            if self.use_class_prior:
+                log_q = log_q - self.log_class_prior
+        else:  # product / GeoPrior
+            log_q = log_p_hr + log_p_lr
+            if self.use_class_prior:
+                log_q = log_q - self.log_class_prior
+
+        # Renormalize to a proper log-distribution so softmax(log_q) == q.
+        return F.log_softmax(log_q, dim=1)
+
 class GeoPriorFusion(Fusion):
     def __init__(self, hr_dim, lr_dim, out_dim, pre_fusion_relu=True):
         super().__init__(hr_dim, lr_dim, out_dim)

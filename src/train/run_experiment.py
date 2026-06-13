@@ -1,4 +1,3 @@
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -9,6 +8,7 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import DictConfig, OmegaConf
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 import wandb
@@ -16,7 +16,11 @@ import wandb
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 from models.components.spatial_encoding import SpatialEncoding
 from models.late_fusion import LateFusionModule
+from results.utils import find_best_checkpoints, find_run_dir
 from train.utils import make_multiscale_dataset, make_multiscale_loader
+
+REPO_ROOT = Path(__file__).parent.parent.parent
+DEFAULT_PRIOR_METADATA = REPO_ROOT / "data" / "rgb_metadata_extended.csv"
 
 def has_device_tensor_cores() -> bool:
     """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
@@ -156,6 +160,16 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
             landsat_channels=cfg.model.landsat_in_channels,
         )
+    elif model_target.endswith("DecisionFusionModel"):
+        # Parameter-free decision fusion over cached features. The frozen heads are
+        # built later (per seed) by model.load_heads() from the single-branch
+        # checkpoints; here we only build the (untrained) decision rule.
+        rule = instantiate(cfg.model.rule)
+        model = instantiate(
+            cfg.model.model,
+            num_task_labels=cfg.num_task_labels,
+            rule=rule,
+        )
     elif model_target.endswith("SingleBranchLocationModel"):
         encoder = instantiate(cfg.model.encoder)
         model = instantiate(
@@ -249,13 +263,80 @@ def make_model(cfg: DictConfig) -> LateFusionModule:
     )
 
 
+def _is_decision_fusion(cfg: DictConfig) -> bool:
+    return cfg.model.model.get("_target_", "").endswith("DecisionFusionModel")
+
+
+def _compute_class_prior(metadata_path: Path, split: str, num_classes: int) -> torch.Tensor:
+    """Per-class frequency vector P(y) over ``split``, indexed by the ``y`` label.
+
+    Counts come from the FMoW metadata CSV (not model metrics); classes absent from
+    the split get a count of 0 (DecisionRule clamps the log before use).
+    """
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Class-prior metadata CSV not found: {metadata_path}")
+    df = pd.read_csv(metadata_path, usecols=["split", "y"])
+    sub = df[df["split"] == split]
+    if sub.empty:
+        raise ValueError(f"No rows with split == {split!r} in {metadata_path}")
+    prior = torch.zeros(num_classes)
+    for cls, n in sub["y"].value_counts().items():
+        prior[int(cls)] = float(n)
+    return prior
+
+
+def _prepare_decision_fusion(model: LateFusionModule, cfg: DictConfig, run_idx: int) -> None:
+    """Build this seed's frozen heads and set the class prior (no training involved).
+
+    The HR/LR heads come from the same single-branch runs that produced the cached
+    features, so the run keys are taken from ``data.hr_feature_run_name`` /
+    ``data.lr_feature_run_name`` (these must be the experiment key, e.g.
+    ``densenet_baseline``, so ``find_run_dir`` resolves ``train_<key>``). The head for
+    seed ``run_idx`` is loaded and its feature width inferred from the saved weight.
+    The class prior P(y) is then set on the decision rule (used by every rule).
+    """
+    hr_run = cfg.data.hr_feature_run_name
+    lr_run = cfg.data.lr_feature_run_name
+    hr_dir = find_run_dir(hr_run)
+    lr_dir = find_run_dir(lr_run)
+    if hr_dir is None or lr_dir is None:
+        raise FileNotFoundError(
+            f"Could not resolve head runs: hr_feature_run_name={hr_run} -> {hr_dir}, "
+            f"lr_feature_run_name={lr_run} -> {lr_dir}"
+        )
+    hr_ckpts = find_best_checkpoints(hr_dir)
+    lr_ckpts = find_best_checkpoints(lr_dir)
+    if run_idx >= len(hr_ckpts) or run_idx >= len(lr_ckpts):
+        raise IndexError(
+            f"Seed {run_idx} out of range (HR has {len(hr_ckpts)} seeds, LR has {len(lr_ckpts)})."
+        )
+
+    def state(path: Path) -> dict:
+        return torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
+
+    model.model.load_heads(state(hr_ckpts[run_idx]), state(lr_ckpts[run_idx]))
+
+    if not cfg.model.get("use_class_prior", True):
+        return  # prior-ignored ablation: leave the rule's uniform prior untouched
+
+    split = cfg.model.get("class_prior_split", "train")
+    metadata = cfg.model.get("class_prior_metadata", None)
+    metadata_path = Path(metadata) if metadata else DEFAULT_PRIOR_METADATA
+    prior = _compute_class_prior(metadata_path, split, cfg.num_task_labels)
+    model.model.rule.set_class_prior(prior)
+
+
 def _run_once(
     cfg: DictConfig,
     run_idx: int,
     default_root_dir: str,
     wandb_group: str,
 ) -> tuple[list[dict], str]:
-    """Run one training + test pass. Returns (test_results, checkpoint_dir)."""
+    """Run one training + test pass. Returns (test_results, checkpoint_dir).
+
+    Decision-fusion models are parameter-free: there is nothing to fit, so for those
+    we load this seed's frozen heads + prior and run test only.
+    """
     seed_everything(cfg.seed + run_idx, workers=True)
 
     run_name = f"{wandb_group}-run{run_idx}"
@@ -272,6 +353,18 @@ def _run_once(
 
     train_loader, val_loaders, test_loaders = make_data_loaders(cfg, run_idx)
     model = make_model(cfg)
+
+    if _is_decision_fusion(cfg):
+        _prepare_decision_fusion(model, cfg, run_idx)
+        trainer = Trainer(
+            accelerator=cfg.trainer.accelerator,
+            logger=[wandb_logger, csv_logger],
+            log_every_n_steps=cfg.trainer.log_every_n_steps,
+            default_root_dir=default_root_dir,
+        )
+        test_results = trainer.test(model=model, dataloaders=test_loaders)
+        wandb.finish()
+        return test_results, checkpoint_dir
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_dir,

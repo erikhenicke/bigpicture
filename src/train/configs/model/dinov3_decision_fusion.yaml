@@ -1,0 +1,23 @@
+# @package _global_
+model:
+  decision_rule: sum
+
+  use_class_prior: true
+  class_prior_split: train
+
+  rule:
+    _target_: models.components.fusion.DecisionRule
+    rule: ${model.decision_rule}
+    num_task_labels: ${num_task_labels}
+    use_class_prior: ${model.use_class_prior}
+
+  model:
+    _target_: models.components.fusion_model.DecisionFusionModel
+
+run_name: train-dinov3-decision-fusion
+
+data:
+  source: features
+  hr_feature_run_name: dinov3_baseline
+  lr_feature_run_name: dinov3_lr_baseline_no_domain
+  batch_size: 512
