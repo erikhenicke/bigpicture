@@ -11,6 +11,15 @@ primary_metrics:
   - test/test-od-task-acc
   - test/test-od-worst-group-task-acc
 
+# Per-class accuracy gain/loss plots (src/results/class_eval.py). Each comparison
+# run gets a Test-OOD plot and a worst-region plot (baseline's worst OOD region),
+# each showing the five largest per-class accuracy gains and losses vs. baseline.
+class-eval:
+  baseline: baselines@densenet_baseline
+  runs:
+    - film_om_gauss_pe_freq_lr_crop_14_9km
+    - film_om_gauss_pe_freq
+
 groups:
   - name: Baselines
     runs:

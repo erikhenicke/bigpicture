@@ -74,8 +74,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
         preprocessed_dir=None,
         extended_metadata_csv="rgb_metadata_extended.csv",
         split_scheme="official",
-        use_ood_val=True,
-        seed=111,
         transform_rgb=None,
         transform_landsat=None,
         augment=False,
@@ -95,8 +93,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
         """
         Args:
             split_scheme: 'official' (time_after_2016) or other WILDS split schemes
-            use_ood_val: Whether to use OOD validation set
-            seed: Random seed
             transform_rgb: Transforms for RGB images
             transform_landsat: Transforms for Landsat images
             scale_to_img_size: If True (default), Landsat images are resized to
@@ -562,7 +558,7 @@ if __name__ == "__main__":
     dataset = FMoWMultiScaleDataset(
         fmow_dir="/home/henicke/data",
         landsat_dir="/home/datasets4/FMoW_LandSat",
-        lr_extension_factor=DEFAULT_LR_EXTENSION_FACTOR,
+        lr_extension_factor=3.0,
     )
 
     sample, y, metadata = dataset[271258]

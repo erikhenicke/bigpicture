@@ -1,10 +1,20 @@
-"""Shared helpers for loading trained runs (checkpoints + hydra config)."""
+"""Shared helpers for loading trained runs (checkpoints + hydra config) and for
+resolving eval-YAML run references to their log directories and display names."""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+import pandas as pd
+import yaml
 from omegaconf import OmegaConf
+
+REPO_ROOT = Path(__file__).parent.parent.parent
+LOG_RUNS = REPO_ROOT / "log" / "runs"
+EVAL_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "eval"
+RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
+TRANSLATIONS_FILE = EVAL_CONFIG_DIR / "translations.yaml"
 
 
 def find_best_checkpoints(run_dir: Path) -> list[Path]:
@@ -43,3 +53,163 @@ def load_hydra_config(run_dir: Path):
         if key not in cfg.trainer:
             cfg.trainer[key] = default
     return cfg
+
+
+def find_run_dir(exp_key: str) -> Path | None:
+    """Return the most recent log directory for the given experiment key."""
+    job_name = f"train_{exp_key}"
+    prefix = job_name + "-"
+
+    candidates: list[tuple[str, str, Path]] = []
+    for date_dir in LOG_RUNS.iterdir():
+        if not date_dir.is_dir():
+            continue
+        for run_dir in date_dir.iterdir():
+            if run_dir.name.startswith(prefix):
+                candidates.append((date_dir.name, run_dir.name, run_dir))
+
+    if not candidates:
+        return None
+    # Take the most recent by date, then by run name
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
+
+
+def parse_run_ref(ref: str, default_config: str) -> tuple[str, str]:
+    if "@" in ref:
+        config_name, exp_key = ref.split("@", 1)
+        return config_name, exp_key
+    return default_config, ref
+
+
+def load_run_configs(config_names: set[str]) -> dict[str, dict]:
+    configs: dict[str, dict] = {}
+    for name in config_names:
+        path = RUN_CONFIG_DIR / f"{name}.yaml"
+        if not path.exists():
+            print(f"Warning: run config not found: {path}", file=sys.stderr)
+            continue
+        with path.open() as f:
+            configs[name] = yaml.safe_load(f)
+    return configs
+
+
+def resolve_experiments(
+    groups: list[dict],
+    run_configs: dict[str, dict],
+    default_config: str,
+) -> dict[str, dict]:
+    default_global = run_configs.get(default_config, {}).get("global_overrides", {})
+    resolved: dict[str, dict] = {}
+    for group in groups:
+        for ref in group["runs"]:
+            if ref in resolved:
+                continue
+            config_name, exp_key = parse_run_ref(ref, default_config)
+            cfg = run_configs.get(config_name)
+            if cfg is None:
+                print(f"Warning: run config '{config_name}' not found (referenced by '{ref}')", file=sys.stderr)
+                continue
+            exp_def = cfg.get("experiments", {}).get(exp_key)
+            if exp_def is None:
+                print(f"Warning: experiment '{exp_key}' not found in '{config_name}'", file=sys.stderr)
+                continue
+            source_global = cfg.get("global_overrides", {})
+            exp_overrides = exp_def.get("overrides") or {}
+            global_diff = {k: v for k, v in source_global.items() if default_global.get(k) != v}
+            display_overrides = {**global_diff, **exp_overrides}
+            resolved[ref] = {**exp_def, "overrides": display_overrides or None}
+    return resolved
+
+
+def load_seed_test_metrics(seed_dir: Path) -> dict[str, float] | None:
+    """Load one seed's flat test metric map, preferring ``metrics_rerun.csv``.
+
+    ``metrics_rerun.csv`` is the long-format (``metric,value``) rerun output and
+    the only source of the per-class / top-5 keys. Falls back to the wide training
+    ``metrics.csv`` (its final non-empty ``test/`` row). Returns ``None`` if neither
+    file yields test metrics.
+    """
+    rerun = seed_dir / "version_0" / "metrics_rerun.csv"
+    if rerun.exists():
+        df = pd.read_csv(rerun)
+        return {str(m): float(v) for m, v in zip(df["metric"], df["value"]) if pd.notna(v)}
+
+    plain = seed_dir / "version_0" / "metrics.csv"
+    if plain.exists():
+        df = pd.read_csv(plain)
+        test_cols = [c for c in df.columns if c.startswith("test/")]
+        if not test_cols:
+            return None
+        test_rows = df.dropna(subset=[test_cols[0]])
+        if test_rows.empty:
+            return None
+        row = test_rows.iloc[-1]
+        return {c: float(row[c]) for c in test_cols if pd.notna(row[c])}
+
+    return None
+
+
+def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
+    """Mean of each test metric across all seeds of a run (empty if none found).
+
+    Each seed is loaded via :func:`load_seed_test_metrics`, so per-seed values come
+    from ``metrics_rerun.csv`` when present, otherwise ``metrics.csv``.
+    """
+    if run_dir is None:
+        return {}
+    pooled: dict[str, list[float]] = {}
+    for seed_dir in sorted(run_dir.glob("run*")):
+        seed_metrics = load_seed_test_metrics(seed_dir)
+        if not seed_metrics:
+            continue
+        for k, v in seed_metrics.items():
+            pooled.setdefault(k, []).append(v)
+    return {k: sum(vs) / len(vs) for k, vs in pooled.items()}
+
+
+def load_translations() -> dict:
+    translations: dict = {"models": {}, "params": {}}
+    if TRANSLATIONS_FILE.exists():
+        with TRANSLATIONS_FILE.open() as f:
+            translations = yaml.safe_load(f)
+    return translations
+
+
+def format_experiment_name(
+    run_ref: str,
+    run_experiments: dict,
+    translations: dict,
+    latex: bool = False,
+) -> str:
+    exp_def = run_experiments.get(run_ref)
+    exp_key = run_ref.split("@", 1)[1] if "@" in run_ref else run_ref
+    if exp_def is None:
+        return exp_key.replace("_", " ").title()
+
+    symbol_key = "latex" if latex else "plain"
+    model_key = exp_def.get("model", exp_key)
+    base_name = translations["models"].get(model_key, model_key.replace("_", " ").title())
+
+    overrides: dict = exp_def.get("overrides") or {}
+    parts = [base_name]
+    for param_key, value in overrides.items():
+        param_trans = translations["params"].get(param_key)
+        if param_trans and param_trans.get("hidden", False):
+            continue
+        label = param_trans[symbol_key] if param_trans else param_key.split(".")[-1]
+        value_trans = (param_trans or {}).get("values", {}).get(str(value))
+        if value_trans:
+            parts.append(value_trans[symbol_key])
+        elif isinstance(value, bool):
+            if not value:
+                parts.append(f"no {label}")
+            else:
+                parts.append(label)
+        elif param_trans and param_trans.get("no_value", False):
+            parts.append(label)
+        else:
+            val_str = f"{value:g}" if isinstance(value, float) else str(value)
+            parts.append(f"{label}$={val_str}$" if latex else f"{label}={val_str}")
+
+    return ", ".join(parts)

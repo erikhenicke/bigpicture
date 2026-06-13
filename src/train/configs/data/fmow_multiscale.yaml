@@ -4,7 +4,6 @@ landsat_dir: /home/datasets4/FMoW_LandSat
 preprocessed_dir: FMoW_LandSat
 hr_feature_run_name: null
 lr_feature_run_name: null
-feature_run_idx: null
 image_norm: null
 
 batch_size: 64
