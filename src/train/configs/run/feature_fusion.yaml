@@ -2,6 +2,7 @@ slurm:
   partition: robolab
   cpus_per_task: 4
   mem_per_cpu: 8GB
+  nodelist: gaia4,gaia7
 
 global_overrides:
   data.frac: 1.0 
@@ -270,51 +271,3 @@ experiments:
       trainer.branch_ablation: true
       trainer.alternating_freeze: true
       trainer.alternating_freeze_period: 2
-
-
-  # ----------------- Spatial Extent Ablation ----------------------
-  # Four different extents: 1km, 6.5km (default) and no cropping (14.94km)
-  # Resolutions: 2 times 95th percentile (4.4681380514206985 m/px), 3 times 95th percentile (6.702207077131048 m/px), 15 m/px, 30 m/px, 45 m/px, Full extent (66.7334406811903 m/px)
-  # Crop extents: 1000.8629235182365 m, 1501.2943852773546 m, 3360 m, 6720 m, 10080 m, 14,948.290712586628 m
-
-  film_om_gauss_pe_freq_lr_crop_1km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 1.0008629235182365
-
-  film_om_gauss_pe_freq_lr_crop_1_5km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 1.5012943852773546
-
-  film_om_gauss_pe_freq_lr_crop_3_4km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 3.36
-
-  film_om_gauss_pe_freq_lr_crop_6_7km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq 
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 6.720
-
-  film_om_gauss_pe_freq_lr_crop_10km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 10.08
-
-  film_om_gauss_pe_freq_lr_crop_14_9km:
-    model: densenet_film
-    overrides:
-      spatial: om_gauss_pe_freq
-      data.preprocessed_dir: FMoW_LandSat_FullRes
-      data.lr_crop_km: 14.91

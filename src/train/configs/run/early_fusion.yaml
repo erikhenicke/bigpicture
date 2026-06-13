@@ -1,0 +1,23 @@
+slurm:
+  partition: robolab
+  cpus_per_task: 4
+  mem_per_cpu: 8GB
+  nodelist: gaia4,gaia7
+
+global_overrides:
+  optim: adam_warmup_cosine
+  data.source: preprocessed
+  data.preprocessed_dir: FMoW_LandSat_Norm
+
+experiments:
+  # ---------------- Stacked Inputs -------------------------
+  densenet_stacked:
+    model: densenet_stacked
+
+  densenet_stacked_no_domain:
+    model: densenet_stacked
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+  
+  dinov3_stacked:
+    model: dinov3_stacked

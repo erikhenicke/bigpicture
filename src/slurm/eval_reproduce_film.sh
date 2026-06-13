@@ -10,4 +10,4 @@
 #SBATCH --output=log/slurm/reproduce_film.%j.out
 #SBATCH --error=log/slurm/reproduce_film.%j.err
 cd /home/henicke/git/bigpicture
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film 
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film 

@@ -229,7 +229,7 @@ def load_run_config(config_path: Path) -> tuple[dict, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Per-class evaluation of a trained model")
-    parser.add_argument("--config", type=str, required=True, help="Path to run config YAML (e.g. src/train/configs/run/multsim.yaml)")
+    parser.add_argument("--config", type=str, required=True, help="Path to run config YAML (e.g. src/train/configs/run/feature_fusion.yaml)")
     parser.add_argument("--run-name", type=str, required=True, help="Experiment key to evaluate (e.g. film_om_bin_pe)")
     parser.add_argument("--batch-size", type=int, default=None, help="Override batch size")
     parser.add_argument("--num-workers", type=int, default=None, help="Override num workers")

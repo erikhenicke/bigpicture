@@ -44,6 +44,7 @@ def generate(run_yaml: Path) -> list[Path]:
     partition = slurm.get("partition", "robolab")
     cpus_per_task = slurm.get("cpus_per_task", 4)
     mem_per_cpu = slurm.get("mem_per_cpu", "8G")
+    nodelist = slurm.get("nodelist", NODELIST)
 
     global_overrides = cfg.get("global_overrides", {})
     experiments = cfg.get("experiments", {})
@@ -68,7 +69,7 @@ def generate(run_yaml: Path) -> list[Path]:
 
         script = SCRIPT_TEMPLATE.format(
             partition=partition,
-            nodelist=NODELIST,
+            nodelist=nodelist,
             job_name=job_name,
             gpus=GPUS,
             cpus_per_task=cpus_per_task,

@@ -1,5 +1,5 @@
 # @package _global_
-odel:
+model:
   decision_rule: sum
   use_class_prior: true
   class_prior_split: train

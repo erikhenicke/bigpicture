@@ -1,5 +1,11 @@
 # Decision-fusion experiments (Sum / Max / Min / GeoPrior rules).
 
+slurm:
+  partition: robolab
+  cpus_per_task: 4
+  mem_per_cpu: 8GB
+  nodelist: gaia4,gaia5,gaia7
+
 global_overrides:
   data.frac: 1.0
 

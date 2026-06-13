@@ -21,16 +21,16 @@ srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/con
 srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/baselines.yaml --run-name densenet_stacked_baseline_no_domain
 srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/baselines.yaml --run-name dinov3_stacked_baseline
 
-# ---------------- multsim.yaml (21 runs with 3 seeds) ----------------
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_no_domain
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name concat_no_domain
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name geoprior_no_domain
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name d3g_no_domain
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_relu
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_bin
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_gauss
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_pe
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_pe_freq
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_bin_pe_freq
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_bin_pe
-srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/multsim.yaml --run-name film_om_gauss_pe
+# ---------------- feature_fusion.yaml (21 runs with 3 seeds) ----------------
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_no_domain
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name concat_no_domain
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name geoprior_no_domain
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_no_domain
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_relu
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_om_bin
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_om_gauss
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_pe
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_pe_freq
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_om_bin_pe_freq
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_om_bin_pe
+srun uv run --env-file .env src/results/eval_reproduce.py --config src/train/configs/run/feature_fusion.yaml --run-name film_om_gauss_pe

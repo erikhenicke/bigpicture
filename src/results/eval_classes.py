@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot per-class accuracy gains/losses of runs relative to a baseline.
 
-Reads the ``class-eval`` section of an eval YAML (e.g. ``multsim.yaml``):
+Reads the ``class-eval`` section of an eval YAML (e.g. ``feature_fusion.yaml``):
 
     class-eval:
       baseline: baselines@densenet_baseline
@@ -262,8 +262,8 @@ def main() -> None:
     parser.add_argument(
         "eval_yaml",
         nargs="?",
-        default=str(EVAL_CONFIG_DIR / "multsim.yaml"),
-        help="Path to eval YAML (default: src/train/configs/eval/multsim.yaml)",
+        default=str(EVAL_CONFIG_DIR / "feature_fusion.yaml"),
+        help="Path to eval YAML (default: src/train/configs/eval/feature_fusion.yaml)",
     )
     parser.add_argument(
         "--metadata",
