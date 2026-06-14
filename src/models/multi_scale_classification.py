@@ -402,6 +402,10 @@ class MultiScaleClassificationModule(LightningModule):
         task_preds = torch.argmax(task_logits, dim=1)
 
         optimizers = self.optimizers()
+        # Lightning returns a bare optimizer when there is only one (e.g. decision
+        # fusion trained from scratch has just the task optimizer); normalize to a list.
+        if not isinstance(optimizers, (list, tuple)):
+            optimizers = [optimizers]
         opt_idx = 0
         task_opt = optimizers[opt_idx]
         opt_idx += 1

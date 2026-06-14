@@ -1,4 +1,6 @@
-from typing import Dict, List, Optional, Protocol, runtime_checkable
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -6,18 +8,23 @@ import torch.nn as nn
 from models.components.branches import Branch, DualBranch, SatCLIPLocationBranch
 from models.components.fusion import Fusion, DecisionRule
 from models.components.domain_relations import D3GRelation
+from results.utils import find_best_checkpoints, find_run_dir
 
 
-@runtime_checkable
-class MultiScaleModel(Protocol):
-    """Structural contract every model wrapped by ``MultiScaleClassificationModule``
-    fulfills. The wrapper is fusion-agnostic: it depends only on this interface, not on
-    any concrete class.
+class MultiScaleModel(nn.Module, ABC):
+    """Abstract base class every model wrapped by ``MultiScaleClassificationModule``
+    derives from. It is itself an ``nn.Module``, so every model is-a ``nn.Module`` and
+    is-a ``MultiScaleModel``. The wrapper is fusion-agnostic: it depends only on this
+    interface, not on any concrete subclass.
 
-    Implementations: ``SingleBranchModel`` / ``SingleBranchLRModel`` /
+    Subclasses: ``SingleBranchModel`` / ``SingleBranchLRModel`` /
     ``SingleBranchLocationModel`` (single-scale), ``EarlyFusionModel`` (early
     fusion), ``FeatureFusionModel`` (feature fusion), ``D3GModel`` (domain-gated feature
     fusion), and ``DecisionFusionModel`` (decision fusion).
+
+    The abstract methods below must be implemented by every concrete subclass -- an
+    incomplete subclass cannot be instantiated (``TypeError`` at construction). Only
+    ``train_model`` has a concrete default.
 
     ``forward`` always returns a dict containing ``task_logits``. The capability-gated
     keys (``lr_domain_logits`` / ``hr_domain_logits`` / ``rel_logits``) and the optional
@@ -26,21 +33,39 @@ class MultiScaleModel(Protocol):
     returns True.
     """
 
+    @abstractmethod
     def forward(
         self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]: ...
 
+    def train_model(self) -> bool:
+        """Whether this model is learned via ``Trainer.fit``.
+
+        Concrete default: True for every model, inherited by all subclasses. The sole
+        exception is ``DecisionFusionModel``, which overrides this to return its own
+        ``train_model`` flag -- False means its frozen heads are evaluated test-only,
+        True means the decision heads are trained jointly from scratch.
+        """
+        return True
+
+    @abstractmethod
     def supports_d3g_objective(self) -> bool: ...
+    @abstractmethod
     def supports_lr_domain_classification(self) -> bool: ...
+    @abstractmethod
     def supports_hr_domain_classification(self) -> bool: ...
+    @abstractmethod
     def supports_branch_ablation(self) -> bool: ...
 
+    @abstractmethod
     def task_parameters(self) -> List[torch.nn.Parameter]: ...
+    @abstractmethod
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
+    @abstractmethod
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
 
 
-class SingleBranchModel(nn.Module, MultiScaleModel):
+class SingleBranchModel(MultiScaleModel):
     """HR-only baseline: single encoder + task classifier, no fusion."""
 
     def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
@@ -78,7 +103,7 @@ class SingleBranchModel(nn.Module, MultiScaleModel):
         return list(self.hr_domain_classifier.parameters())
 
 
-class SingleBranchLRModel(nn.Module, MultiScaleModel):
+class SingleBranchLRModel(MultiScaleModel):
     """LR-only model: single LR encoder + task classifier + LR domain head."""
 
     def __init__(
@@ -125,7 +150,7 @@ class SingleBranchLRModel(nn.Module, MultiScaleModel):
         return []
 
 
-class SingleBranchLocationModel(nn.Module, MultiScaleModel):
+class SingleBranchLocationModel(MultiScaleModel):
     """Location-only model: SatCLIP encoder + task classifier + LR domain head."""
 
     def __init__(
@@ -169,7 +194,7 @@ class SingleBranchLocationModel(nn.Module, MultiScaleModel):
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []
 
-class EarlyFusionModel(nn.Module, MultiScaleModel):
+class EarlyFusionModel(MultiScaleModel):
     """Early fusion model: concatenates HR RGB and Landsat along channels, feeds a single encoder."""
 
     def __init__(
@@ -217,34 +242,56 @@ class EarlyFusionModel(nn.Module, MultiScaleModel):
         return []
 
 
-class DecisionFusionModel(nn.Module, MultiScaleModel):
-    """Parameter-free decision fusion over precomputed single-branch features.
+class DecisionFusionModel(MultiScaleModel):
+    """Decision fusion over precomputed single-branch features.
 
-    Holds the two *frozen* single-branch task heads (HR + LR) and a
-    :class:`DecisionRule`. It consumes cached encoder features served by
-    ``source="features"`` -- ``x["rgb"]`` is the HR feature vector and
-    ``x["landsat"]`` the LR feature vector -- applies each frozen head to get
-    per-branch logits, and combines them with the decision rule.
+    Holds two single-branch task heads (HR + LR) and a :class:`DecisionRule`. It
+    consumes cached encoder features served by ``source="features"`` -- ``x["rgb"]``
+    is the HR feature vector and ``x["landsat"]`` the LR feature vector -- applies
+    each head to get per-branch logits, and combines them with the decision rule.
 
-    There is nothing to train: the heads are loaded from the single-branch
-    checkpoints via :meth:`load_heads` (mirroring extract_features.py's
-    "build once, reload weights per seed" pattern), so the model exposes no task /
-    domain parameters and supports neither the domain nor the D3G objectives. The
+    Two modes, selected by ``train_model``:
+
+    - ``train_model=False`` (default): test-only. The heads copy the trained
+      single-branch weights via :meth:`load_heads` (mirroring extract_features.py's
+      "build once, reload weights per seed" pattern) and are frozen, so the model
+      exposes no task parameters and there is nothing to fit.
+    - ``train_model=True``: the heads are reinitialized and left trainable, so they
+      can be learned jointly from scratch through the decision rule via
+      ``Trainer.fit``. Only the input width is taken from the checkpoint; the weights
+      are not copied.
+
+    Either way the heads supports neither the domain nor the D3G objectives: the
     domain metrics already live in each single-branch run folder and worst-group
     accuracy uses the ground-truth region, so no domain head is needed here.
 
-    The heads are built lazily in :meth:`load_heads`, which reads each branch's
-    feature width straight from the saved classifier weight -- so the feature
-    dimension is never configured, it is inferred from the checkpoint.
+    The heads are built in the constructor, which reads each branch's feature width
+    straight from the saved classifier weight -- so the feature dimension is never
+    configured, it is inferred from the checkpoint. The class prior P(y) is handled
+    entirely by the :class:`DecisionRule` (computed from metadata in its constructor).
     """
 
-    def __init__(self, num_task_labels: int, rule: DecisionRule):
+    def __init__(
+        self,
+        num_task_labels: int,
+        rule: DecisionRule,
+        hr_run_name: str,
+        lr_run_name: str,
+        run_idx: int = 0,
+        train_model: bool = False,
+    ):
         super().__init__()
         self.num_task_labels = num_task_labels
         self.rule = rule
-        # Built (and frozen) lazily from the checkpoints in load_heads().
+        # Stored under a leading underscore so it never shadows the train_model()
+        # method (an instance attribute of the same name would mask the method).
+        self._train_model = train_model
         self.hr_head: Optional[nn.Linear] = None
         self.lr_head: Optional[nn.Linear] = None
+        self._load_heads(hr_run_name, lr_run_name, run_idx)
+
+    def train_model(self) -> bool:
+        return self._train_model
 
     def supports_d3g_objective(self) -> bool:
         return False
@@ -260,26 +307,53 @@ class DecisionFusionModel(nn.Module, MultiScaleModel):
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         if self.hr_head is None or self.lr_head is None:
-            raise RuntimeError("DecisionFusionModel.load_heads() must be called before forward().")
+            raise RuntimeError("DecisionFusionModel heads were not built in the constructor.")
         hr_logits = self.hr_head(x["rgb"])
         lr_logits = self.lr_head(x["landsat"])
         return {"task_logits": self.rule(hr_logits, lr_logits)}
 
-    def load_heads(self, hr_state_dict: Dict[str, torch.Tensor], lr_state_dict: Dict[str, torch.Tensor]) -> None:
-        """Build the two frozen task heads from single-branch checkpoint state dicts.
+    def _load_heads(self, hr_run_name: str, lr_run_name: str, run_idx: int) -> None:
+        """Build this seed's two task heads from the single-branch checkpoints.
 
-        Both ``SingleBranchModel`` (HR) and ``SingleBranchLRModel`` (LR) store their
-        head under ``model.task_classifier.*`` (the ``model.`` prefix comes from the
-        ``MultiScaleClassificationModule`` wrapper). Each head's input width is read from
-        the saved weight, so the feature dimension never has to be configured.
+        The HR/LR heads come from the same single-branch runs that produced the cached
+        features, so ``hr_run_name`` / ``lr_run_name`` must be the experiment keys (e.g.
+        ``densenet_baseline``, which ``find_run_dir`` resolves to ``train_<key>``). The
+        head for seed ``run_idx`` is built and its feature width read straight from the
+        saved ``model.task_classifier.*`` weight (the ``model.`` prefix comes from the
+        ``MultiScaleClassificationModule`` wrapper), so the feature dimension is never
+        configured.
+
+        In test-only mode (``train_model=False``) the heads copy the trained weights and
+        are frozen. In training mode (``train_model=True``) only the shape is taken from
+        the checkpoint -- the heads are reinitialized and left trainable so they can be
+        learned jointly from scratch through the decision rule.
         """
-        device = self.rule.log_class_prior.device
-        self.hr_head = self._build_head(hr_state_dict).to(device)
-        self.lr_head = self._build_head(lr_state_dict).to(device)
-        # Frozen: loaded from trained checkpoints, never optimized.
-        self.requires_grad_(False)
+        hr_dir = find_run_dir(hr_run_name)
+        lr_dir = find_run_dir(lr_run_name)
+        if hr_dir is None or lr_dir is None:
+            raise FileNotFoundError(
+                f"Could not resolve head runs: hr_run_name={hr_run_name} -> {hr_dir}, "
+                f"lr_run_name={lr_run_name} -> {lr_dir}"
+            )
+        hr_ckpts = find_best_checkpoints(hr_dir)
+        lr_ckpts = find_best_checkpoints(lr_dir)
+        if run_idx >= len(hr_ckpts) or run_idx >= len(lr_ckpts):
+            raise IndexError(
+                f"Seed {run_idx} out of range (HR has {len(hr_ckpts)} seeds, LR has {len(lr_ckpts)})."
+            )
 
-    def _build_head(self, state_dict: Dict[str, torch.Tensor]) -> nn.Linear:
+        def state(path: Path) -> dict:
+            return torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
+
+        device = self.rule.log_class_prior.device
+        copy_weights = not self._train_model
+        self.hr_head = self._build_head(state(hr_ckpts[run_idx]), copy_weights=copy_weights).to(device)
+        self.lr_head = self._build_head(state(lr_ckpts[run_idx]), copy_weights=copy_weights).to(device)
+        if not self._train_model:
+            # Frozen: loaded from trained checkpoints, never optimized.
+            self.requires_grad_(False)
+
+    def _build_head(self, state_dict: Dict[str, torch.Tensor], copy_weights: bool) -> nn.Linear:
         weight = state_dict["model.task_classifier.weight"]
         bias = state_dict["model.task_classifier.bias"]
         out_dim, in_dim = weight.shape
@@ -288,13 +362,21 @@ class DecisionFusionModel(nn.Module, MultiScaleModel):
                 f"Head has {out_dim} outputs but num_task_labels={self.num_task_labels}."
             )
         head = nn.Linear(in_dim, out_dim)
-        with torch.no_grad():
-            head.weight.copy_(weight)
-            head.bias.copy_(bias)
+        if copy_weights:
+            with torch.no_grad():
+                head.weight.copy_(weight)
+                head.bias.copy_(bias)
         return head
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
-        return []
+        if not self._train_model:
+            return []
+        params: List[torch.nn.Parameter] = []
+        if self.hr_head is not None:
+            params += list(self.hr_head.parameters())
+        if self.lr_head is not None:
+            params += list(self.lr_head.parameters())
+        return params
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []
@@ -303,7 +385,7 @@ class DecisionFusionModel(nn.Module, MultiScaleModel):
         return []
 
 
-class FeatureFusionModel(nn.Module, MultiScaleModel):
+class FeatureFusionModel(MultiScaleModel):
     def __init__(
         self,
         branches: DualBranch,

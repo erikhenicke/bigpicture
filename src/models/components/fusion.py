@@ -1,9 +1,33 @@
-from typing import Literal
+from pathlib import Path
+from typing import Literal, Optional
 
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from abc import abstractmethod
+
+# Repo-root-relative default for the FMoW metadata CSV the class prior is read from.
+# fusion.py lives at src/models/components/, so parents[3] is the repo root.
+DEFAULT_PRIOR_METADATA = Path(__file__).resolve().parents[3] / "data" / "rgb_metadata_extended.csv"
+
+
+def compute_class_prior(metadata_path: Path, split: str, num_classes: int) -> torch.Tensor:
+    """Per-class frequency vector P(y) over ``split``, indexed by the ``y`` label.
+
+    Counts come from the FMoW metadata CSV (not model metrics); classes absent from
+    the split get a count of 0 (:class:`DecisionRule` clamps the log before use).
+    """
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Class-prior metadata CSV not found: {metadata_path}")
+    df = pd.read_csv(metadata_path, usecols=["split", "y"])
+    sub = df[df["split"] == split]
+    if sub.empty:
+        raise ValueError(f"No rows with split == {split!r} in {metadata_path}")
+    prior = torch.zeros(num_classes)
+    for cls, n in sub["y"].value_counts().items():
+        prior[int(cls)] = float(n)
+    return prior
 
 class Fusion(nn.Module):
     def __init__(self, hr_dim, lr_dim, out_dim):
@@ -159,8 +183,8 @@ class DecisionRule(nn.Module):
       - ``product``: ``q(y) = P(y|HR) * P(y|LR) / P(y)`` -- GeoPrior
         rule. Each trained classifier's posterior already embeds the train-set class
         prior ``P(y)``; multiplying the two double-counts it, so the product rule
-        divides ``P(y)`` back out once. ``P(y)`` is set via :meth:`set_class_prior`
-        (default uniform -> no correction, i.e. a plain product).
+        divides ``P(y)`` back out once. ``P(y)`` is computed from the FMoW metadata in
+        the constructor (``use_class_prior=False`` -> uniform, i.e. no correction).
 
     Set ``use_class_prior=False`` to drop the ``P(y)`` term entirely (an ablation):
     ``sum`` -> ``P(y|HR) + P(y|LR)``, ``max`` -> ``max(P(y|HR), P(y|LR))``,
@@ -173,7 +197,14 @@ class DecisionRule(nn.Module):
 
     VALID_RULES = ("sum", "max", "min", "product")
 
-    def __init__(self, rule: str, num_task_labels: int, use_class_prior: bool = True):
+    def __init__(
+        self,
+        rule: str,
+        num_task_labels: int,
+        use_class_prior: bool = True,
+        class_prior_split: str = "train",
+        class_prior_metadata: Optional[str] = None,
+    ):
         super().__init__()
         if rule not in self.VALID_RULES:
             raise ValueError(f"rule must be one of {self.VALID_RULES}, got {rule!r}")
@@ -182,8 +213,14 @@ class DecisionRule(nn.Module):
         # log P(y); zeros == uniform prior, which leaves the product rule unchanged
         # after the final renormalization.
         self.register_buffer("log_class_prior", torch.zeros(num_task_labels))
+        # Compute and set the class prior straight from the FMoW metadata. When the
+        # prior is disabled it stays uniform (the registered zeros above).
+        if use_class_prior:
+            metadata_path = Path(class_prior_metadata) if class_prior_metadata else DEFAULT_PRIOR_METADATA
+            prior = compute_class_prior(metadata_path, class_prior_split, num_task_labels)
+            self._set_class_prior(prior)
 
-    def set_class_prior(self, prior: torch.Tensor) -> None:
+    def _set_class_prior(self, prior: torch.Tensor) -> None:
         """Set the class prior P(y) (only used by the ``product`` rule).
 
         ``prior`` is a length-``num_task_labels`` vector of (unnormalized) class

@@ -2,6 +2,7 @@ source: raw  # raw | preprocessed | features
 fmow_dir: /home/henicke/data
 landsat_dir: /home/datasets4/FMoW_LandSat
 preprocessed_dir: FMoW_LandSat
+metadata_path: ${.landsat_dir}/fmow_landsat/rgb_metadata_extended.csv
 hr_feature_run_name: null
 lr_feature_run_name: null
 image_norm: null

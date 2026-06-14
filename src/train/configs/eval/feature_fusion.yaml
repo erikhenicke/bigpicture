@@ -17,7 +17,7 @@ primary_metrics:
 class-eval:
   baseline: baselines@densenet_baseline
   runs:
-    - film_om_gauss_pe_freq_lr_crop_14_9km
+    - spatial_extent@film_om_gauss_pe_freq_lr_crop_14_9km
     - film_om_gauss_pe_freq
 
 groups:

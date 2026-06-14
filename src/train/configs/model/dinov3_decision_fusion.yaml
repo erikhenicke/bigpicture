@@ -4,12 +4,16 @@ model:
 
   use_class_prior: true
   class_prior_split: train
+  # false: copy + freeze the trained single-branch heads (test only).
+  # true:  reinitialize the heads and train them jointly from scratch (Trainer.fit).
+  train_model: false
 
   rule:
     _target_: models.components.fusion.DecisionRule
     rule: ${model.decision_rule}
     num_task_labels: ${num_task_labels}
     use_class_prior: ${model.use_class_prior}
+    class_prior_split: ${model.class_prior_split}
 
   model:
     _target_: models.components.fusion_model.DecisionFusionModel
