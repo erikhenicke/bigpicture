@@ -21,3 +21,14 @@ experiments:
   
   dinov3_stacked:
     model: dinov3_stacked
+
+  # ---------------- Higher Learning Rate -------------------------
+  densenet_stacked_hlr:
+    model: densenet_stacked
+    overrides:
+      optim.optimizer.lr: 1e-3
+
+  dinov3_stacked_hlr:
+    model: dinov3_stacked
+    overrides:
+      optim.optimizer.lr: 1e-3
