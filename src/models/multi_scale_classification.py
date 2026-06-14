@@ -10,7 +10,7 @@ from torchmetrics.classification import MulticlassCalibrationError
 from torchmetrics.classification.accuracy import Accuracy
 import wandb
 
-from models.components.fusion_model import (
+from models.components.fusion_models import (
     FeatureFusionModel,
     MultiScaleModel,
 )
