@@ -65,10 +65,7 @@ class ConcatFusion(Fusion):
         self.intermediate_dim = (hr_dim + lr_dim) // 2
 
         self.fusion = nn.Sequential(
-            nn.Linear(hr_dim + lr_dim, self.intermediate_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.intermediate_dim, self.out_dim),
+            nn.Linear(hr_dim + lr_dim, self.out_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
         )
