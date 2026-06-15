@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=robolab
-#SBATCH --nodelist=gaia7
+#SBATCH --nodelist=gaia4
 #SBATCH --job-name=extract_features
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -21,8 +21,10 @@ EXPERIMENTS=(
   # train_dinov3_baseline
   # train_dinov3_lr_baseline
   # train_dinov3_lr_baseline_no_domain
-  train_satclip_le_enc_baseline
-  train_satclip_le_enc_baseline_no_domain
+  # train_satclip_le_enc_baseline
+  # train_satclip_le_enc_baseline_no_domain
+  train_satclip_le_enc_baseline_l_40
+  train_satclip_le_enc_baseline_l_40_no_domain
 )
 
 for experiment in "${EXPERIMENTS[@]}"; do
