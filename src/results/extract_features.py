@@ -248,8 +248,8 @@ def main() -> None:
     branch = resolve_branch(module.model)
     module.to(device)
 
-    dataset, preprocessed_dir = build_dataset(cfg)
-    out_base = resolve_output_base(cfg, preprocessed_dir)
+    dataset = build_dataset(cfg)
+    out_base = resolve_output_base(cfg)
     splits = list(dataset._split_dict.keys())
 
     subdir = branch[0]
