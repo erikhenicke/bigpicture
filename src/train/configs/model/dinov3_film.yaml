@@ -1,0 +1,48 @@
+# @package _global_
+model:
+  landsat_in_channels: 6
+  hr_pretrained: true
+  lr_pretrained: true
+  landsat_channel_init: average
+
+  hr_encoder:
+    _target_: models.components.branches.DINOv3Branch
+    in_channels: 3
+    pretrained: ${model.hr_pretrained}
+    model_size: base
+
+  lr_encoder:
+    _target_: models.components.branches.DINOv3Branch
+    in_channels: ${model.landsat_in_channels}
+    pretrained: ${model.lr_pretrained}
+    landsat_channel_init: ${model.landsat_channel_init}
+    model_size: base
+    bgr_input: true 
+
+  branches:
+    _target_: models.components.branches.DualBranch
+    landsat_channels: ${model.landsat_in_channels}
+
+  fusion:
+    _target_: models.components.fusion.FilmFusion
+    hr_dim: 768
+    lr_dim: 768
+    out_dim: 768
+    pre_fusion_relu: false
+
+  model:
+    _target_: models.components.fusion_model.FeatureFusionModel
+
+  lr_domain_loss_coeff: 0.1667
+  domain_optimizer_lr_factor: 0.1
+  detach_lr_for_task: false
+
+run_name: train-dinov3-film
+data:
+  batch_size: 32
+  num_workers: 8
+trainer:
+  max_epochs: 10
+optim:
+  optimizer:
+    lr: 1e-4

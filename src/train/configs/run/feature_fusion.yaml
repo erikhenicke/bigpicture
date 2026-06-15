@@ -271,3 +271,21 @@ experiments:
       trainer.branch_ablation: true
       trainer.alternating_freeze: true
       trainer.alternating_freeze_period: 2
+
+  # ----------------- DINOv3 Backbone ----------------------
+  dinov3_film:
+    model: dinov3_film
+    overrides:
+      trainer.branch_ablation: true
+
+  dinov3_film_no_domain:
+    model: dinov3_film
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      trainer.branch_ablation: true
+
+  dinov3_film_om_gauss_pe_freq:
+    model: dinov3_film
+    overrides:
+      spatial: om_gauss_pe_freq
+      trainer.branch_ablation: true
