@@ -7,10 +7,45 @@ from wilds.datasets.fmow_dataset import categories as TASK_CLASSES
 
 
 REGIONS = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania", 5: "Other"}
-FIVE_REGION_NAMES = ["Asia", "Europe", "Africa", "Americas", "Oceania"]
+
+# Per-region reporting allow-list: which regions get an individually logged metric.
+# "Other" is intentionally excluded in every setting (kept for training, not
+# reported); Asia is listed but only has samples to report on outside LAO.
+DOMAIN_NAMES = ["Asia", "Europe", "Africa", "Americas", "Oceania"]
 
 # Number of classes to consider for top-k task accuracy.
 TOPK = 5
+
+
+def domain_label_names(leave_asia_out: bool) -> List[str]:
+    """Label space of the domain classifier: every region present during training.
+
+    Drives the head's output classes and the target remap. The full setting uses
+    all six WILDS regions; Leave-Asia-Out drops only Asia at index 0 
+    (absent from training). "Other" is kept in both cases as it 
+    is a real trained class. Which regions are surfaced in logs is a separate
+    decision: :data:`DOMAIN_NAMES` drops "Other" from per-region reporting in both
+    settings.
+    """
+    regions = {k: v for k, v in REGIONS.items() if k != 0} if leave_asia_out else REGIONS
+    return list(regions.values())
+
+
+def build_domain_remap(domain_names: List[str]) -> torch.Tensor:
+    """Map raw WILDS region codes to contiguous domain-class indices.
+
+    Region codes whose name is not in ``domain_names`` map to ``-1``. Under
+    Leave-Asia-Out only Asia maps to ``-1``; it never appears in training (so the
+    domain loss never sees it) and is masked out of the domain metrics at eval,
+    where domain prediction is meaningless. The full-region case yields the
+    identity map.
+    """
+    name_to_class = {name: idx for idx, name in enumerate(domain_names)}
+    remap = torch.full((len(REGIONS),), -1, dtype=torch.long)
+    for code, name in REGIONS.items():
+        if name in name_to_class:
+            remap[code] = name_to_class[name]
+    return remap
 
 def make_eval_state() -> Dict[str, Any]:
     """
@@ -148,7 +183,7 @@ def compute_final_lr_domain_metrics(state: Dict[str, Any], region_names: List[st
     targets = torch.cat(state["lr_domain_targets"])
     metrics: Dict[str, float] = {}
     for rid, name in enumerate(region_names):
-        if name not in FIVE_REGION_NAMES:
+        if name not in DOMAIN_NAMES:
             continue
         mask = targets == rid
         if mask.sum() == 0:
@@ -163,7 +198,7 @@ def compute_final_hr_domain_metrics(state: Dict[str, Any], region_names: List[st
     targets = torch.cat(state["hr_domain_targets"])
     metrics: Dict[str, float] = {}
     for rid, name in enumerate(region_names):
-        if name not in FIVE_REGION_NAMES:
+        if name not in DOMAIN_NAMES:
             continue
         mask = targets == rid
         if mask.sum() == 0:
@@ -184,7 +219,7 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     per_region_task_loss: Dict[str, float] = {}
     for rid, rid_total in state["region_total"].items():
         region_name = region_names[rid]
-        if rid_total == 0 or region_name not in FIVE_REGION_NAMES:
+        if rid_total == 0 or region_name not in DOMAIN_NAMES:
             continue
         per_region_task_acc[region_name] = state["task_region_correct"][rid] / rid_total
         per_region_top5_task_acc[region_name] = state["task_top5_region_correct"][rid] / rid_total
@@ -218,7 +253,7 @@ def compute_final_task_class_metrics(state: Dict[str, Any], region_names: List[s
         if total == 0:
             continue
         region_name = region_names[rid] if rid < len(region_names) else None
-        if region_name not in FIVE_REGION_NAMES:
+        if region_name not in DOMAIN_NAMES:
             continue
         class_name = TASK_CLASSES[c_int]
         metrics[f"region-{region_name.lower()}-class-{class_name}-task-acc"] = (
@@ -239,7 +274,7 @@ def compute_final_branch_ablation_metrics(state: Dict[str, Any], region_names: L
         worst_group = 1.0
         for rid, rid_total in state["region_total"].items():
             name = region_names[rid] if rid < len(region_names) else None
-            if rid_total == 0 or name not in FIVE_REGION_NAMES:
+            if rid_total == 0 or name not in DOMAIN_NAMES:
                 continue
             acc = state[region_correct_key][rid] / rid_total
             metrics[f"region-{name.lower()}-{prefix}-task-acc"] = acc
@@ -326,16 +361,23 @@ def compute_final_eval_metrics(
     loader_name: str,
     region_names: List[str],
     ece_metric: MulticlassCalibrationError,
+    domain_names: List[str],
     include_class_breakdown: bool = False,
 ) -> Dict[str, float]:
     """Compute final metrics for the evaluation phase.
 
     Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
 
+    :param region_names: Full WILDS region set, used to name the task/region
+        metrics. Kept distinct from ``domain_names`` so e.g. Asia is still reported
+        at test time under Leave-Asia-Out.
+    :param domain_names: Label space of the domain classifier, used to name the
+        domain-accuracy metrics. The full region set in the default setting; the
+        smaller trained-region space under Leave-Asia-Out, matching the remapped
+        domain targets stored in ``state``.
     :param include_class_breakdown: If True, also emit the high-cardinality
         per-class (overall and per-region) task accuracies. Used at test time only.
     """
-
     metrics = {}
     metrics.update({
         f"{loader_name}-{k}": v for k, v in compute_final_task_metrics(state, region_names, ece_metric).items()
@@ -346,11 +388,11 @@ def compute_final_eval_metrics(
         })
     if state["lr_domain_preds"]:  # Empty, if no LR domain classifier
         metrics.update({
-            f"{loader_name}-{k}": v for k, v in compute_final_lr_domain_metrics(state, region_names).items()
+            f"{loader_name}-{k}": v for k, v in compute_final_lr_domain_metrics(state, domain_names).items()
         })
     if state["hr_domain_preds"]:
         metrics.update({
-            f"{loader_name}-{k}": v for k, v in compute_final_hr_domain_metrics(state, region_names).items()
+            f"{loader_name}-{k}": v for k, v in compute_final_hr_domain_metrics(state, domain_names).items()
         })
 
     return metrics

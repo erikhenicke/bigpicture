@@ -9,7 +9,6 @@ model:
 
   lr_encoder:
     _target_: models.components.branches.DomainEmbeddingBranch
-    num_domains: ${num_domain_labels}
     embed_dim: 512
 
   branches:

@@ -51,10 +51,8 @@ from results.utils import (
     resolve_experiments,
 )
 
-# Regions that carry per-region metrics (mirrors utils.FIVE_REGION_NAMES; "Other"
-# is region id 5 and is excluded from region breakdowns). The list order is the
-# region-id order in the FMoW metadata (0=Asia .. 4=Oceania).
-FIVE_REGION_NAMES = ["Asia", "Europe", "Africa", "Americas", "Oceania"]
+from models.utils import DOMAIN_NAMES
+
 OOD_PREFIX = "test/test-od"
 TOP_N = 5
 GAIN_COLOR = "#2ca02c"
@@ -72,7 +70,7 @@ def worst_region(metrics: dict[str, float]) -> str | None:
     """Region with the lowest OOD top-1 task accuracy, or ``None`` if unavailable."""
     region_accs = {
         r: metrics[f"{OOD_PREFIX}-region-{r.lower()}-task-acc"]
-        for r in FIVE_REGION_NAMES
+        for r in DOMAIN_NAMES
         if f"{OOD_PREFIX}-region-{r.lower()}-task-acc" in metrics
     }
     if not region_accs:
@@ -122,7 +120,7 @@ def load_test_class_counts(
     test = df[df["split"] == "test"]
     overall = {str(k): int(v) for k, v in test["category"].value_counts().items()}
     per_region: dict[str, dict[str, int]] = {}
-    for rid, name in enumerate(FIVE_REGION_NAMES):
+    for rid, name in enumerate(DOMAIN_NAMES):
         sub = test[test["region"] == rid]
         per_region[name] = {str(k): int(v) for k, v in sub["category"].value_counts().items()}
     return overall, per_region

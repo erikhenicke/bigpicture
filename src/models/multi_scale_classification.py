@@ -22,7 +22,8 @@ from models.utils import (
     update_hr_domain_metrics,
     compute_final_eval_metrics,
     compute_final_branch_ablation_metrics,
-    REGIONS,
+    build_domain_remap,
+    domain_label_names,
 )
 
 
@@ -60,6 +61,7 @@ class MultiScaleClassificationModule(LightningModule):
         branch_ablation: bool = False,
         alternating_freeze: bool = False,
         alternating_freeze_period: int = 1,
+        leave_asia_out: bool = False,
     ) -> None:
         """Initialize a `MultiScaleClassificationModule`.
 
@@ -115,7 +117,21 @@ class MultiScaleClassificationModule(LightningModule):
         self.task_criterion_per_sample = nn.CrossEntropyLoss(
             reduction="none", label_smoothing=self.hparams.label_smoothing
         )
+        # Domain targets are raw WILDS region codes, remapped to the (possibly
+        # reduced) domain label space. Under Leave-Asia-Out the only dropped region
+        # is Asia, which is absent from training, so the loss never sees the -1
+        # sentinel and needs no ignore_index; "Other" remains a normal class.
         self.domain_criterion = nn.CrossEntropyLoss()
+        self.domain_names = domain_label_names(self.hparams.leave_asia_out)
+        if self.hparams.num_domain_labels != len(self.domain_names):
+            raise ValueError(
+                f"num_domain_labels ({self.hparams.num_domain_labels}) must match the "
+                f"domain label space size ({len(self.domain_names)}) implied by "
+                f"leave_asia_out={self.hparams.leave_asia_out}."
+            )
+        self.register_buffer(
+            "domain_remap", build_domain_remap(self.domain_names), persistent=False
+        )
 
         self.train_task_acc = Accuracy(
             task="multiclass", num_classes=self.hparams.num_task_labels
@@ -321,11 +337,21 @@ class MultiScaleClassificationModule(LightningModule):
         preds = torch.argmax(logits, dim=1)
         return loss, preds, logits
 
+    def _domain_targets(self, regions: torch.Tensor) -> torch.Tensor:
+        """Map raw WILDS region codes to the domain-classifier label space.
+
+        Under Leave-Asia-Out only Asia falls outside the label space and maps to
+        ``-1``; it is absent from training and is masked out of the domain metrics
+        at eval. "Other" is a normal class. With the full region set this is the
+        identity map.
+        """
+        return self.domain_remap.to(regions.device)[regions]
+
     def log_lr_domain_metrics(
         self,
         lr_domain_loss: torch.Tensor,
         lr_domain_preds: torch.Tensor,
-        regions: torch.Tensor,
+        domain_targets: torch.Tensor,
     ) -> None:
         self.train_lr_domain_loss(lr_domain_loss)
         self.log(
@@ -335,15 +361,15 @@ class MultiScaleClassificationModule(LightningModule):
             on_epoch=True,
             prog_bar=False,
         )
-        self.train_lr_domain_acc.update(lr_domain_preds, regions)
+        self.train_lr_domain_acc.update(lr_domain_preds, domain_targets)
         self._train_lr_domain_preds.append(lr_domain_preds.cpu())
-        self._train_lr_domain_targets.append(regions.cpu())
+        self._train_lr_domain_targets.append(domain_targets.cpu())
 
     def log_hr_domain_metrics(
         self,
         hr_domain_loss: torch.Tensor,
         hr_domain_preds: torch.Tensor,
-        regions: torch.Tensor,
+        domain_targets: torch.Tensor,
     ) -> None:
         self.train_hr_domain_loss(hr_domain_loss)
         self.log(
@@ -353,9 +379,9 @@ class MultiScaleClassificationModule(LightningModule):
             on_epoch=True,
             prog_bar=False,
         )
-        self.train_hr_domain_acc.update(hr_domain_preds, regions)
+        self.train_hr_domain_acc.update(hr_domain_preds, domain_targets)
         self._train_hr_domain_preds.append(hr_domain_preds.cpu())
-        self._train_hr_domain_targets.append(regions.cpu())
+        self._train_hr_domain_targets.append(domain_targets.cpu())
 
     def log_task_metrics(
         self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor
@@ -389,9 +415,10 @@ class MultiScaleClassificationModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
-        assert all([module.training for module in self.model.modules()]), (
-            "Model is not in training mode during training step!"
-        )
+        if not all([module.training for module in self.model.modules()]):
+            raise ValueError(
+                "Model is not in training mode during training step!"
+            )
 
         x, y, metadata = batch
         regions = metadata[:, self.hparams.domain_index].long()
@@ -425,11 +452,19 @@ class MultiScaleClassificationModule(LightningModule):
 
         backbone_loss = self.task_loss_coeff * task_loss
 
+        if self.has_lr_domain_classifier or self.has_hr_domain_classifier:
+            domain_targets = self._domain_targets(regions)
+            if not domain_targets.ge(0).all():
+                raise ValueError(
+                    "Domain target -1 during training: an out-of-label-space region "
+                    "(e.g. Asia under Leave-Asia-Out) leaked into the train split."
+                )
+
         if self.has_lr_domain_classifier:
             lr_domain_logits = result["lr_domain_logits"]
-            lr_domain_loss = self.domain_criterion(lr_domain_logits, regions)
+            lr_domain_loss = self.domain_criterion(lr_domain_logits, domain_targets)
             lr_domain_preds = lr_domain_logits.argmax(dim=1)
-            self.log_lr_domain_metrics(lr_domain_loss, lr_domain_preds, regions)
+            self.log_lr_domain_metrics(lr_domain_loss, lr_domain_preds, domain_targets)
             backbone_loss = backbone_loss + self.lr_domain_loss_coeff * lr_domain_loss
 
         if self.use_d3g_objective:
@@ -450,9 +485,9 @@ class MultiScaleClassificationModule(LightningModule):
 
         if self.has_hr_domain_classifier:
             hr_domain_logits = result["hr_domain_logits"]
-            hr_domain_loss = self.domain_criterion(hr_domain_logits, regions)
+            hr_domain_loss = self.domain_criterion(hr_domain_logits, domain_targets)
             hr_domain_preds = hr_domain_logits.argmax(dim=1)
-            self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, regions)
+            self.log_hr_domain_metrics(hr_domain_loss, hr_domain_preds, domain_targets)
             self.manual_backward(hr_domain_loss)
 
         task_opt.step()
@@ -498,7 +533,7 @@ class MultiScaleClassificationModule(LightningModule):
         if self._train_lr_domain_preds:
             per_class = self.train_lr_domain_acc.compute()
             for rid, acc in enumerate(per_class):
-                name = REGIONS[rid].lower()
+                name = self.domain_names[rid].lower()
                 self.log(f"train/train-lr-domain-acc-{name}", acc)
             preds = torch.cat(self._train_lr_domain_preds)
             targets = torch.cat(self._train_lr_domain_targets)
@@ -508,7 +543,7 @@ class MultiScaleClassificationModule(LightningModule):
                 targets,
                 "train/lr-domain-confusion-matrix",
                 "lr",
-                list(REGIONS.values()),
+                self.domain_names,
                 "Train",
             )
 
@@ -516,7 +551,7 @@ class MultiScaleClassificationModule(LightningModule):
         if self.has_hr_domain_classifier and self._train_hr_domain_preds:
             per_class = self.train_hr_domain_acc.compute()
             for rid, acc in enumerate(per_class):
-                name = REGIONS[rid].lower()
+                name = self.domain_names[rid].lower()
                 self.log(f"train/train-hr-domain-acc-{name}", acc)
             preds = torch.cat(self._train_hr_domain_preds)
             targets = torch.cat(self._train_hr_domain_targets)
@@ -526,7 +561,7 @@ class MultiScaleClassificationModule(LightningModule):
                 targets,
                 "train/hr-domain-confusion-matrix",
                 "hr",
-                list(REGIONS.values()),
+                self.domain_names,
                 "Train",
             )
 
@@ -586,15 +621,26 @@ class MultiScaleClassificationModule(LightningModule):
             self.hparams.domain_index,
         )
 
+        if self.has_lr_domain_classifier or self.has_hr_domain_classifier:
+            # The val splits exclude Asia (LAO drops it), so every sample maps into
+            # the domain label space; a -1 would mean an out-of-space region (e.g.
+            # Asia) leaked into a val split -- fail loudly rather than skip.
+            domain_targets = self._domain_targets(regions)
+            if not domain_targets.ge(0).all():
+                raise ValueError(
+                    "Domain target -1 during validation: an out-of-label-space region "
+                    "(e.g. Asia under Leave-Asia-Out) leaked into a val split."
+                )
+
         if self.has_lr_domain_classifier:
             lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
             update_lr_domain_metrics(
-                self._val_state[dataloader_idx], lr_domain_preds, regions
+                self._val_state[dataloader_idx], lr_domain_preds, domain_targets
             )
         if self.has_hr_domain_classifier:
             hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
             update_hr_domain_metrics(
-                self._val_state[dataloader_idx], hr_domain_preds, regions
+                self._val_state[dataloader_idx], hr_domain_preds, domain_targets
             )
 
         if self.do_branch_ablation:
@@ -611,6 +657,7 @@ class MultiScaleClassificationModule(LightningModule):
                 loader_name,
                 region_names,
                 self.val_ece_metrics[idx],
+                domain_names=self.domain_names,
             )
             all_metrics.update({f"val/{k}": v for k, v in metrics.items()})
             if not self.trainer.sanity_checking:
@@ -622,7 +669,7 @@ class MultiScaleClassificationModule(LightningModule):
                         lr_targets,
                         f"val/{loader_name}-lr-domain-confusion-matrix",
                         "lr",
-                        list(REGIONS.values()),
+                        self.domain_names,
                         loader_name,
                     )
                 if state["hr_domain_preds"]:
@@ -633,7 +680,7 @@ class MultiScaleClassificationModule(LightningModule):
                         hr_targets,
                         f"val/{loader_name}-hr-domain-confusion-matrix",
                         "hr",
-                        list(REGIONS.values()),
+                        self.domain_names,
                         loader_name,
                     )
                 if self.do_branch_ablation:
@@ -710,14 +757,24 @@ class MultiScaleClassificationModule(LightningModule):
 
         if self.has_lr_domain_classifier:
             lr_domain_preds = result["lr_domain_logits"].argmax(dim=1)
-            update_lr_domain_metrics(
-                self._test_state[dataloader_idx], lr_domain_preds, regions
-            )
+            domain_targets = self._domain_targets(regions)
+            valid = domain_targets >= 0
+            if valid.any():  # all-masked on the Asia-only eval split -> skip
+                update_lr_domain_metrics(
+                    self._test_state[dataloader_idx],
+                    lr_domain_preds[valid],
+                    domain_targets[valid],
+                )
         if self.has_hr_domain_classifier:
             hr_domain_preds = result["hr_domain_logits"].argmax(dim=1)
-            update_hr_domain_metrics(
-                self._test_state[dataloader_idx], hr_domain_preds, regions
-            )
+            domain_targets = self._domain_targets(regions)
+            valid = domain_targets >= 0
+            if valid.any():  # all-masked on the Asia-only eval split -> skip
+                update_hr_domain_metrics(
+                    self._test_state[dataloader_idx],
+                    hr_domain_preds[valid],
+                    domain_targets[valid],
+                )
 
         if self.do_branch_ablation:
             self._branch_ablation_step(x, y, regions, self._test_state[dataloader_idx])
@@ -734,6 +791,7 @@ class MultiScaleClassificationModule(LightningModule):
                 region_names,
                 self.test_ece_metrics[idx],
                 include_class_breakdown=True,
+                domain_names=self.domain_names,
             )
             all_metrics.update({f"test/{k}": v for k, v in metrics.items()})
             if state["lr_domain_preds"]:
@@ -744,7 +802,7 @@ class MultiScaleClassificationModule(LightningModule):
                     lr_targets,
                     f"test/{loader_name}-lr-domain-confusion-matrix",
                     "lr",
-                    region_names,
+                    self.domain_names,
                     loader_name,
                 )
             if state["hr_domain_preds"]:
@@ -755,7 +813,7 @@ class MultiScaleClassificationModule(LightningModule):
                     hr_targets,
                     f"test/{loader_name}-hr-domain-confusion-matrix",
                     "hr",
-                    region_names,
+                    self.domain_names,
                     loader_name,
                 )
             if self.do_branch_ablation:

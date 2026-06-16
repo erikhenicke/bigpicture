@@ -15,6 +15,7 @@ import wandb
 from dataset.fmow_multiscale_dataset import FMoWMultiScaleDataset
 from models.components.spatial_encoding import SpatialEncoding
 from models.multi_scale_classification import MultiScaleClassificationModule
+from models.utils import domain_label_names
 from train.utils import make_multiscale_dataset, make_multiscale_loader
 
 
@@ -130,13 +131,18 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
 
     model_target = cfg.model.model.get("_target_", "")
 
+    leave_asia_out = cfg.data.get("leave_asia_out", False)
+    num_domain_labels = (
+        len(domain_label_names(leave_asia_out))
+    )
+
     if model_target.endswith("SingleBranchModel"):
         hr_encoder = instantiate(cfg.model.hr_encoder)
         model = instantiate(
             cfg.model.model,
             encoder=hr_encoder,
             num_task_labels=cfg.num_task_labels,
-            num_domain_labels=cfg.num_domain_labels,
+            num_domain_labels=num_domain_labels,
         )
     elif model_target.endswith("SingleBranchLRModel"):
         lr_encoder = instantiate(cfg.model.lr_encoder)
@@ -144,7 +150,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
             cfg.model.model,
             encoder=lr_encoder,
             num_task_labels=cfg.num_task_labels,
-            num_domain_labels=cfg.num_domain_labels,
+            num_domain_labels=num_domain_labels,
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
             landsat_channels=cfg.model.landsat_in_channels,
         )
@@ -154,7 +160,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
             cfg.model.model,
             encoder=encoder,
             num_task_labels=cfg.num_task_labels,
-            num_domain_labels=cfg.num_domain_labels,
+            num_domain_labels=num_domain_labels,
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
             landsat_channels=cfg.model.landsat_in_channels,
         )
@@ -183,7 +189,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
             cfg.model.model,
             encoder=encoder,
             num_task_labels=cfg.num_task_labels,
-            num_domain_labels=cfg.num_domain_labels,
+            num_domain_labels=num_domain_labels,
             lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
         )
     else:
@@ -211,14 +217,18 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
             )
         else:
             hr_encoder = instantiate(cfg.model.hr_encoder)
-            lr_encoder = instantiate(cfg.model.lr_encoder)
+            lr_target = cfg.model.lr_encoder.get("_target_", "")
+            if lr_target.endswith("DomainEmbeddingBranch"):
+                lr_encoder = instantiate(cfg.model.lr_encoder, num_domains=num_domain_labels)
+            else:
+                lr_encoder = instantiate(cfg.model.lr_encoder)
             branches = instantiate(cfg.model.branches, hr_encoder=hr_encoder, lr_encoder=lr_encoder)
         if model_target.endswith("D3GModel"):
             model = instantiate(
                 cfg.model.model,
                 branches=branches,
                 num_task_labels=cfg.num_task_labels,
-                num_domain_labels=cfg.num_domain_labels,
+                num_domain_labels=num_domain_labels,
                 lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
                 consistency_loss_coeff=cfg.model.consistency_loss_coeff,
                 learnable_relation_coeff=cfg.model.learnable_relation_coeff,
@@ -233,7 +243,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
                 branches=branches,
                 fusion=fusion,
                 num_task_labels=cfg.num_task_labels,
-                num_domain_labels=cfg.num_domain_labels,
+                num_domain_labels=num_domain_labels,
                 lr_domain_loss_coeff=cfg.model.lr_domain_loss_coeff,
                 detach_lr_for_task=cfg.model.detach_lr_for_task,
             )
@@ -257,7 +267,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
         domain_optimizer=domain_optimizer_factory,
         domain_scheduler=domain_scheduler_factory,
         num_task_labels=cfg.num_task_labels,
-        num_domain_labels=cfg.num_domain_labels,
+        num_domain_labels=num_domain_labels,
         domain_index=cfg.domain_index,
         ece_n_bins=cfg.trainer.ece_n_bins,
         val_loader_names=list(cfg.data.val_loader_names),
@@ -267,6 +277,7 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
         branch_ablation=cfg.trainer.branch_ablation,
         alternating_freeze=cfg.trainer.alternating_freeze,
         alternating_freeze_period=cfg.trainer.alternating_freeze_period,
+        leave_asia_out=leave_asia_out,
     )
 
 
