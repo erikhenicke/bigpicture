@@ -1,0 +1,34 @@
+# @package _global_
+model:
+  hr_pretrained: true
+
+  hr_encoder:
+    _target_: models.components.branches.DenseNetBranch
+    in_channels: 3
+    pretrained: ${model.hr_pretrained}
+
+  lr_encoder:
+    _target_: models.components.branches.DomainEmbeddingBranch
+    num_domains: ${num_domain_labels}
+    embed_dim: 512
+
+  branches:
+    _target_: models.components.branches.DomainDualBranch
+
+  fusion:
+    _target_: models.components.fusion.GeoPriorFusion
+    hr_dim: 1024
+    lr_dim: 512
+    out_dim: 62
+    pre_fusion_relu: true
+
+  model:
+    _target_: models.components.fusion_model.FeatureFusionModel
+
+  lr_domain_loss_coeff: 0.1667
+  domain_optimizer_lr_factor: 0.1
+  detach_lr_for_task: false
+
+run_name: train-densenet-domain-geoprior
+data:
+  batch_size: 80

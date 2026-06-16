@@ -95,6 +95,7 @@ def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[D
         hr_feature_run_name=cfg.data.get("hr_feature_run_name", None),
         lr_feature_run_name=cfg.data.get("lr_feature_run_name", None),
         feature_run_idx=run_idx if cfg.data.get("source", None) == "features" else None,
+        leave_asia_out=cfg.data.get("leave_asia_out", False),
         **spatial_kwargs,
     )
     dataset_eval = make_multiscale_dataset(
@@ -109,6 +110,7 @@ def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[D
         hr_feature_run_name=cfg.data.get("hr_feature_run_name", None),
         lr_feature_run_name=cfg.data.get("lr_feature_run_name", None),
         feature_run_idx=run_idx if cfg.data.get("source", None) == "features" else None,
+        leave_asia_out=cfg.data.get("leave_asia_out", False),
         **spatial_kwargs,
     )
 

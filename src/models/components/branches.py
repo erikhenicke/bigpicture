@@ -456,6 +456,51 @@ class CoordDualBranch(nn.Module):
         return hr_features, lr_features
 
 
+class DomainEmbeddingBranch(nn.Module):
+    """Location-encoder ablation from Crasto & Rolf (2026), Sec. 5.3.
+
+    Replaces the continuous location encoder with a domain encoder that maps each
+    discrete domain label to a learnable embedding used for conditioning. The
+    auxiliary domain-prediction loss is applied to these embeddings downstream (via
+    ``lr_domain_classifier``) to keep the per-domain vectors separated and avoid
+    collapse. Output dimension is matched to the location encoder it ablates against
+    so the fusion module is identical.
+
+    This requires the domain label as input at inference
+    time as well as during training.
+    """
+
+    def __init__(self, num_domains: int = 6, embed_dim: int = 512):
+        super().__init__()
+        self.embedding = nn.Embedding(num_domains, embed_dim)
+        self._embed_dim = embed_dim
+
+    @property
+    def out_dim(self) -> int:
+        return self._embed_dim
+
+    def forward(self, domain_ids: torch.Tensor) -> torch.Tensor:
+        return self.embedding(domain_ids.long())
+
+
+class DomainDualBranch(nn.Module):
+    """Pairs an HR image encoder with a :class:`DomainEmbeddingBranch`.
+
+    Mirrors :class:`CoordDualBranch` but conditions on the discrete domain label
+    (``x["domain"]``) instead of geographic coordinates (``x["coords"]``).
+    """
+
+    def __init__(self, hr_encoder: Branch, lr_encoder: DomainEmbeddingBranch):
+        super().__init__()
+        self.hr_encoder = hr_encoder
+        self.lr_encoder = lr_encoder
+
+    def forward(self, x: Dict[str, torch.Tensor]) -> torch.Tensor:
+        hr_features = self.hr_encoder(x["rgb"])
+        lr_features = self.lr_encoder(x["domain"])
+        return hr_features, lr_features
+
+
 if __name__ == "__main__":
     # Example usage
     hr_branch = DeitBranch(in_channels=3, pretrained=True)
