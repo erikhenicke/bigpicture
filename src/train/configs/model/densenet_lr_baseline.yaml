@@ -12,7 +12,7 @@ model:
     bgr_input: false
 
   model:
-    _target_: models.components.fusion_model.SingleBranchLRModel
+    _target_: models.components.fusion_models.SingleBranchLRModel
 
   lr_domain_loss_coeff: 0.1667
 
