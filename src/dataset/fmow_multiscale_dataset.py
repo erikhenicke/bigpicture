@@ -547,28 +547,6 @@ class FMoWMultiScaleDataset(WILDSDataset):
             ).squeeze(0)
         return landsat_tensor
 
-    def get_input(self, idx):
-        file_idx = self.full_idxs[idx]
-        coords_start = self._metadata_fields.index("lat")
-        coords = self._metadata_array[idx, coords_start:coords_start + 2]
-        img_span_idx = self._metadata_fields.index("img_span_km")
-        img_span_km = self._metadata_array[idx, img_span_idx]
-        spatial = self._build_spatial_tensors(img_span_km.item())
-        region_idx = self._metadata_fields.index("region")
-        return {
-            "rgb": self.get_rgb_input(file_idx),
-            "landsat": self.get_landsat_input(file_idx),
-            "coords": coords,
-            "domain": self._metadata_array[idx, region_idx],
-            "img_span_km": img_span_km,
-            **spatial,
-        }
-
-    def eval(self, y_pred, y_true, metadata, prediction_fn=None):
-        """Reuse evaluation from base FMoW dataset"""
-        return self.base_dataset.eval(y_pred, y_true, metadata, prediction_fn)
-
-
 def collate_multiscale(batch):
     xs, ys, metas = zip(*batch)
     keys = xs[0].keys()
