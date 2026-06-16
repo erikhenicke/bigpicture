@@ -15,7 +15,9 @@ import argparse
 import csv
 import sys
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import torch
 import yaml
 from lightning import Trainer, seed_everything
@@ -49,7 +51,109 @@ def find_run_dir(exp_key: str) -> Path | None:
     return candidates[0][2]
 
 
-def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
+def attach_logit_collector(module) -> dict[int, dict[str, Any]]:
+    """Capture the model's per-sample task logits during trainer.test().
+
+    The module's test path only folds logits into aggregate metric counters; the
+    raw logits are never kept. Here we wrap two of its methods (without touching
+    the model code) to record them:
+
+      - ``_shared_forward`` stashes the task logits of the batch it just ran.
+      - ``test_step`` pairs those stashed logits with the batch's labels and
+        domain (region) codes, bucketed by ``dataloader_idx``.
+
+    Because the wrappers only read the forward result and the batch, they do not
+    change what test_step computes, so the reproduced metrics are unaffected. The
+    returned dict is filled in place as testing proceeds, keyed by dataloader
+    index (matching ``module.test_loader_names``).
+    """
+    collected: dict[int, dict[str, list[torch.Tensor]]] = {}
+    last_logits: dict[str, torch.Tensor] = {}
+
+    orig_shared_forward = module._shared_forward
+
+    def wrapped_shared_forward(x, region_ids=None):
+        result = orig_shared_forward(x, region_ids=region_ids)
+        last_logits["task_logits"] = result["task_logits"].detach().float().cpu()
+        return result
+
+    module._shared_forward = wrapped_shared_forward
+
+    orig_test_step = module.test_step
+
+    def wrapped_test_step(batch, batch_idx, dataloader_idx=0):
+        out = orig_test_step(batch, batch_idx, dataloader_idx)
+        _, y, metadata = batch
+        regions = metadata[:, module.hparams.domain_index].long()
+        bucket = collected.setdefault(
+            dataloader_idx, {"logits": [], "labels": [], "domains": []}
+        )
+        bucket["logits"].append(last_logits["task_logits"])
+        bucket["labels"].append(y.detach().cpu())
+        bucket["domains"].append(regions.detach().cpu())
+        return out
+
+    module.test_step = wrapped_test_step
+    return collected
+
+
+def loader_file_indices(loader) -> np.ndarray:
+    """Recover the dataset file index of every sample served by ``loader``, in order.
+
+    The loader wraps a ``WILDSSubset`` over ``FMoWMultiScaleDataset`` and is built
+    with ``shuffle=False``, so its rows come out in subset-index order. Subset row
+    ``r`` is ``base[subset.indices[r]]``, and the dataset keys its input files
+    (``rgb_img_{file_idx}.png`` etc.) by ``base.full_idxs[idx]`` (see
+    FMoWMultiScaleDataset.__getitem__). Composing the two gives the file index per
+    served row, which is the stable id that ties a logit row back to its inputs.
+    """
+    subset = loader.dataset
+    base = subset.dataset
+    return np.asarray(base.full_idxs)[np.asarray(subset.indices)]
+
+
+def write_rerun_logits(
+    run_dir: Path,
+    run_idx: int,
+    collected: dict[int, dict[str, Any]],
+    loader_names: list[str],
+) -> Path:
+    """Persist the captured per-sample logits next to the rerun metrics.
+
+    Written as a single compressed ``logits_rerun.npz`` at
+    ``run{run_idx}/version_0/``, alongside ``metrics_rerun.csv``. For each test
+    dataloader ``<name>`` (from ``loader_names``) four arrays are stored:
+      - ``<name>/logits``   float32 ``[N, num_classes]``
+      - ``<name>/labels``   int64   ``[N]`` (FMoW task labels)
+      - ``<name>/domains``  int64   ``[N]`` (raw WILDS region codes)
+      - ``<name>/file_idx`` int64   ``[N]`` (dataset file index, the input-file id)
+    Rows are in test-iteration order and aligned across the four arrays, so
+    ``file_idx[r]`` is the input-file id of the sample whose logits are ``logits[r]``.
+    """
+    out_dir = run_dir / f"run{run_idx}" / "version_0"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "logits_rerun.npz"
+
+    arrays: dict[str, np.ndarray] = {}
+    for idx, bucket in collected.items():
+        name = loader_names[idx] if idx < len(loader_names) else f"loader{idx}"
+        logits = torch.cat(bucket["logits"]).numpy()
+        file_idx = np.asarray(bucket["file_idx"])
+        if file_idx.shape[0] != logits.shape[0]:
+            raise ValueError(
+                f"{name}: {file_idx.shape[0]} file indices but {logits.shape[0]} "
+                "logit rows; loader order and captured rows are out of sync."
+            )
+        arrays[f"{name}/logits"] = logits
+        arrays[f"{name}/labels"] = torch.cat(bucket["labels"]).numpy()
+        arrays[f"{name}/domains"] = torch.cat(bucket["domains"]).numpy()
+        arrays[f"{name}/file_idx"] = file_idx.astype(np.int64)
+
+    np.savez_compressed(out_path, **arrays)
+    return out_path
+
+
+def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> tuple[list[dict], dict]:
     """Run trainer.test() on a checkpoint, reproducing run_experiment.py's test metrics.
 
     Mirrors `_run_once` in run_experiment.py: seed -> make_data_loaders(cfg, run_idx) -> model ->
@@ -62,6 +166,9 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
     of the get_subset calls. The subset is drawn before training, so it is fully
     determined by these two things (not by the trained weights). `run_idx` is the
     original run index (run{run_idx}) for this checkpoint.
+
+    Returns the per-dataloader metric dicts from trainer.test() and the captured
+    per-sample logits (keyed by dataloader index; see attach_logit_collector).
     """
     # Recreate the RNG state the original run used right before it built its loaders.
     seed_everything(cfg.seed + run_idx, workers=True)
@@ -84,6 +191,9 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
     # We test with logger=False, so no-op it to avoid a None-logger crash for domain models.
     module._log_domain_confusion_matrix = lambda *args, **kwargs: None
 
+    # Capture the per-sample task logits as the test runs (see attach_logit_collector).
+    logits = attach_logit_collector(module)
+
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
@@ -91,7 +201,16 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> list[dict]:
         enable_checkpointing=False,
     )
 
-    return trainer.test(model=module, dataloaders=test_loaders)
+    results = trainer.test(model=module, dataloaders=test_loaders)
+
+    # Tie each captured logit row back to its dataset file index. Loaders run in the
+    # order they are passed (matching dataloader_idx) and unshuffled, so the file
+    # indices of a loader line up row-for-row with that bucket's captured logits.
+    for idx, loader in enumerate(test_loaders):
+        if idx in logits:
+            logits[idx]["file_idx"] = loader_file_indices(loader)
+
+    return results, logits
 
 
 def load_original_test_metrics(run_dir: Path, run_idx: int) -> dict[str, float]:
@@ -278,7 +397,7 @@ def main() -> None:
         # Seed i was trained as run{i} with seed_everything(cfg.seed + i); evaluate_checkpoint
         # re-seeds with the same value so the frac<1.0 test subset matches the original run.
         print(f"\n--- Evaluating seed {i} ({ckpt_path.name}) ---")
-        results = evaluate_checkpoint(ckpt_path, cfg, run_idx=i)
+        results, logits = evaluate_checkpoint(ckpt_path, cfg, run_idx=i)
         # trainer.test() returns one dict per dataloader; flatten into a single metric map.
         rerun_metrics: dict[str, float] = {}
         for result_dict in results:
@@ -286,6 +405,10 @@ def main() -> None:
 
         out_path = write_rerun_metrics(run_dir, i, rerun_metrics)
         print(f"  Wrote {len(rerun_metrics)} rerun metrics to {out_path}")
+
+        logits_path = write_rerun_logits(run_dir, i, logits, cfg.data.test_loader_names)
+        n_samples = sum(int(t.shape[0]) for b in logits.values() for t in b["logits"])
+        print(f"  Wrote logits for {n_samples} samples to {logits_path}")
 
         # Seed i was trained as run{i}; its original test metrics live in run{i}/version_0/metrics.csv.
         original_metrics = load_original_test_metrics(run_dir, i)
