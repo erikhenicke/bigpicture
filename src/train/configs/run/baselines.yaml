@@ -79,6 +79,21 @@ experiments:
   densenet_le_geoprior:
     model: densenet_le_geoprior
 
+  # ---------------- DomainDualBranch ------------------------------
+  # Location-encoder ablation (Crasto & Rolf 2026, Sec. 5.3): location encoder
+  # replaced by a learnable per-domain embedding. Mirrors the densenet_le_* runs.
+  densenet_de_concat:
+    model: densenet_de_concat
+
+  densenet_de_film:
+    model: densenet_de_film
+
+  densenet_de_d3g:
+    model: densenet_de_d3g
+
+  densenet_de_geoprior:
+    model: densenet_de_geoprior
+
   # ---------------- Dataset Normalization -------------------------
   # Normalized not with data statistics but with 0.5
   densenet_baseline_constnorm:

@@ -19,3 +19,7 @@ val_splits: [val, id_val]
 test_splits: [test, id_test]
 val_loader_names: [val-od, val-id]
 test_loader_names: [test-od, test-id]
+
+# Leave-Asia-Out: When true, Asia is dropped from train/id_val/val and 
+# non-Asia is dropped from id_test/test. 
+leave_asia_out: false

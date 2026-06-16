@@ -26,6 +26,7 @@ def make_multiscale_dataset(
     hr_feature_run_name: str | None = None,
     lr_feature_run_name: str | None = None,
     feature_run_idx: int | None = None,
+    leave_asia_out: bool = False,
 ) -> FMoWMultiScaleDataset:
     return FMoWMultiScaleDataset(
         fmow_dir=fmow_dir,
@@ -42,6 +43,7 @@ def make_multiscale_dataset(
         hr_feature_run_name=hr_feature_run_name,
         lr_feature_run_name=lr_feature_run_name,
         feature_run_idx=feature_run_idx,
+        leave_asia_out=leave_asia_out,
     )
 
 

@@ -89,6 +89,7 @@ class FMoWMultiScaleDataset(WILDSDataset):
         hr_feature_run_name=None,
         lr_feature_run_name=None,
         feature_run_idx=None,
+        leave_asia_out=False,
     ):
         """
         Args:
@@ -131,6 +132,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 (0/1/2 -> run0/run1/run2). Required there. Leaving one of the two
                 run-names ``None`` yields a ``None`` tensor for that branch (e.g.
                 retraining a single-branch classifier on the other modality).
+            leave_asia_out: If True, turn the WILDS split scheme into a geographic
+                leave-one-continent-out split while keeping the split names intact:
+                Asia samples are dropped from ``train``/``id_val``/``val`` and
+                non-Asia samples are dropped from ``id_test``/``test`` (set to the
+                ``-1`` unused code). The model then trains and is model-selected on
+                non-Asia and is evaluated exclusively on the unseen Asia continent.
         """
         from wilds import get_dataset
 
@@ -223,6 +230,21 @@ class FMoWMultiScaleDataset(WILDSDataset):
             [self._metadata_array.float(), extra_cols], dim=1
         )
         self._metadata_fields = self._metadata_fields + ["lat", "lon", "img_span_km"]
+
+        self.leave_asia_out = leave_asia_out
+        if leave_asia_out:
+            region_idx = self._metadata_fields.index("region")
+            region_arr = self._metadata_array[:, region_idx].numpy().astype(int)
+            asia_mask = region_arr == self._metadata_map["region"].index("Asia")
+
+            # Drop Asia from the train/val splits and drop non-Asia from
+            # the test splits (set to -1, the "unused" code). 
+            train_val_codes = [self._split_dict[s] for s in ("train", "id_val", "val")]
+            test_codes = [self._split_dict[s] for s in ("id_test", "test")]
+            drop = (asia_mask & np.isin(self._split_array, train_val_codes)) | (
+                ~asia_mask & np.isin(self._split_array, test_codes)
+            )
+            self._split_array[drop] = -1
 
         # Transforms
         self.transform_rgb = transform_rgb or self.get_default_transform_rgb()
@@ -420,10 +442,13 @@ class FMoWMultiScaleDataset(WILDSDataset):
         if self.augment and self.source != "features":
             rgb_img, landsat_img, spatial = self._apply_augmentation(rgb_img, landsat_img, spatial)
 
+        region_idx = self._metadata_fields.index("region")
+
         x = {
             "rgb": rgb_img,
             "landsat": landsat_img,
             "coords": coords,
+            "domain": self._metadata_array[idx, region_idx],
             "img_span_km": self._metadata_array[idx, img_span_idx],
             **spatial,
         }
@@ -529,10 +554,12 @@ class FMoWMultiScaleDataset(WILDSDataset):
         img_span_idx = self._metadata_fields.index("img_span_km")
         img_span_km = self._metadata_array[idx, img_span_idx]
         spatial = self._build_spatial_tensors(img_span_km.item())
+        region_idx = self._metadata_fields.index("region")
         return {
             "rgb": self.get_rgb_input(file_idx),
             "landsat": self.get_landsat_input(file_idx),
             "coords": coords,
+            "domain": self._metadata_array[idx, region_idx],
             "img_span_km": img_span_km,
             **spatial,
         }
