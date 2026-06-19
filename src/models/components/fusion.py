@@ -237,7 +237,10 @@ class DecisionRule(nn.Module):
                 q = log_p_hr.exp() + log_p_lr.exp() - prior
             else:
                 q = 2.0 * torch.maximum(log_p_hr.exp(), log_p_lr.exp()) - prior
-            log_q = q.clamp_min(1e-12).log()
+            # Per-row shift to non-negative (only where a row has negatives), so each
+            # sample's fused distribution is independent of the rest of the batch.
+            q = q - q.amin(dim=1, keepdim=True).clamp(max=0.0)
+            log_q = q.clamp(1e-12).log()
         elif self.rule == "min":
             log_q = torch.minimum(log_p_hr, log_p_lr)
             if self.use_class_prior:
