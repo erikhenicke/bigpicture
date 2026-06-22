@@ -2,7 +2,7 @@ slurm:
   partition: robolab
   cpus_per_task: 4
   mem_per_cpu: 8GB
-  nodelist: gaia5
+  nodelist: gaia4,gaia5,gaia7
 
 global_overrides:
   data.frac: 1.0
@@ -13,13 +13,13 @@ global_overrides:
   data.leave_asia_out: true
 
 experiments:
-  densenet_baseline:
+  densenet_lao:
     model: densenet_baseline
 
-  film:
+  film_lao:
     model: densenet_film
 
-  film_om_gauss_pe_freq_lr_crop_14_9km:
+  film_om_gauss_pe_freq_lr_crop_14_9km_lao:
     model: densenet_film
     overrides:
       spatial: om_gauss_pe_freq
