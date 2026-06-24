@@ -23,5 +23,5 @@ run_name: train-dinov3-decision-fusion
 data:
   source: features
   hr_feature_run_name: dinov3_baseline
-  lr_feature_run_name: dinov3_lr_baseline_no_domain
+  lr_feature_run_name: dinov3_lr_baseline
   batch_size: 512
