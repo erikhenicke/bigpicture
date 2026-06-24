@@ -18,6 +18,18 @@ experiments:
     model: densenet_stacked
     overrides:
       model.lr_domain_loss_coeff: 0.0
+
+  densenet_stacked_zero_init_no_domain:
+    model: densenet_stacked
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      model.encoder.landsat_channel_init: zero
+
+  densenet_stacked_he_init_no_domain:
+    model: densenet_stacked
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      model.encoder.landsat_channel_init: he
   
   dinov3_stacked:
     model: dinov3_stacked

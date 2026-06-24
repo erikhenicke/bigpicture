@@ -1,0 +1,27 @@
+metric_directions:
+  test/test-od-task-ece: min
+
+summary_metrics:
+  - test/test-od-worst-group-task-acc
+  - test/test-od-lr-domain-acc
+
+primary_metrics:
+  - test/test-id-task-acc
+  - test/test-od-task-acc
+  - test/test-od-worst-group-task-acc
+
+groups:
+  # Input-level (early) fusion: 9-channel stack, single backbone, LR bands
+  # zero-init. Naive lower bound. Grouped by backbone, HR-only baseline as
+  # anchor; domain on/off toggled per backbone. lr-domain-acc shows what the
+  # domain loss buys at the input level.
+  - name: Input-Level Fusion
+    runs:
+      - baselines@densenet_baseline
+      - densenet_stacked
+      - densenet_stacked_no_domain
+      - baselines@dinov3_baseline
+      - dinov3_stacked
+      - dinov3_stacked_no_domain
+    additional_metrics:
+      - test/test-od-lr-domain-acc

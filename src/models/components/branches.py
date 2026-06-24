@@ -50,7 +50,11 @@ class Branch(nn.Module):
 
     def _init_extra_weights(self, weight_slice: torch.Tensor, old_weight: torch.Tensor) -> None:
         with torch.no_grad():
-            if self.stacked and weight_slice.size(1) >= 3:
+            # "average" reuses the pretrained RGB weights for the stacked Landsat
+            # visible bands (B, G, R) and only initialises the remaining bands.
+            # "zero"/"he" instead override *every* non-RGB channel, so only the
+            # FMoW-RGB stem channels stay pretrained.
+            if self.landsat_channel_init == "average" and self.stacked and weight_slice.size(1) >= 3:
                 # Landsat visible bands (B, G, R): reuse pretrained RGB swapped to BGR
                 weight_slice[:, :3, :, :].copy_(old_weight[:, [2, 1, 0], :, :])
                 remaining = weight_slice[:, 3:, :, :]
