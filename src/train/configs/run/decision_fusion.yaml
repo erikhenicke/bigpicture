@@ -666,3 +666,258 @@ experiments:
       model.use_class_prior: false
       data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
 
+  # ==============================================================
+  # SatCLIP location fusion (trained): decision heads learned
+  # jointly from scratch (model.train_model: true) instead of
+  # reusing the frozen single-branch heads. One per frozen
+  # SatCLIP variant above.
+  # ==============================================================
+
+  # ---------------- DenseNet HR + SatCLIP location (trained) ----
+  densenet_satclip_l40_sum_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_max_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_min_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_geoprior_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  # ---------------- DenseNet HR + SatCLIP location No Prior (trained)
+  densenet_satclip_l40_sum_no_prior_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_max_no_prior_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_min_no_prior_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  densenet_satclip_l40_geoprior_no_prior_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  # ---------------- DenseNet HR + SatCLIP location No Domain (trained)
+  densenet_satclip_l40_sum_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_max_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_min_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_geoprior_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  # ------------ DenseNet HR + SatCLIP location No Prior No Domain (trained)
+  densenet_satclip_l40_sum_no_prior_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_max_no_prior_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_min_no_prior_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  densenet_satclip_l40_geoprior_no_prior_no_domain_trained:
+    model: densenet_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  # ---------------- DINOv3 HR + SatCLIP location (trained) ------
+  dinov3_satclip_l40_sum_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_max_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_min_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_geoprior_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  # ---------------- DINOv3 HR + SatCLIP location No Prior (trained)
+  dinov3_satclip_l40_sum_no_prior_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_max_no_prior_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_min_no_prior_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  dinov3_satclip_l40_geoprior_no_prior_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40
+      model.train_model: true
+
+  # ---------------- DINOv3 HR + SatCLIP location No Domain (trained)
+  dinov3_satclip_l40_sum_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_max_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_min_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_geoprior_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  # ------------ DINOv3 HR + SatCLIP location No Prior No Domain (trained)
+  dinov3_satclip_l40_sum_no_prior_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: sum
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_max_no_prior_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: max
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_min_no_prior_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: min
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+
+  dinov3_satclip_l40_geoprior_no_prior_no_domain_trained:
+    model: dinov3_decision_fusion
+    overrides:
+      model.decision_rule: product
+      model.use_class_prior: false
+      data.lr_feature_run_name: satclip_le_enc_baseline_l_40_no_domain
+      model.train_model: true
+

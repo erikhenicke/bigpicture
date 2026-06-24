@@ -181,7 +181,19 @@ def format_experiment_name(
     run_experiments: dict,
     translations: dict,
     latex: bool = False,
+    model_overrides: dict | None = None,
+    param_overrides: dict | None = None,
 ) -> str:
+    """Format experiment name using translations + optional group-level overrides.
+
+    Args:
+        run_ref: Run reference (e.g., "config@exp_key" or just "exp_key")
+        run_experiments: Dict mapping run_ref to experiment definitions
+        translations: Dict with "models" and "params" sections for global translations
+        latex: Use LaTeX versions if available
+        model_overrides: Group-level model display name overrides {model_key: display_name}
+        param_overrides: Group-level param display name overrides {param_key: display_name}
+    """
     exp_def = run_experiments.get(run_ref)
     exp_key = run_ref.split("@", 1)[1] if "@" in run_ref else run_ref
     if exp_def is None:
@@ -189,24 +201,55 @@ def format_experiment_name(
 
     symbol_key = "latex" if latex else "plain"
     model_key = exp_def.get("model", exp_key)
-    base_name = translations["models"].get(model_key, model_key.replace("_", " ").title())
+
+    # Check model overrides first, then global translations
+    if model_overrides and model_key in model_overrides:
+        base_name = model_overrides[model_key]
+    else:
+        base_name = translations.get("models", {}).get(model_key, model_key.replace("_", " ").title())
 
     overrides: dict = exp_def.get("overrides") or {}
     parts = [base_name]
     for param_key, value in overrides.items():
-        param_trans = translations["params"].get(param_key)
-        if param_trans and param_trans.get("hidden", False):
+        param_trans = translations.get("params", {}).get(param_key)
+        has_local_override = param_overrides is not None and param_key in param_overrides
+        local_override = param_overrides[param_key] if has_local_override else None
+
+        # A non-dict local override (e.g. null, or a fixed string) unconditionally
+        # replaces the param's display, ignoring its value. A falsy override hides it.
+        if has_local_override and not isinstance(local_override, dict):
+            if local_override:
+                parts.append(local_override)
             continue
-        label = param_trans[symbol_key] if param_trans else param_key.split(".")[-1]
-        value_trans = (param_trans or {}).get("values", {}).get(str(value))
+
+        # A dict local override merges into the global translation (taking precedence),
+        # so it can override e.g. just one entry of "values" without losing the rest.
+        effective_trans = dict(param_trans) if param_trans else {}
+        if has_local_override:
+            merged_values = {**effective_trans.get("values", {}), **local_override.get("values", {})}
+            effective_trans.update(local_override)
+            if merged_values:
+                effective_trans["values"] = merged_values
+
+        if effective_trans.get("hidden", False):
+            continue
+        label = effective_trans.get(symbol_key, effective_trans.get("plain", param_key.split(".")[-1]))
+        values_map = effective_trans.get("values", {})
+        value_trans = values_map.get(value)
+        if value_trans is None:
+            value_trans = values_map.get(str(value))
+        if value_trans is None and isinstance(value, bool):
+            value_trans = values_map.get(str(value).lower())
         if value_trans:
-            parts.append(value_trans[symbol_key])
+            if value_trans.get("hidden", False):
+                continue
+            parts.append(value_trans.get(symbol_key, value_trans.get("plain", value_trans.get("latex"))))
         elif isinstance(value, bool):
             if not value:
                 parts.append(f"no {label}")
             else:
                 parts.append(label)
-        elif param_trans and param_trans.get("no_value", False):
+        elif effective_trans.get("no_value", False):
             parts.append(label)
         else:
             val_str = f"{value:g}" if isinstance(value, float) else str(value)

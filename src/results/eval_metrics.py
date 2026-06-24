@@ -4,7 +4,9 @@
 import argparse
 import json
 import re
+import shutil
 import sys
+from itertools import groupby
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +28,28 @@ from results.utils import (
 
 THESIS_ROOT = REPO_ROOT.parent / "thesis"
 LATEX_OUTPUT_DIR = THESIS_ROOT / "results"
+LATEX_SCRIPT = THESIS_ROOT / "tables.tex"
 
+LATEX_TABLE_TEMPLATE = """\
+\\documentclass[11pt,a4paper]{{article}}
+\\usepackage[margin=2.2cm]{{geometry}}
+\\usepackage{{booktabs}}
+\\usepackage{{siunitx}}
+
+\\title{{Seeing the Big Picture}}
+\\author{{Erik Henicke}}
+\\date{{}}
+
+\\begin{{document}}
+\\maketitle
+\\vspace{{-2em}}
+
+\\section*{{Result Tables}}
+
+{tables}
+
+\\end{{document}}
+"""
 
 def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float]]:
     """Load final test metrics from all seeds, preferring metrics_rerun.csv."""
@@ -94,35 +117,71 @@ def format_cell(values: list[float], format_percent: bool = False, format_count:
     return f"{mean:.4f} {sep} {std:.4f}"
 
 
-def format_metric_name(metric: str, remove_task_prefix: bool=True, remove_acc: bool=False, remove_od: bool=False) -> str:
+def format_metric_name(
+    metric: str,
+    translations: dict | None = None,
+    local_overrides: dict | None = None,
+    remove_task_prefix: bool = True,
+    remove_acc: bool = False,
+    remove_od: bool = False,
+    latex: bool = False,
+) -> str:
+    """Format metric name from translations (global + local overrides) or via string manipulation.
+
+    Args:
+        metric: Metric key (e.g., "test/test-od-task-acc")
+        translations: Dict with "metrics" key containing metric name mappings
+        local_overrides: Group-level overrides for this metric
+        remove_task_prefix: Legacy flag for string-based formatting
+        remove_acc: Legacy flag for string-based formatting
+        remove_od: Legacy flag for string-based formatting
+        latex: Use LaTeX versions if available
+    """
     if metric == "param_count":
         return "Parameters"
-    if metric.startswith("test/test-"):
-        metric = metric.removeprefix("test/test-")
-    elif metric.startswith("val/val-"):
-        metric = metric.removeprefix("val/val-")
+
+    symbol_key = "latex" if latex else "plain"
+
+    # Check local overrides first
+    if local_overrides and metric in local_overrides:
+        return local_overrides[metric]
+
+    # Check global translations
+    if translations and "metrics" in translations and metric in translations["metrics"]:
+        metric_trans = translations["metrics"][metric]
+        if isinstance(metric_trans, dict):
+            return metric_trans.get(symbol_key, metric_trans.get("plain", metric))
+        return metric_trans
+
+    # Fall back to string-based formatting
+    cleaned = metric
+    if cleaned.startswith("test/test-"):
+        cleaned = cleaned.removeprefix("test/test-")
+    elif cleaned.startswith("val/val-"):
+        cleaned = cleaned.removeprefix("val/val-")
 
     if remove_task_prefix:
-        metric = metric.replace("-task", "")
+        cleaned = cleaned.replace("-task", "")
     if remove_acc:
-        metric = metric.replace("-acc", "")
+        cleaned = cleaned.replace("-acc", "")
     if remove_od:
-        metric = metric.replace("od", "")
+        cleaned = cleaned.replace("od", "")
 
-    if "region" in metric:
-        metric = re.sub(r"-region(-.*?)", r"\1 ", metric)
-    metric = (
-        metric.replace("-", " ")
-              .title()
-              .replace("Od", "OOD")
-              .replace("Id", "ID")
-              .replace("Lr", "LR")
-              .replace("Hr", "HR")
-              .replace("Worst Group Acc", "WRA")
-              .replace("Acc", "Overall Acc.")
-              )
+    if "region" in cleaned:
+        cleaned = re.sub(r"-region(-.*?)", r"\1 ", cleaned)
 
-    return metric
+    cleaned = (
+        cleaned.replace("-", " ")
+               .title()
+               .replace("Od", "OOD")
+               .replace("Id", "ID")
+               .replace("Lr", "LR")
+               .replace("Hr", "HR")
+               .replace("Worst Group Acc", "WRA")
+               .replace("Acc", "Overall Acc.")
+               )
+
+    return cleaned
 
 
 METRIC_CHUNK_SIZE = 4
@@ -213,26 +272,33 @@ def build_group_table(
     """Build and write a table for one group. Returns False if skipped."""
     metrics = primary_metrics + group.get("additional_metrics", [])
     run_refs: list[str] = group["runs"]
+    metric_display_overrides = group.get("metric_display_names", {})
+    model_display_overrides = group.get("model_display_names", {})
+    param_display_overrides = group.get("param_display_names", {})
 
     rows: list[dict] = []
     for ref in run_refs:
         _, exp_key = parse_run_ref(ref, default_config)
         run_dir = find_run_dir(exp_key)
         metric_values = load_all_metrics(run_dir, metrics)
-        row: dict = {"Experiment": format_experiment_name(ref, run_experiments, translations, latex=latex)}
+        row: dict = {"Experiment": format_experiment_name(
+            ref, run_experiments, translations, latex=latex,
+            model_overrides=model_display_overrides,
+            param_overrides=param_display_overrides,
+        )}
         for m in metrics:
-            row[format_metric_name(m)] = format_cell(
+            row[format_metric_name(m, translations, metric_display_overrides, latex=latex)] = format_cell(
                 metric_values[m], format_percent=m.endswith("acc"), format_count=(m == "param_count"), latex=latex,
             )
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    metric_cols = [format_metric_name(m) for m in metrics]
+    metric_cols = [format_metric_name(m, translations, metric_display_overrides, latex=latex) for m in metrics]
 
     if df[metric_cols].eq("").all().all():
         return False
 
-    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in metrics if m != "param_count"}
+    col_directions = {format_metric_name(m, translations, metric_display_overrides, latex=latex): metric_directions.get(m, "max") for m in metrics if m != "param_count"}
     write_table(df, group["name"], output, latex, col_directions)
     return True
 
@@ -256,7 +322,8 @@ def build_summary_table(
                 seen.add(ref)
                 run_refs.append(ref)
 
-    cols = [format_metric_name(m) for m in summary_metrics]
+    # Summary uses global translations (no per-group overrides)
+    cols = [format_metric_name(m, translations, latex=latex) for m in summary_metrics]
     rows: list[dict] = []
     for ref in run_refs:
         _, exp_key = parse_run_ref(ref, default_config)
@@ -277,8 +344,46 @@ def build_summary_table(
         .drop(columns="_sort")
         .reset_index(drop=True)
     )
-    col_directions = {format_metric_name(m): metric_directions.get(m, "max") for m in summary_metrics if m != "param_count"}
+    col_directions = {format_metric_name(m, translations, latex=latex): metric_directions.get(m, "max") for m in summary_metrics if m != "param_count"}
     write_table(df, "All experiments — summary", output, latex, col_directions)
+
+
+def _table_title(tex_path: Path) -> str:
+    """Read the leading '% <title>' comment written by write_table, else fall back to the filename."""
+    first_line = tex_path.read_text(encoding="utf-8").splitlines()[0]
+    if first_line.startswith("% "):
+        return first_line.removeprefix("% ")
+    return tex_path.stem.replace("_", " ").title()
+
+
+def build_latex_document() -> None:
+    """Recursively collect every generated .tex snippet under LATEX_OUTPUT_DIR and
+    assemble them into a single standalone document at LATEX_SCRIPT."""
+    tex_files = sorted(LATEX_OUTPUT_DIR.rglob("*.tex"))
+    if not tex_files:
+        return
+
+    sections: list[str] = []
+    for run_dir, files in groupby(tex_files, key=lambda p: p.parent):
+        run_name = run_dir.relative_to(LATEX_OUTPUT_DIR).as_posix().replace("_", " ").title()
+        blocks = [f"\\section*{{{run_name}}}"]
+        for tex_path in files:
+            rel_path = tex_path.relative_to(THESIS_ROOT).as_posix()
+            caption = _table_title(tex_path)
+            blocks.append(
+                "\\begin{table}[h]\n"
+                "\\centering\n"
+                "\\small\n"
+                f"\\input{{{rel_path}}}\n"
+                f"\\caption{{{caption}}}\n"
+                "\\end{table}"
+            )
+        sections.append("\n\n".join(blocks))
+
+    LATEX_SCRIPT.write_text(
+        LATEX_TABLE_TEMPLATE.format(tables="\n\n".join(sections)), encoding="utf-8"
+    )
+    print(f"  wrote {LATEX_SCRIPT}")
 
 
 def main() -> None:
@@ -344,11 +449,14 @@ def main() -> None:
         latex = fmt == "latex"
         ext = ".tex" if latex else ".html"
         output_dir = LATEX_OUTPUT_DIR / run_name if latex else REPO_ROOT / "results" / run_name
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        for group in groups:
+        num_width = len(str(len(groups) + 1))
+        for idx, group in enumerate(groups, start=1):
             safe_name = group["name"].lower().replace(" ", "_").replace("-", "_")
-            output = output_dir / f"{safe_name}{ext}"
+            output = output_dir / f"{idx:0{num_width}d}_{safe_name}{ext}"
             written = build_group_table(group, primary_metrics, output, latex, run_experiments, translations, metric_directions, run_name)
             if written:
                 print(f"  wrote {output}")
@@ -356,9 +464,12 @@ def main() -> None:
                 print(f"  skipped {group['name']} (no finished runs)")
 
         if summary_metrics:
-            output = output_dir / f"summary{ext}"
+            output = output_dir / f"{len(groups) + 1:0{num_width}d}_summary{ext}"
             build_summary_table(groups, summary_metrics, output, latex, run_experiments, translations, metric_directions, run_name)
             print(f"  wrote {output}")
+
+        if latex:
+            build_latex_document()
 
 
 if __name__ == "__main__":

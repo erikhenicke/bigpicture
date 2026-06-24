@@ -5,7 +5,7 @@ models:
   densenet_d3g: "D3G"
   densenet_geoprior: "GeoPrior"
   densenet_multsim: "MultSim"
-  densenet_lr_baseline: "DenseNet LR"
+  densenet_lr_baseline: "DenseNet-121 LR"
   deit_baseline: "DeiT-Tiny"
   efficientformer_baseline: "EfficientFormerV2-S1"
   efficientnet_baseline: "EffNetV2-B1"
@@ -13,6 +13,42 @@ models:
   densenet_le_film: "FiLM w. LE"
   densenet_le_d3g: "D3G w. LE"
   densenet_le_geoprior: "GeoPrior w. LE"
+  dinov3_film: "DINOv3 FiLM"
+  dinov3_baseline: "DINOv3"
+  satclip_le_enc_baseline: "SatCLIP"
+
+  # Decision Fusion
+  densenet_decision_fusion: "DenseNet-121"
+  dinov3_decision_fusion: "DINOv3"
+
+metrics:
+  test/test-id-task-acc:
+    plain: "ID Overall Acc."
+    latex: "ID Overall Acc."
+  test/test-od-task-acc:
+    plain: "OOD Overall Acc."
+    latex: "OOD Overall Acc."
+  test/test-od-worst-group-task-acc:
+    plain: "OOD WRA"
+    latex: "OOD WRA"
+  test/test-od-lr-domain-acc:
+    plain: "OOD LR Domain Acc."
+    latex: "OOD LR Domain Acc."
+  test/test-od-hr-domain-acc:
+    plain: "OOD HR Domain Acc."
+    latex: "OOD HR Domain Acc."
+  test/test-od-domain-acc:
+    plain: "OOD Domain Acc."
+    latex: "OOD Domain Acc."
+  test/test-od-task-ece:
+    plain: "OOD ECE"
+    latex: "OOD ECE"
+  test/test-od-lr-ablated-worst-group-task-acc:
+    plain: "OD Acc LR Constant"
+    latex: "OD Acc LR Constant"
+  test/test-od-hr-ablated-worst-group-task-acc:
+    plain: "OD Acc HR Constant"
+    latex: "OD Acc HR Constant"
 
 
 params:
@@ -52,6 +88,53 @@ params:
   model.landsat_channel_init:
     plain: "Ch-Init"
     latex: "Ch-Init"
+  model.decision_rule:
+    plain: "Rule"
+    latex: "Rule"
+    values:
+      max:
+        plain: "Max"
+        latex: '$\mathrm{max}$'
+      min:
+        plain: "Min"
+        latex: '$\mathrm{min}$'
+      sum:
+        plain: "Sum"
+        latex: '$\mathrm{sum}$'
+      product:
+        plain: "GeoPrior"
+        latex: '$\mathrm{GeoPrior}$'
+  model.use_class_prior:
+    plain: "Class Prior"
+    latex: "Class Prior"
+    values:
+      false:
+        plain: "No Prior"
+        latex: 'No Prior'
+      true:
+        plain: "Class Prior"
+        latex: "Class Prior"
+  model.train_model:
+    plain: "Trained"
+    latex: "Trained"
+  model.encoder.legendre_polys:
+    plain: "L"
+    latex: "L"
+  data.lr_feature_run_name:
+    plain: "LR Source"
+    latex: "LR Source"
+    values:
+      densenet_lr_baseline_no_domain:
+        plain: "No Domain"
+        latex: "No Domain"
+      dinov3_lr_baseline_no_domain:
+        plain: "No Domain"
+        latex: "No Domain"
+      satclip_le_enc_baseline_l_40:
+        hidden: true
+      satclip_le_enc_baseline_l_40_no_domain:
+        plain: "No Domain"
+        latex: "No Domain"
   trainer.branch_ablation:
     hidden: true
   data.preprocessed_dir:
