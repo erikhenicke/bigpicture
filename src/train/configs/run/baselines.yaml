@@ -14,6 +14,11 @@ experiments:
   densenet_baseline:
     model: densenet_baseline
 
+  densenet_baseline_no_pretrained:
+    model: densenet_baseline
+    overrides:
+      model.hr_encoder.pretrained: false
+
   efficientformer_baseline:
     model: efficientformer_baseline
   

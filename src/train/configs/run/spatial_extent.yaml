@@ -58,3 +58,11 @@ experiments:
       spatial: om_gauss_pe_freq
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
+
+  film_om_gauss_pe_freq_lr_crop_14_9km_rgb:
+    model: densenet_film
+    overrides:
+      spatial: om_gauss_pe_freq
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 14.91
+      model.landsat_in_channels: 3
