@@ -1,0 +1,33 @@
+# Spatial extent ablation: a single FiLM (om_gauss + pe_freq) model trained on
+# full-resolution Landsat, varying only the LR crop extent (data.lr_crop_km).
+# Runs without an explicit "config@" prefix resolve against the matching run
+# config src/train/configs/run/spatial_extent.yaml.
+
+primary_metrics:
+  - test/test-id-task-acc
+  - test/test-od-task-acc
+  - test/test-od-worst-group-task-acc
+  - test/test-od-task-ece
+
+metric_directions:
+  test/test-od-task-ece: min
+
+# HR-only DenseNet baseline (no LR context), drawn as a horizontal reference
+# line with a shaded across-seed std band, just like in decision_plots.py.
+baseline: baselines@densenet_baseline
+
+groups:
+  - name: Spatial Extent
+    # Ordered by increasing LR crop extent (≈1 km → full extent ≈14.9 km).
+    runs:
+      - film_om_gauss_pe_freq_lr_crop_1km
+      - film_om_gauss_pe_freq_lr_crop_1_5km
+      - film_om_gauss_pe_freq_lr_crop_3_4km
+      - film_om_gauss_pe_freq_lr_crop_6_7km
+      - film_om_gauss_pe_freq_lr_crop_10km
+      - film_om_gauss_pe_freq_lr_crop_14_9km
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      spatial: null

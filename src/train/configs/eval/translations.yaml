@@ -102,8 +102,8 @@ params:
         plain: "Sum"
         latex: '$\mathrm{sum}$'
       product:
-        plain: "GeoPrior"
-        latex: '$\mathrm{GeoPrior}$'
+        plain: "Product"
+        latex: '$\mathrm{Product}$'
   model.use_class_prior:
     plain: "Class Prior"
     latex: "Class Prior"
@@ -150,6 +150,9 @@ params:
   data.image_norm:
     plain: "Norm"
     latex: "Norm"
+  data.lr_crop_km:
+    plain: "Extent"
+    latex: "Extent"
   spatial:
     plain: "Spatial Encoding"
     latex: "Spatial Encoding"

@@ -1,0 +1,31 @@
+# Leave-Asia-Out study: models are trained with data.leave_asia_out=true (Asia
+# held out of training), so the OOD split is Asia. The headline number is the
+# OOD/Asia task accuracy; ID accuracy shows in-distribution performance on the
+# remaining regions. Runs resolve against src/train/configs/run/leave_asia_out.yaml.
+
+metric_directions:
+  test/test-od-task-ece: min
+
+primary_metrics:
+  - test/test-id-region-asia-task-acc
+  - test/test-od-region-asia-task-acc
+
+groups:
+  - name: Leave Asia Out
+    runs:
+      - densenet_lao
+      - film_lao
+      - film_om_gauss_pe_freq_lr_crop_14_9km_lao
+    additional_metrics:
+      - test/test-od-task-ece
+    param_display_names:
+      data.lr_crop_km: null
+      data.preprocessed_dir: null
+    metric_display_names:
+      test/test-id-region-asia-task-acc:
+        plain: "ID Asia Acc."
+        latex: "ID Asia Acc."
+      test/test-od-region-asia-task-acc:
+        plain: "OOD Asia Acc."
+        latex: "OOD Asia Acc."
+

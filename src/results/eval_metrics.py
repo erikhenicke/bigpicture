@@ -144,7 +144,10 @@ def format_metric_name(
 
     # Check local overrides first
     if local_overrides and metric in local_overrides:
-        return local_overrides[metric]
+        metric_override = local_overrides[metric]
+        if isinstance(metric_override, dict):
+            return metric_override.get(symbol_key, metric_override.get("plain", metric))
+        return metric_override
 
     # Check global translations
     if translations and "metrics" in translations and metric in translations["metrics"]:
@@ -364,9 +367,10 @@ def build_latex_document() -> None:
         return
 
     sections: list[str] = []
-    for run_dir, files in groupby(tex_files, key=lambda p: p.parent):
+    for i, (run_dir, files) in enumerate(groupby(tex_files, key=lambda p: p.parent)):
         run_name = run_dir.relative_to(LATEX_OUTPUT_DIR).as_posix().replace("_", " ").title()
-        blocks = [f"\\section*{{{run_name}}}"]
+        section_header = f"\\section*{{{run_name}}}" if i == 0 else f"\\clearpage\n\\section*{{{run_name}}}"
+        blocks = [section_header]
         for tex_path in files:
             rel_path = tex_path.relative_to(THESIS_ROOT).as_posix()
             caption = _table_title(tex_path)

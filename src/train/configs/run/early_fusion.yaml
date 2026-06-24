@@ -22,6 +22,12 @@ experiments:
   dinov3_stacked:
     model: dinov3_stacked
 
+  dinov3_stacked_no_domain:
+    model: dinov3_stacked
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+
+
   # ---------------- Higher Learning Rate -------------------------
   densenet_stacked_hlr:
     model: densenet_stacked
