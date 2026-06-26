@@ -44,6 +44,16 @@ experiments:
     overrides:
       model.lr_domain_loss_coeff: 0.0
 
+  dinov3_stacked_zero_init:
+    model: dinov3_stacked
+    overrides:
+      model.encoder.landsat_channel_init: zero
+
+  dinov3_stacked_zero_init_no_domain:
+    model: dinov3_stacked
+    overrides:
+      model.lr_domain_loss_coeff: 0.0
+      model.encoder.landsat_channel_init: zero
 
   # ---------------- Higher Learning Rate -------------------------
   densenet_stacked_hlr:
