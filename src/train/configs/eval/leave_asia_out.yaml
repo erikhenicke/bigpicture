@@ -7,8 +7,10 @@ metric_directions:
   test/test-od-task-ece: min
 
 primary_metrics:
-  - test/test-id-region-asia-task-acc
-  - test/test-od-region-asia-task-acc
+  - test/test-id-task-acc
+  - test/test-id-top5-task-acc
+  - test/test-od-task-acc
+  - test/test-od-top5-task-acc
 
 groups:
   - name: Leave Asia Out
@@ -22,10 +24,16 @@ groups:
       data.lr_crop_km: null
       data.preprocessed_dir: null
     metric_display_names:
-      test/test-id-region-asia-task-acc:
+      test/test-id-task-acc:
         plain: "ID Asia Acc."
         latex: "ID Asia Acc."
-      test/test-od-region-asia-task-acc:
+      test/test-od-task-acc:
         plain: "OOD Asia Acc."
         latex: "OOD Asia Acc."
+      test/test-id-top5-task-acc:
+        plain: "ID Top5 Asia Acc."
+        latex: "ID Top5 Asia Acc."
+      test/test-od-top5-task-acc:
+        plain: "OOD Top5 Asia Acc."
+        latex: "OOD Top5 Asia Acc."
 

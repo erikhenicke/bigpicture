@@ -1,0 +1,38 @@
+primary_metrics:
+  - test/test-id-task-acc
+  - test/test-od-task-acc
+  - test/test-od-worst-group-task-acc
+
+groups:
+  - name: Baselines
+    runs:
+      - densenet_baseline
+      - deit_baseline
+      - efficientnet_baseline
+      - efficientformer_baseline
+
+  - name: HR LR Encoder Comparison
+    runs:
+      - densenet_baseline
+      - densenet_lr_baseline_no_domain
+    
+  - name: ImageNet Weights
+    runs:
+      - densenet_baseline
+      - densenet_baseline_no_pretrained
+
+  - name: SatCLIP Fusion
+    runs:
+      - densenet_baseline
+      - densenet_le_concat
+      - densenet_le_film
+      - densenet_le_d3g
+    additional_metrics:
+      - test/test-od-lr-domain-acc
+
+  - name: Domain Fusion
+    runs:
+      - densenet_baseline
+      - densenet_de_concat
+      - densenet_de_film
+      - densenet_de_d3g

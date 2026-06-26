@@ -8,8 +8,11 @@ summary_metrics:
 
 primary_metrics:
   - test/test-id-task-acc
+  - test/test-id-top5-task-acc
   - test/test-od-task-acc
+  - test/test-od-top5-task-acc
   - test/test-od-worst-group-task-acc
+  - test/test-od-worst-group-top5-task-acc
 
 # Per-class accuracy gain/loss plots (src/results/class_eval.py). Each comparison
 # run gets a Test-OOD plot and a worst-region plot (baseline's worst OOD region),
@@ -19,30 +22,12 @@ class-eval:
   runs:
     - spatial_extent@film_om_gauss_pe_freq_lr_crop_14_9km
     - film_om_gauss_pe_freq
+    - d3g_detach_both_no_domain 
+    - film_om_bin_pe_freq
+    - film_pe_freq
+    - film
 
 groups:
-  - name: Baselines
-    runs:
-      - baselines@densenet_baseline
-      - baselines@deit_baseline
-      - baselines@efficientnet_baseline
-      - baselines@efficientformer_baseline
-
-  - name: HR LR Encoder Comparison
-    runs:
-      - baselines@densenet_baseline
-      - baselines@densenet_lr_baseline_no_domain
-
-  - name: SatCLIP Fusion
-    runs:
-      - baselines@densenet_baseline
-      - baselines@densenet_le_concat
-      - baselines@densenet_le_film
-      - baselines@densenet_le_d3g
-      - baselines@densenet_le_geoprior
-    additional_metrics:
-      - test/test-od-lr-domain-acc
-
   - name: Fusion Comparison
     runs:
       - baselines@densenet_baseline
@@ -54,7 +39,6 @@ groups:
       - baselines@densenet_baseline
       - concat
       - film
-      - geoprior
       - d3g
     additional_metrics:
       - test/test-od-lr-domain-acc
@@ -64,6 +48,18 @@ groups:
       - film
       - film_detach
       - film_no_domain
+      - d3g
+      - d3g_no_domain
+      - d3g_detach_lr
+      - d3g_detach_hr
+      - d3g_detach_hr_no_domain
+      - d3g_detach_both
+      - d3g_detach_both_no_domain
+      - concat
+      - concat_no_domain
+      - concat_detach
+    additional_metrics:
+      - test/test-od-lr-domain-acc
   
   - name: ReLU Ablation
     runs:
@@ -73,30 +69,9 @@ groups:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
 
-  - name: Label Smoothing
-    runs:
-      - multsim
-      - multsim_ls_0_1  
-  
-  - name: Normalization Ablation
-    runs:
-      - baselines@densenet_baseline
-      - baselines@densenet_baseline_constnorm
-      - multsim
-      - multsim_constnorm
-      - concat
-      - concat_constnorm
-      - d3g
-      - d3g_detach_both_constnorm
-      - multsim_om_gauss_constnorm
-      - film
-      - film_constnorm
-    additional_metrics:
-      - test/test-od-lr-ablated-worst-group-task-acc
-      - test/test-od-hr-ablated-worst-group-task-acc
-
   - name: Spatial Encodings
     runs:
+      - baselines@densenet_baseline
       - film
       - film_om_gauss
       - film_pe_freq
@@ -104,6 +79,7 @@ groups:
           
   - name: Spatial Encodings Full
     runs:
+      - baselines@densenet_baseline
       - film
       - film_om_bin
       - film_om_gauss
@@ -113,14 +89,15 @@ groups:
       - film_om_gauss_pe_freq
       - film_om_bin_pe
       - film_om_gauss_pe
-
-  - name: Alternating Branch Freezing
+  
+  - name: DINOv3 FiLM
     runs:
-      - multsim
-      - multsim_alternate_branches
-      - multsim_alternate_om_gauss
-      - film
-      - film_alternate_branches
-    additional_metrics:
-      - test/test-od-lr-ablated-worst-group-task-acc
-      - test/test-od-hr-ablated-worst-group-task-acc
+      - baselines@dinov3_baseline
+      - dinov3_film
+      - dinov3_film_no_domain
+      - dinov3_film_om_gauss_pe_freq
+
+  - name: Channel Ablation
+    runs:
+      - film_om_gauss_pe_freq_lr_crop_14_9km
+      - film_om_gauss_pe_freq_lr_crop_14_9km_rgb

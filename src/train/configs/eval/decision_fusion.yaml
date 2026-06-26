@@ -325,106 +325,106 @@ groups:
       data.preprocessed_dir: null
 
   # Not run yet -- training heads for SatCLIP variants pending.
-  # - name: Decision Fusion DenseNet121 SatCLIP Trained Sum
-  #   runs:
-  #     - baselines@densenet_baseline
-  #     - densenet_satclip_l40_sum_trained
-  #     - densenet_satclip_l40_sum_no_prior_trained
-  #     - densenet_satclip_l40_sum_no_domain_trained
-  #     - densenet_satclip_l40_sum_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DenseNet121 SatCLIP Trained Sum
+    runs:
+      - baselines@densenet_baseline
+      - densenet_satclip_l40_sum_trained
+      - densenet_satclip_l40_sum_no_prior_trained
+      - densenet_satclip_l40_sum_no_domain_trained
+      - densenet_satclip_l40_sum_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DenseNet121 SatCLIP Trained Max
-  #   runs:
-  #     - baselines@densenet_baseline
-  #     - densenet_satclip_l40_max_trained
-  #     - densenet_satclip_l40_max_no_prior_trained
-  #     - densenet_satclip_l40_max_no_domain_trained
-  #     - densenet_satclip_l40_max_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DenseNet121 SatCLIP Trained Max
+    runs:
+      - baselines@densenet_baseline
+      - densenet_satclip_l40_max_trained
+      - densenet_satclip_l40_max_no_prior_trained
+      - densenet_satclip_l40_max_no_domain_trained
+      - densenet_satclip_l40_max_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DenseNet121 SatCLIP Trained Min
-  #   runs:
-  #     - baselines@densenet_baseline
-  #     - densenet_satclip_l40_min_trained
-  #     - densenet_satclip_l40_min_no_prior_trained
-  #     - densenet_satclip_l40_min_no_domain_trained
-  #     - densenet_satclip_l40_min_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DenseNet121 SatCLIP Trained Min
+    runs:
+      - baselines@densenet_baseline
+      - densenet_satclip_l40_min_trained
+      - densenet_satclip_l40_min_no_prior_trained
+      - densenet_satclip_l40_min_no_domain_trained
+      - densenet_satclip_l40_min_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DenseNet121 SatCLIP Trained GeoPrior
-  #   runs:
-  #     - baselines@densenet_baseline
-  #     - densenet_satclip_l40_geoprior_trained
-  #     - densenet_satclip_l40_geoprior_no_prior_trained
-  #     - densenet_satclip_l40_geoprior_no_domain_trained
-  #     - densenet_satclip_l40_geoprior_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DenseNet121 SatCLIP Trained GeoPrior
+    runs:
+      - baselines@densenet_baseline
+      - densenet_satclip_l40_geoprior_trained
+      - densenet_satclip_l40_geoprior_no_prior_trained
+      - densenet_satclip_l40_geoprior_no_domain_trained
+      - densenet_satclip_l40_geoprior_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DINOv3 SatCLIP Trained Sum
-  #   runs:
-  #     - baselines@dinov3_baseline
-  #     - dinov3_satclip_l40_sum_trained
-  #     - dinov3_satclip_l40_sum_no_prior_trained
-  #     - dinov3_satclip_l40_sum_no_domain_trained
-  #     - dinov3_satclip_l40_sum_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DINOv3 SatCLIP Trained Sum
+    runs:
+      - baselines@dinov3_baseline
+      - dinov3_satclip_l40_sum_trained
+      - dinov3_satclip_l40_sum_no_prior_trained
+      - dinov3_satclip_l40_sum_no_domain_trained
+      - dinov3_satclip_l40_sum_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DINOv3 SatCLIP Trained Max
-  #   runs:
-  #     - baselines@dinov3_baseline
-  #     - dinov3_satclip_l40_max_trained
-  #     - dinov3_satclip_l40_max_no_prior_trained
-  #     - dinov3_satclip_l40_max_no_domain_trained
-  #     - dinov3_satclip_l40_max_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DINOv3 SatCLIP Trained Max
+    runs:
+      - baselines@dinov3_baseline
+      - dinov3_satclip_l40_max_trained
+      - dinov3_satclip_l40_max_no_prior_trained
+      - dinov3_satclip_l40_max_no_domain_trained
+      - dinov3_satclip_l40_max_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DINOv3 SatCLIP Trained Min
-  #   runs:
-  #     - baselines@dinov3_baseline
-  #     - dinov3_satclip_l40_min_trained
-  #     - dinov3_satclip_l40_min_no_prior_trained
-  #     - dinov3_satclip_l40_min_no_domain_trained
-  #     - dinov3_satclip_l40_min_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DINOv3 SatCLIP Trained Min
+    runs:
+      - baselines@dinov3_baseline
+      - dinov3_satclip_l40_min_trained
+      - dinov3_satclip_l40_min_no_prior_trained
+      - dinov3_satclip_l40_min_no_domain_trained
+      - dinov3_satclip_l40_min_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null
 
-  # - name: Decision Fusion DINOv3 SatCLIP Trained GeoPrior
-  #   runs:
-  #     - baselines@dinov3_baseline
-  #     - dinov3_satclip_l40_geoprior_trained
-  #     - dinov3_satclip_l40_geoprior_no_prior_trained
-  #     - dinov3_satclip_l40_geoprior_no_domain_trained
-  #     - dinov3_satclip_l40_geoprior_no_prior_no_domain_trained
-  #   param_display_names:
-  #     optim: null
-  #     data.source: null
-  #     data.preprocessed_dir: null
-  #     model.train_model: null
+  - name: Decision Fusion DINOv3 SatCLIP Trained GeoPrior
+    runs:
+      - baselines@dinov3_baseline
+      - dinov3_satclip_l40_geoprior_trained
+      - dinov3_satclip_l40_geoprior_no_prior_trained
+      - dinov3_satclip_l40_geoprior_no_domain_trained
+      - dinov3_satclip_l40_geoprior_no_prior_no_domain_trained
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      model.train_model: null

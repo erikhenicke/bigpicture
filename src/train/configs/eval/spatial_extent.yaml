@@ -5,8 +5,12 @@
 
 primary_metrics:
   - test/test-id-task-acc
+  - test/test-id-top5-task-acc
   - test/test-od-task-acc
+  - test/test-od-top5-task-acc
   - test/test-od-worst-group-task-acc
+  - test/test-od-worst-group-top5-task-acc
+
   - test/test-od-task-ece
 
 metric_directions:

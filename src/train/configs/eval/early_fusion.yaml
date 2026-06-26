@@ -1,10 +1,6 @@
 metric_directions:
   test/test-od-task-ece: min
 
-summary_metrics:
-  - test/test-od-worst-group-task-acc
-  - test/test-od-lr-domain-acc
-
 primary_metrics:
   - test/test-id-task-acc
   - test/test-od-task-acc
@@ -20,6 +16,8 @@ groups:
       - baselines@densenet_baseline
       - densenet_stacked
       - densenet_stacked_no_domain
+      - densenet_stacked_zero_init_no_domain
+      - densenet_stacked_he_init_no_domain
       - baselines@dinov3_baseline
       - dinov3_stacked
       - dinov3_stacked_no_domain

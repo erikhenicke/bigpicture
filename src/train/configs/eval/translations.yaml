@@ -23,14 +23,23 @@ models:
 
 metrics:
   test/test-id-task-acc:
-    plain: "ID Overall Acc."
-    latex: "ID Overall Acc."
+    plain: "ID Acc."
+    latex: "ID Acc."
   test/test-od-task-acc:
-    plain: "OOD Overall Acc."
-    latex: "OOD Overall Acc."
+    plain: "OOD Acc."
+    latex: "OOD Acc."
   test/test-od-worst-group-task-acc:
     plain: "OOD WRA"
     latex: "OOD WRA"
+  test/test-od-worst-group-top5-task-acc:
+    plain: "OOD Top-5 WRA"
+    latex: "OOD Top-5 WRA"
+  test/test-od-top5-task-acc:
+    plain: "OOD Top-5 Acc."
+    latex: "OOD Top-5 Acc."
+  test/test-id-top5-task-acc:
+    plain: "ID Top-5 Acc."
+    latex: "ID Top-5 Acc."
   test/test-od-lr-domain-acc:
     plain: "OOD LR Domain Acc."
     latex: "OOD LR Domain Acc."
@@ -120,6 +129,9 @@ params:
   model.encoder.legendre_polys:
     plain: "L"
     latex: "L"
+  model.encoder.landsat_channel_init:
+    plain: "Ch-Init"
+    latex: "Ch-Init"
   data.lr_feature_run_name:
     plain: "LR Source"
     latex: "LR Source"
