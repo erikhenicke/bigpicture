@@ -17,7 +17,7 @@ cd /home/henicke/git/bigpicture
 # LR-domain test metrics in that run's per-seed metrics file. All five runs
 # live in feature_fusion.yaml.
 srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name film_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name concat_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_hr_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_both_no_domain
+# srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name concat_no_domain
+# srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_no_domain
+# srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_hr_no_domain
+# srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_both_no_domain
