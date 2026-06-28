@@ -2,8 +2,8 @@
 model:
   spatial_encoding:
     coord_channels: false
-    overlap_mask: true
-    overlap_mask_type: gaussian
+    overlap_mask: false
+    overlap_mask_type: none 
     fourier_bands: 4
     fourier_proj_dim: 4
     fourier_on_hr: true
