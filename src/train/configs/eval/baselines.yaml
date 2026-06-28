@@ -16,10 +16,12 @@ groups:
       - densenet_baseline
       - densenet_lr_baseline_no_domain
     
-  - name: ImageNet Weights
+  - name: Model Init
     runs:
       - densenet_baseline
       - densenet_baseline_no_pretrained
+      - densenet_lr_baseline_no_domain
+      - densenet_lr_baseline_no_domain_zero_init
 
   - name: SatCLIP Fusion
     runs:

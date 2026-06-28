@@ -255,6 +255,14 @@ class MultiScaleClassificationModule(LightningModule):
         x: Dict[str, torch.Tensor],
         region_ids: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        if region_ids is not None:
+            # Map raw WILDS region codes to the contiguous domain-label space the
+            # model's per-domain heads are indexed in. Identity in the full
+            # setting; under Leave-Asia-Out the trained regions shift to 0..N-1
+            # and Asia maps to -1 (absent from train/val; at test it only reaches
+            # D3G's eval branch, which never indexes by region_ids). Only
+            # D3GModel routes by region_ids; other models ignore the argument.
+            region_ids = self._domain_targets(region_ids)
         return self.model(x, region_ids=region_ids)
 
     def on_train_start(self) -> None:

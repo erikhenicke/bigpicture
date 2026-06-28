@@ -497,7 +497,7 @@ class D3GModel(FeatureFusionModel):
         self.detach_lr_for_consistency = detach_lr_for_consistency
         self.detach_hr_for_consistency = detach_hr_for_consistency
         self.num_heads = num_domain_labels
-        self.d3g_relation = D3GRelation(learnable_relation_coeff=learnable_relation_coeff, internal_dim=256, lr_features_dim=branches.lr_encoder.out_dim)
+        self.d3g_relation = D3GRelation(learnable_relation_coeff=learnable_relation_coeff, internal_dim=256, lr_features_dim=branches.lr_encoder.out_dim, num_domains=num_domain_labels)
         self.consistency_loss_coeff = consistency_loss_coeff
         self.pred_domain_for_d3g = pred_domain_for_d3g
         self.task_classifier = None

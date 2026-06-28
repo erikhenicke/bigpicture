@@ -15,11 +15,14 @@ groups:
     runs:
       - baselines@densenet_baseline
       - densenet_stacked
+      - densenet_stacked_zero_init
       - densenet_stacked_no_domain
       - densenet_stacked_zero_init_no_domain
       - densenet_stacked_he_init_no_domain
       - baselines@dinov3_baseline
       - dinov3_stacked
+      - dinov3_stacked_zero_init
       - dinov3_stacked_no_domain
+      - dinov3_stacked_zero_init_no_domain
     additional_metrics:
       - test/test-od-lr-domain-acc
