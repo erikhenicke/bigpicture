@@ -302,3 +302,18 @@ experiments:
     overrides:
       spatial: om_gauss_pe_freq
       trainer.branch_ablation: true
+
+  # ----------------- D3G + spatial encoding ----------------------
+  # D3G's LR branch only drives domain weighting; the LR coord grid is constant,
+  # so Fourier PE is applied to the HR branch only (per-sample scene scale via
+  # img_span_km). The per-sample overlap mask still goes to LR. d3g_om_gauss is
+  # the mask-only control to isolate the HR-PE contribution.
+  d3g_om_gauss:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss
+
+  d3g_om_gauss_pe_freq_hr:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr

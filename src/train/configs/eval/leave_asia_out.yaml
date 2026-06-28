@@ -18,6 +18,7 @@ groups:
       - densenet_lao
       - film_lao
       - film_om_gauss_pe_freq_lr_crop_14_9km_lao
+      - d3g_lao
     additional_metrics:
       - test/test-od-task-ece
     param_display_names:

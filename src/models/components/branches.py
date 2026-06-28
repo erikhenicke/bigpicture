@@ -222,7 +222,8 @@ class DualBranch(nn.Module):
         hr_encoder: Branch,
         lr_encoder: Branch,
         landsat_channels: int = 6,
-        coord_channels: bool = False,
+        coord_channels_hr: bool = False,
+        coord_channels_lr: bool = False,
         hr_spatial_encoding: Optional[SpatialEncoding] = None,
         lr_spatial_encoding: Optional[SpatialEncoding] = None,
     ):
@@ -231,7 +232,8 @@ class DualBranch(nn.Module):
         self.hr_encoder = hr_encoder
         self.lr_encoder = lr_encoder
         self.landsat_channels = landsat_channels
-        self.coord_channels = coord_channels
+        self.coord_channels_hr = coord_channels_hr
+        self.coord_channels_lr = coord_channels_lr
         self.hr_spatial_encoding = hr_spatial_encoding
         self.lr_spatial_encoding = lr_spatial_encoding
 
@@ -241,8 +243,9 @@ class DualBranch(nn.Module):
 
         extra_hr, extra_lr = [], []
 
-        if self.coord_channels:
+        if self.coord_channels_hr:
             extra_hr.append(x["coord_grid_hr"])
+        if self.coord_channels_lr:
             extra_lr.append(x["coord_grid_lr"])
 
         if "overlap_mask" in x:

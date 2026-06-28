@@ -1,0 +1,14 @@
+# @package _global_
+# HR-only Fourier PE + per-sample Gaussian overlap mask on LR.
+# The LR coord grid is constant (fixed footprint), so LR Fourier PE is a no-op;
+# only the HR coord grid is per-sample (depends on img_span_km) and encodes scene
+# scale. Intended for D3G, whose LR branch only drives domain weighting.
+model:
+  spatial_encoding:
+    coord_channels: false
+    overlap_mask: true
+    overlap_mask_type: gaussian
+    fourier_bands: 4
+    fourier_proj_dim: 4
+    fourier_on_hr: true
+    fourier_on_lr: false

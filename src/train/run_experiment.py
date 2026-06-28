@@ -42,32 +42,53 @@ def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, sh
 def _parse_spatial_cfg(cfg: DictConfig):
     spatial_cfg = cfg.model.get("spatial_encoding", {})
     coord_channels = spatial_cfg.get("coord_channels", False)
+    # Per-branch raw-coord toggles (default both on -> existing symmetric behaviour).
+    # Like the Fourier toggles: the LR coord grid is constant, so coord_on_lr=false
+    # drops the (useless) raw LR coords while keeping HR scene-scale coords.
+    coord_on_hr = spatial_cfg.get("coord_on_hr", True)
+    coord_on_lr = spatial_cfg.get("coord_on_lr", True)
     overlap_mask = spatial_cfg.get("overlap_mask", False)
     fourier_bands = spatial_cfg.get("fourier_bands", 0)
     fourier_proj_dim = spatial_cfg.get("fourier_proj_dim", 0)
     overlap_mask_type = spatial_cfg.get("overlap_mask_type", "binary")
+    # Per-branch Fourier toggles (default both on -> existing symmetric behaviour).
+    # The LR coord grid is constant, so LR Fourier PE is a no-op; fourier_on_lr=false
+    # skips it (and its wasted input channels) while keeping HR scene-scale PE.
+    fourier_on_hr = spatial_cfg.get("fourier_on_hr", True)
+    fourier_on_lr = spatial_cfg.get("fourier_on_lr", True)
+
+    use_coord_hr = coord_channels and coord_on_hr
+    use_coord_lr = coord_channels and coord_on_lr
+
+    use_fourier = fourier_proj_dim > 0 and fourier_bands > 0
+    use_fourier_hr = use_fourier and fourier_on_hr
+    use_fourier_lr = use_fourier and fourier_on_lr
 
     hr_extra, lr_extra = 0, 0
-    if coord_channels:
+    if use_coord_hr:
         hr_extra += 2
+    if use_coord_lr:
         lr_extra += 2
     if overlap_mask:
         lr_extra += 1
-    use_fourier = fourier_proj_dim > 0 and fourier_bands > 0
-    if use_fourier:
+    if use_fourier_hr:
         hr_extra += fourier_proj_dim
+    if use_fourier_lr:
         lr_extra += fourier_proj_dim
 
-    needs_coord_grid = coord_channels or use_fourier
+    needs_coord_grid = use_coord_hr or use_coord_lr or use_fourier_hr or use_fourier_lr
     needs_overlap_mask = overlap_mask
 
     return {
-        "coord_channels": coord_channels,
+        "use_coord_hr": use_coord_hr,
+        "use_coord_lr": use_coord_lr,
         "overlap_mask": overlap_mask,
         "overlap_mask_type": overlap_mask_type,
         "fourier_bands": fourier_bands,
         "fourier_proj_dim": fourier_proj_dim,
         "use_fourier": use_fourier,
+        "use_fourier_hr": use_fourier_hr,
+        "use_fourier_lr": use_fourier_lr,
         "hr_extra": hr_extra,
         "lr_extra": lr_extra,
         "needs_coord_grid": needs_coord_grid,
@@ -203,15 +224,17 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
 
             hr_spatial_enc = None
             lr_spatial_enc = None
-            if sc["use_fourier"]:
+            if sc["use_fourier_hr"]:
                 hr_spatial_enc = SpatialEncoding(sc["fourier_bands"], sc["fourier_proj_dim"])
+            if sc["use_fourier_lr"]:
                 lr_spatial_enc = SpatialEncoding(sc["fourier_bands"], sc["fourier_proj_dim"])
 
             branches = instantiate(
                 cfg.model.branches,
                 hr_encoder=hr_encoder,
                 lr_encoder=lr_encoder,
-                coord_channels=sc["coord_channels"],
+                coord_channels_hr=sc["use_coord_hr"],
+                coord_channels_lr=sc["use_coord_lr"],
                 hr_spatial_encoding=hr_spatial_enc,
                 lr_spatial_encoding=lr_spatial_enc,
             )

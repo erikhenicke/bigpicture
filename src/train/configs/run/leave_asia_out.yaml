@@ -25,3 +25,6 @@ experiments:
       spatial: om_gauss_pe_freq
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
+
+  d3g_lao:
+    model: densenet_d3g
