@@ -19,6 +19,11 @@ experiments:
   film_lao:
     model: densenet_film
 
+  film_om_gauss_pe_freq_lao:
+    model: densenet_film
+    overrides:
+      spatial: om_gauss_pe_freq
+
   film_om_gauss_pe_freq_lr_crop_14_9km_lao:
     model: densenet_film
     overrides:
@@ -26,5 +31,7 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
 
-  d3g_lao:
+  d3g_detach_hr_lao:
     model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
