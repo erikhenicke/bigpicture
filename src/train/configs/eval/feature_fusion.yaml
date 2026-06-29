@@ -51,6 +51,7 @@ groups:
       - d3g
       - d3g_no_domain
       - d3g_detach_lr
+      - d3g_detach_lr_no_domain
       - d3g_detach_hr
       - d3g_detach_hr_no_domain
       - d3g_detach_both
@@ -89,6 +90,9 @@ groups:
       - film_om_gauss_pe_freq
       - film_om_bin_pe
       - film_om_gauss_pe
+      - film_om_gauss_pe_freq_hr
+      - d3g_detach_both_no_domain_pe_freq_hr
+      - d3g_detach_hr_om_gauss_pe_freq_hr
   
   - name: DINOv3 FiLM
     runs:
@@ -96,8 +100,3 @@ groups:
       - dinov3_film
       - dinov3_film_no_domain
       - dinov3_film_om_gauss_pe_freq
-
-  - name: Channel Ablation
-    runs:
-      - film_om_gauss_pe_freq_lr_crop_14_9km
-      - film_om_gauss_pe_freq_lr_crop_14_9km_rgb

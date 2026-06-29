@@ -266,6 +266,24 @@ experiments:
       spatial: om_gauss_pe
       trainer.branch_ablation: true
 
+  concat_no_domain_pe_freq:
+    model: densenet_concat
+    overrides:
+      spatial: pe_freq
+      model.lr_domain_loss_coeff: 0.0
+
+  concat_no_domain_om_gauss:
+    model: densenet_concat
+    overrides:
+      spatial: om_gauss
+      model.lr_domain_loss_coeff: 0.0
+
+  concat_no_domain_om_gauss_pe_freq:
+    model: densenet_concat
+    overrides:
+      spatial: om_gauss_pe_freq
+      model.lr_domain_loss_coeff: 0.0
+
   # ----------------- Alternate Freezing ----------------------
   multsim_alternate_branches:
     model: densenet_multsim
@@ -309,6 +327,8 @@ experiments:
       spatial: om_gauss_pe_freq
       trainer.branch_ablation: true
 
+  # dinov3_d3g:
+
   # ----------------- Partial spatial encoding ----------------------
   d3g_detach_both_no_domain_pe_freq_hr:
     model: densenet_d3g
@@ -323,6 +343,18 @@ experiments:
     overrides:
       model.detach_hr_for_consistency: true
       spatial: om_gauss_pe_freq_hr
+
+  d3g_detach_hr_om_gauss:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      spatial: om_gauss
+
+  d3g_detach_hr_pe_freq_hr:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      spatial: pe_freq_hr
 
   film_om_gauss_pe_freq_hr:
     model: densenet_film

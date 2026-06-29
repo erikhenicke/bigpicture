@@ -132,6 +132,13 @@ params:
   model.encoder.landsat_channel_init:
     plain: "Ch-Init"
     latex: "Ch-Init"
+  model.landsat_in_channels:
+    plain: "In-Ch"
+    latex: "In-Ch"
+    values:
+      3:
+        plain: "RGB"
+        latex: "RGB"
   data.lr_feature_run_name:
     plain: "LR Source"
     latex: "LR Source"

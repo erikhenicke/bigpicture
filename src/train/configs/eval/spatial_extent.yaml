@@ -35,3 +35,13 @@ groups:
       data.source: null
       data.preprocessed_dir: null
       spatial: null
+
+  - name: Channel Ablation
+    runs:
+      - film_om_gauss_pe_freq_lr_crop_14_9km
+      - film_om_gauss_pe_freq_lr_crop_14_9km_rgb
+    param_display_names:
+      optim: null
+      data.source: null
+      data.preprocessed_dir: null
+      spatial: null

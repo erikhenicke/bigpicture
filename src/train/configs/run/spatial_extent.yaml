@@ -59,6 +59,8 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
 
+  # ------------------------------------------------------------
+
   film_om_gauss_pe_freq_lr_crop_14_9km_rgb:
     model: densenet_film
     overrides:
@@ -66,3 +68,54 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
       model.landsat_in_channels: 3
+
+  # ------------------------------------------------------------
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_1km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 1.0008629235182365
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_1_5km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 1.5012943852773546
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_3_4km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 3.36
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_6_7km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true 
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 6.720
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_10km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 10.08
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_14_9km:
+    model: densenet_d3g
+    overrides:
+      spatial: om_gauss_pe_freq_hr
+      model.detach_hr_for_consistency: true
+      data.preprocessed_dir: FMoW_LandSat_FullRes
+      data.lr_crop_km: 14.91
+
