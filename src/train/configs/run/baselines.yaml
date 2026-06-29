@@ -2,7 +2,7 @@ slurm:
   partition: robolab
   cpus_per_task: 4
   mem_per_cpu: 8GB
-  nodelist: gaia4,gaia5,gaia7
+  nodelist: gaia4,gaia7
 
 global_overrides:
   optim: adam_warmup_cosine
