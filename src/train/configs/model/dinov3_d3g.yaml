@@ -1,0 +1,45 @@
+# @package _global_
+model:
+  landsat_in_channels: 6
+  hr_pretrained: true
+  lr_pretrained: true
+  landsat_channel_init: average
+
+  hr_encoder:
+    _target_: models.components.branches.DINOv3Branch
+    in_channels: 3
+    pretrained: ${model.hr_pretrained}
+    model_size: base
+
+  lr_encoder:
+    _target_: models.components.branches.DINOv3Branch
+    in_channels: ${model.landsat_in_channels}
+    pretrained: ${model.lr_pretrained}
+    landsat_channel_init: ${model.landsat_channel_init}
+    model_size: base
+    bgr_input: true 
+
+  branches:
+    _target_: models.components.branches.DualBranch
+    landsat_channels: ${model.landsat_in_channels}
+
+  model:
+    _target_: models.components.fusion_models.D3GModel
+
+  lr_domain_loss_coeff: 0.1176
+  consistency_loss_coeff: 0.2941
+  learnable_relation_coeff: 0.8
+  pred_domain_for_d3g: false
+  domain_optimizer_lr_factor: 0.1
+  detach_lr_for_consistency: false
+  detach_hr_for_consistency: false
+
+run_name: train-dinov3-d3g
+data:
+  batch_size: 32
+  num_workers: 8
+trainer:
+  max_epochs: 10
+optim:
+  optimizer:
+    lr: 1e-4

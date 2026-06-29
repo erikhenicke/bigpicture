@@ -35,3 +35,9 @@ experiments:
     model: densenet_d3g
     overrides:
       model.detach_hr_for_consistency: true
+
+  d3g_detach_hr_om_gauss_pe_freq_hr_lao:
+    model: densenet_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      spatial: om_gauss_pe_freq_hr

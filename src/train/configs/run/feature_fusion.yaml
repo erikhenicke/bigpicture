@@ -327,7 +327,19 @@ experiments:
       spatial: om_gauss_pe_freq
       trainer.branch_ablation: true
 
-  # dinov3_d3g:
+  dinov3_d3g:
+    model: dinov3_d3g
+
+  dinov3_d3g_detach_hr:
+    model: dinov3_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+
+  dinov3_detach_hr_om_gauss_pe_freq_hr:
+    model: dinov3_d3g
+    overrides:
+      model.detach_hr_for_consistency: true
+      spatial: om_gauss_pe_freq_hr
 
   # ----------------- Partial spatial encoding ----------------------
   d3g_detach_both_no_domain_pe_freq_hr:
