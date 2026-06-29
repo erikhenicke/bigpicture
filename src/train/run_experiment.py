@@ -158,12 +158,20 @@ def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationMod
     )
 
     if model_target.endswith("SingleBranchModel"):
-        hr_encoder = instantiate(cfg.model.hr_encoder)
+        sc = _parse_spatial_cfg(cfg)
+        hr_encoder = instantiate(cfg.model.hr_encoder, in_channels=3 + sc["hr_extra"])
+        hr_spatial_enc = (
+            SpatialEncoding(sc["fourier_bands"], sc["fourier_proj_dim"])
+            if sc["use_fourier_hr"]
+            else None
+        )
         model = instantiate(
             cfg.model.model,
             encoder=hr_encoder,
             num_task_labels=cfg.num_task_labels,
             num_domain_labels=num_domain_labels,
+            coord_channels_hr=sc["use_coord_hr"],
+            hr_spatial_encoding=hr_spatial_enc,
         )
     elif model_target.endswith("SingleBranchLRModel"):
         lr_encoder = instantiate(cfg.model.lr_encoder)

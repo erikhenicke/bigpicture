@@ -1,0 +1,12 @@
+# @package _global_
+model:
+  spatial_encoding:
+    coord_channels: true
+    coord_on_hr: true
+    coord_on_lr: false
+    overlap_mask: false
+    overlap_mask_type: none 
+    fourier_bands: 0 
+    fourier_proj_dim: 0 
+    fourier_on_hr: false 
+    fourier_on_lr: false

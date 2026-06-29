@@ -66,11 +66,26 @@ class MultiScaleModel(nn.Module, ABC):
 
 
 class SingleBranchModel(MultiScaleModel):
-    """HR-only baseline: single encoder + task classifier, no fusion."""
+    """HR-only baseline: single encoder + task classifier, no fusion.
 
-    def __init__(self, encoder: Branch, num_task_labels: int, num_domain_labels: int = 6):
+    Optionally augments the HR input with spatial encoding (raw coord channels
+    and/or Fourier positional encoding), mirroring the HR handling in
+    ``DualBranch``. The encoder must already be built with the matching extra
+    ``in_channels`` (see ``make_model``).
+    """
+
+    def __init__(
+        self,
+        encoder: Branch,
+        num_task_labels: int,
+        num_domain_labels: int = 6,
+        coord_channels_hr: bool = False,
+        hr_spatial_encoding: Optional[nn.Module] = None,
+    ):
         super().__init__()
         self.encoder = encoder
+        self.coord_channels_hr = coord_channels_hr
+        self.hr_spatial_encoding = hr_spatial_encoding
         self.task_classifier = nn.Linear(encoder.out_dim, num_task_labels)
         self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
@@ -87,14 +102,29 @@ class SingleBranchModel(MultiScaleModel):
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
-        features = self.encoder(x["rgb"])
+        hr_image = x["rgb"]
+
+        # Independent, config-driven augmentations (mirrors DualBranch HR handling):
+        # raw coords and Fourier PE can each be enabled on their own or together.
+        extra_hr = []
+        if self.coord_channels_hr:
+            extra_hr.append(x["coord_grid_hr"])
+        if self.hr_spatial_encoding is not None and "coord_grid_hr" in x:
+            extra_hr.append(self.hr_spatial_encoding(x["coord_grid_hr"]))
+        if extra_hr:
+            hr_image = torch.cat([hr_image] + extra_hr, dim=1)
+
+        features = self.encoder(hr_image)
         return {
             "task_logits": self.task_classifier(features),
             "hr_domain_logits": self.hr_domain_classifier(features.detach()),
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
-        return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+        params = list(self.encoder.parameters()) + list(self.task_classifier.parameters())
+        if self.hr_spatial_encoding is not None:
+            params += list(self.hr_spatial_encoding.parameters())
+        return params
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
         return []

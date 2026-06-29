@@ -133,6 +133,11 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_ 
 
   # ----------------------------------------------------------------
+  densenet_baseline_pe_hr:
+    model: densenet_baseline
+    overrides:
+      spatial: pe_hr
+
   densenet_baseline_pe_freq_hr:
     model: densenet_baseline
     overrides:
