@@ -16,8 +16,4 @@ cd /home/henicke/git/bigpicture
 # head). Each run retrains only the head on frozen LR features and updates the
 # LR-domain test metrics in that run's per-seed metrics file. All five runs
 # live in feature_fusion.yaml.
-# srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name film_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name concat_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_hr_no_domain
-srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_both_no_domain
+srun uv run --env-file .env src/results/retrain_lr_domain.py --config src/train/configs/run/feature_fusion.yaml --run-name d3g_detach_lr_no_domain
