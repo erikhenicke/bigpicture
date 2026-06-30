@@ -30,6 +30,13 @@ groups:
       - film_om_gauss_pe_freq_lr_crop_6_7km
       - film_om_gauss_pe_freq_lr_crop_10km
       - film_om_gauss_pe_freq_lr_crop_14_9km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_1km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_1_5km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_3_4km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_6_7km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_10km
+      - d3g_detach_hr_om_gauss_pe_freq_hr_lr_crop_14_9km
+
     param_display_names:
       optim: null
       data.source: null

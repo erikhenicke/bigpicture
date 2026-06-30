@@ -93,6 +93,8 @@ groups:
       - film_om_gauss_pe_freq_hr
       - d3g_detach_both_no_domain_pe_freq_hr
       - d3g_detach_hr_om_gauss_pe_freq_hr
+      - d3g_detach_hr_om_gauss
+      - d3g_detach_hr_pe_freq_hr
   
   - name: DINOv3 FiLM
     runs:
