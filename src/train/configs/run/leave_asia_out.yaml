@@ -31,6 +31,9 @@ experiments:
       data.preprocessed_dir: FMoW_LandSat_FullRes
       data.lr_crop_km: 14.91
 
+  d3g_lao:
+    model: densenet_d3g
+
   d3g_detach_hr_lao:
     model: densenet_d3g
     overrides:
