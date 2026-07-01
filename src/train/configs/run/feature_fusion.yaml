@@ -6,7 +6,6 @@ slurm:
 
 global_overrides:
   data.frac: 1.0 
-  trainer.max_epochs: 50
   optim: adam_warmup_cosine
   data.source: preprocessed
   data.preprocessed_dir: FMoW_LandSat_Norm

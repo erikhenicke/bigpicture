@@ -200,6 +200,15 @@ params:
       om_gauss_pe:
         plain: "OM_gauss, PE"
         latex: '$\text{OM}_{\text{gauss}}, \text{PE}$'
+      pe_freq_hr:
+        plain: "PE_freq^HR"
+        latex: '$\text{PE}_{\text{freq}}^{\text{HR}}$'
+      pe_hr:
+        plain: "PE^HR"
+        latex: '$\text{PE}^{\text{HR}}$'
+      om_gauss_pe_freq_hr:
+        plain: "OM_gauss, PE_freq^HR"
+        latex: '$\text{OM}_{\text{gauss}}, \text{PE}_{\text{freq}}^{\text{HR}}$'
   trainer.alternating_freeze:
     hidden: true 
   trainer.alternating_freeze_period:

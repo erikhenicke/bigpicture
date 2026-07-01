@@ -95,6 +95,9 @@ groups:
       - d3g_detach_hr_om_gauss_pe_freq_hr
       - d3g_detach_hr_om_gauss
       - d3g_detach_hr_pe_freq_hr
+    additional_metrics:
+      - test/test-od-task-ece
+
   
   - name: DINOv3 FiLM
     runs:
@@ -102,3 +105,7 @@ groups:
       - dinov3_film
       - dinov3_film_no_domain
       - dinov3_film_om_gauss_pe_freq
+      - dinov3_d3g
+      - dinov3_d3g_detach_hr
+      - dinov3_detach_hr_om_gauss_pe_freq_hr
+
