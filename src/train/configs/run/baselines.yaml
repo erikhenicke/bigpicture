@@ -93,22 +93,22 @@ experiments:
   densenet_le_concat_l_40:
     model: densenet_le_concat
     overrides:
-      model.encoder.legendre_polys: 40
+      model.lr_encoder.legendre_polys: 40
  
   densenet_le_film_l_40:
     model: densenet_le_film
     overrides:
-      model.encoder.legendre_polys: 40
+      model.lr_encoder.legendre_polys: 40
 
   densenet_le_d3g_l_40:
     model: densenet_le_d3g
     overrides:
-      model.encoder.legendre_polys: 40
+      model.lr_encoder.legendre_polys: 40
   
   densenet_le_geoprior_l_40:
     model: densenet_le_geoprior
     overrides:
-      model.encoder.legendre_polys: 40
+      model.lr_encoder.legendre_polys: 40
 
   # ---------------- DomainDualBranch ------------------------------
   # Location-encoder ablation (Crasto & Rolf 2026, Sec. 5.3): location encoder

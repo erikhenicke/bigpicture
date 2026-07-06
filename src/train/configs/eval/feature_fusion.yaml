@@ -1,5 +1,8 @@
 metric_directions:
   test/test-od-task-ece: min
+  test/test-id-task-ece: min
+  test/test-od-task-entropy-correct: min
+  test/test-id-task-entropy-correct: min
 
 summary_metrics:
   - test/test-od-worst-group-task-acc
@@ -9,10 +12,25 @@ summary_metrics:
 primary_metrics:
   - test/test-id-task-acc
   - test/test-id-top5-task-acc
+  - test/test-id-region-europe-task-acc
+  - test/test-id-region-asia-task-acc
+  - test/test-id-region-americas-task-acc
+  - test/test-id-region-africa-task-acc
+  - test/test-id-region-oceania-task-acc
+  - test/test-id-task-ece
+  - test/test-id-task-entropy-correct
+  - test/test-id-task-entropy-incorrect
   - test/test-od-task-acc
-  - test/test-od-top5-task-acc
-  - test/test-od-worst-group-task-acc
-  - test/test-od-worst-group-top5-task-acc
+  - test/test-od-top5-task-acc 
+  - test/test-od-region-europe-task-acc
+  - test/test-od-region-asia-task-acc
+  - test/test-od-region-americas-task-acc
+  - test/test-od-region-africa-task-acc
+  - test/test-od-region-oceania-task-acc
+  - test/test-od-task-ece
+  - test/test-od-task-entropy-correct
+  - test/test-od-task-entropy-incorrect
+
 
 # Per-class accuracy gain/loss plots (src/results/class_eval.py). Each comparison
 # run gets a Test-OOD plot and a worst-region plot (baseline's worst OOD region),
@@ -33,6 +51,7 @@ groups:
       - baselines@densenet_baseline
       - concat_no_domain
       - film_no_domain
+      - d3g_no_domain
 
   - name: Fusion Comparison with Domain
     runs:
@@ -43,11 +62,19 @@ groups:
     additional_metrics:
       - test/test-od-lr-domain-acc
 
-  - name: Gradient Flow 
+  - name: Loss-Gradient-Ablation FiLM Concat
     runs:
+      - baselines@densenet_baseline
       - film
       - film_detach
-      - film_no_domain
+      - concat
+      - concat_detach
+    additional_metrics:
+      - test/test-od-lr-domain-acc
+  
+  - name: Loss-Gradient-Ablation D3G 
+    runs:
+      - baselines@densenet_baseline
       - d3g
       - d3g_no_domain
       - d3g_detach_lr
@@ -56,12 +83,9 @@ groups:
       - d3g_detach_hr_no_domain
       - d3g_detach_both
       - d3g_detach_both_no_domain
-      - concat
-      - concat_no_domain
-      - concat_detach
     additional_metrics:
       - test/test-od-lr-domain-acc
-  
+
   - name: ReLU Ablation
     runs:
       - film
@@ -70,17 +94,8 @@ groups:
       - test/test-od-lr-ablated-worst-group-task-acc
       - test/test-od-hr-ablated-worst-group-task-acc
 
-  - name: Spatial Encodings
+  - name: Spatial Encodings FiLM
     runs:
-      - baselines@densenet_baseline
-      - film
-      - film_om_gauss
-      - film_pe_freq
-      - film_om_gauss_pe_freq
-          
-  - name: Spatial Encodings Full
-    runs:
-      - baselines@densenet_baseline
       - film
       - film_om_bin
       - film_om_gauss
@@ -91,15 +106,17 @@ groups:
       - film_om_bin_pe
       - film_om_gauss_pe
       - film_om_gauss_pe_freq_hr
-      - d3g_detach_both_no_domain_pe_freq_hr
+          
+  - name: Spatial Encodings D3G 
+    runs:
+      - d3g_detach_hr
       - d3g_detach_hr_om_gauss_pe_freq_hr
       - d3g_detach_hr_om_gauss
       - d3g_detach_hr_pe_freq_hr
-    additional_metrics:
-      - test/test-od-task-ece
-
+      - d3g_detach_both_no_domain
+      - d3g_detach_both_no_domain_pe_freq_hr
   
-  - name: DINOv3 FiLM
+  - name: DINOv3 Spatial Encodings 
     runs:
       - baselines@dinov3_baseline
       - dinov3_film

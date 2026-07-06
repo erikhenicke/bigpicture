@@ -16,6 +16,8 @@ models:
   dinov3_film: "DINOv3 FiLM"
   dinov3_baseline: "DINOv3"
   satclip_le_enc_baseline: "SatCLIP"
+  densenet_stacked: "Dense EF"
+  dinov3_stacked: "Dino EF"
 
   # Decision Fusion
   densenet_decision_fusion: "DenseNet-121"
@@ -52,12 +54,57 @@ metrics:
   test/test-od-task-ece:
     plain: "OOD ECE"
     latex: "OOD ECE"
+  test/test-id-task-ece:
+    plain: "ID ECE"
+    latex: "ID ECE"
   test/test-od-lr-ablated-worst-group-task-acc:
     plain: "OD Acc LR Constant"
     latex: "OD Acc LR Constant"
   test/test-od-hr-ablated-worst-group-task-acc:
     plain: "OD Acc HR Constant"
     latex: "OD Acc HR Constant"
+  test/test-od-region-africa-task-acc:
+    plain: "OOD Africa"
+    latex: "OOD Africa"
+  test/test-od-region-europe-task-acc:
+    plain: "OOD Europe"
+    latex: "OOD Europe"
+  test/test-od-region-americas-task-acc:
+    plain: "OOD Americas"
+    latex: "OOD Americas"
+  test/test-od-region-asia-task-acc:
+    plain: "OOD Asia"
+    latex: "OOD Asia"
+  test/test-od-region-oceania-task-acc:
+    plain: "OOD Oceania"
+    latex: "OOD Oceania"
+  test/test-id-region-africa-task-acc:
+    plain: "ID Africa"
+    latex: "ID Africa"
+  test/test-id-region-europe-task-acc:
+    plain: "ID Europe"
+    latex: "ID Europe"
+  test/test-id-region-americas-task-acc:
+    plain: "ID Americas"
+    latex: "ID Americas"
+  test/test-id-region-asia-task-acc:
+    plain: "ID Asia"
+    latex: "ID Asia"
+  test/test-id-region-oceania-task-acc:
+    plain: "ID Oceania"
+    latex: "ID Oceania"
+  test/test-id-task-entropy-correct:
+    plain: "ID H^+"
+    latex: 'ID $\text{H}^+$'
+  test/test-id-task-entropy-incorrect:
+    plain: "ID H^-"
+    latex: 'ID $\text{H}^-$'
+  test/test-od-task-entropy-correct:
+    plain: "OOD H^+"
+    latex: 'OOD $\text{H}^+$'
+  test/test-od-task-entropy-incorrect:
+    plain: "OOD H^-"
+    latex: 'OOD $\text{H}^-$'
 
 
 params:
@@ -132,6 +179,13 @@ params:
   model.encoder.landsat_channel_init:
     plain: "Ch-Init"
     latex: "Ch-Init"
+    values:
+      zero:
+        plain: "zero"
+        latex: "zero"
+      he:
+        plain: "he"
+        latex: "he"
   model.landsat_in_channels:
     plain: "In-Ch"
     latex: "In-Ch"

@@ -3,6 +3,12 @@ primary_metrics:
   - test/test-od-task-acc
   - test/test-od-worst-group-task-acc
 
+metric_directions:
+  test/test-id-task-ece: min
+  test/test-od-task-ece: min
+  test/test-id-task-entropy-correct: min
+  test/test-od-task-entropy-correct: min
+
 groups:
   - name: Baselines
     runs:
@@ -11,17 +17,23 @@ groups:
       - efficientnet_baseline
       - efficientformer_baseline
 
-  - name: HR LR Encoder Comparison
-    runs:
-      - densenet_baseline
-      - densenet_lr_baseline_no_domain
-    
-  - name: Model Init
+  - name: HR Pretrain 
     runs:
       - densenet_baseline
       - densenet_baseline_no_pretrained
+
+  - name: LR Domain
+    runs:
+      - densenet_baseline
       - densenet_lr_baseline_no_domain
-      - densenet_lr_baseline_no_domain_zero_init
+      - densenet_lr_baseline
+      - dinov3_baseline
+      - dinov3_lr_baseline_no_domain
+      - dinov3_lr_baseline
+      - satclip_le_enc_baseline_l_40
+      - satclip_le_enc_baseline_l_40_no_domain
+    additional_metrics:
+      - test/test-od-lr-domain-acc
 
   - name: SatCLIP Fusion
     runs:
@@ -30,7 +42,26 @@ groups:
       - densenet_le_film
       - densenet_le_d3g
     additional_metrics:
+      - test/test-id-top5-task-acc
+      - test/test-id-region-europe-task-acc
+      - test/test-id-region-asia-task-acc
+      - test/test-id-region-americas-task-acc
+      - test/test-id-region-africa-task-acc
+      - test/test-id-region-oceania-task-acc
+      - test/test-id-task-ece
+      - test/test-id-task-entropy-correct
+      - test/test-id-task-entropy-incorrect
+      - test/test-od-top5-task-acc 
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+      - test/test-od-task-ece
+      - test/test-od-task-entropy-correct
+      - test/test-od-task-entropy-incorrect
       - test/test-od-lr-domain-acc
+
 
   - name: Domain Fusion
     runs:
@@ -38,9 +69,48 @@ groups:
       - densenet_de_concat
       - densenet_de_film
       - densenet_de_d3g
+    additional_metrics:
+      - test/test-id-top5-task-acc
+      - test/test-id-region-europe-task-acc
+      - test/test-id-region-asia-task-acc
+      - test/test-id-region-americas-task-acc
+      - test/test-id-region-africa-task-acc
+      - test/test-id-region-oceania-task-acc
+      - test/test-id-task-ece
+      - test/test-id-task-entropy-correct
+      - test/test-id-task-entropy-incorrect
+      - test/test-od-top5-task-acc 
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+      - test/test-od-task-ece
+      - test/test-od-task-entropy-correct
+      - test/test-od-task-entropy-incorrect
+
 
   - name: Spatial Encoding
     runs:
       - densenet_baseline
       - densenet_baseline_pe_hr
       - densenet_baseline_pe_freq_hr
+    additional_metrics:
+      - test/test-id-top5-task-acc
+      - test/test-id-region-europe-task-acc
+      - test/test-id-region-asia-task-acc
+      - test/test-id-region-americas-task-acc
+      - test/test-id-region-africa-task-acc
+      - test/test-id-region-oceania-task-acc
+      - test/test-id-task-ece
+      - test/test-id-task-entropy-correct
+      - test/test-id-task-entropy-incorrect
+      - test/test-od-top5-task-acc 
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+      - test/test-od-task-ece
+      - test/test-od-task-entropy-correct
+      - test/test-od-task-entropy-incorrect

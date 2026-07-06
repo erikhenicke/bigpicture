@@ -35,6 +35,10 @@ LATEX_TABLE_TEMPLATE = """\
 \\usepackage[margin=2.2cm]{{geometry}}
 \\usepackage{{booktabs}}
 \\usepackage{{siunitx}}
+\\usepackage{{graphicx}}
+\\usepackage{{multirow}}
+
+\\newcommand{{\\hbf}}[1]{{\\scalebox{{0.8683}}[1]{{\\textbf{{#1}}}}}}
 
 \\title{{Seeing the Big Picture}}
 \\author{{Erik Henicke}}
@@ -111,10 +115,13 @@ def format_cell(values: list[float], format_percent: bool = False, format_count:
         return str(count)
     mean = np.mean(values)
     std = np.std(values)
-    sep = r"$\pm$" if latex else "±"
     if format_percent:
-        return f"{mean*100:.2f} {sep} {std*100:.2f}"
-    return f"{mean:.4f} {sep} {std:.4f}"
+        if latex:
+            return f"{mean*100:.1f} ({std*100:.1f})"
+        return f"{mean*100:.1f} ± {std*100:.1f}"
+    if latex:
+        return f"{mean:.2f} ({std:.2f})"
+    return f"{mean:.2f} ± {std:.2f}"
 
 
 def format_metric_name(
@@ -187,7 +194,23 @@ def format_metric_name(
     return cleaned
 
 
-METRIC_CHUNK_SIZE = 4
+METRIC_CHUNK_SIZE = 5 
+
+
+def _chunk_metrics(metric_cols: list[str], chunk_size: int) -> list[list[str]]:
+    """Split metric_cols into as-equal-as-possible chunks of at most chunk_size each."""
+    n = len(metric_cols)
+    if n <= chunk_size:
+        return [metric_cols]
+    num_chunks = -(-n // chunk_size)  # ceil division
+    base, extra = divmod(n, num_chunks)
+    chunks = []
+    start = 0
+    for i in range(num_chunks):
+        size = base + (1 if i < extra else 0)
+        chunks.append(metric_cols[start:start + size])
+        start += size
+    return chunks
 
 
 def _parse_mean(cell: str) -> float | None:
@@ -197,34 +220,26 @@ def _parse_mean(cell: str) -> float | None:
         return None
 
 
-def _best_row_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict[str, str]) -> dict[str, int]:
-    best: dict[str, int] = {}
+def _ranked_rows_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict[str, str]) -> dict[str, list[int]]:
+    """Return, per column, row indices with parseable values ordered from best to worst."""
+    ranked: dict[str, list[int]] = {}
     for col in metric_cols:
         minimize = directions.get(col, "max") == "min"
-        sentinel = float("inf") if minimize else -float("inf")
-        best_val, best_idx = sentinel, None
-        for i, cell in enumerate(df[col]):
-            val = _parse_mean(cell)
-            if val is None:
-                continue
-            if (minimize and val < best_val) or (not minimize and val > best_val):
-                best_val, best_idx = val, i
-        if best_idx is not None:
-            best[col] = best_idx
-    return best
+        parsed = [(i, val) for i, cell in enumerate(df[col]) if (val := _parse_mean(cell)) is not None]
+        parsed.sort(key=lambda p: p[1], reverse=not minimize)
+        ranked[col] = [i for i, _ in parsed]
+    return ranked
 
 
 def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_directions: dict[str, str]) -> None:
     exp_col = df.columns[0]
     metric_cols = list(df.columns[1:])
 
-    if len(metric_cols) > METRIC_CHUNK_SIZE:
-        mid = (len(metric_cols) + 1) // 2
-        chunks = [metric_cols[:mid], metric_cols[mid:]]
-    else:
-        chunks = [metric_cols]
+    chunks = _chunk_metrics(metric_cols, METRIC_CHUNK_SIZE)
 
-    best = _best_row_per_col(df, metric_cols, col_directions)
+    ranked = _ranked_rows_per_col(df, metric_cols, col_directions)
+    best = {col: rows[0] for col, rows in ranked.items() if rows}
+    second_best = {col: rows[1] for col, rows in ranked.items() if len(rows) > 1}
 
     if latex:
         all_lines = [f"% {title}"]
@@ -242,7 +257,9 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_dir
                 for col, val in zip(cols, row):
                     s = str(val)
                     if col in best and best[col] == i:
-                        s = f"\\textbf{{{s}}}"
+                        s = f"\\hbf{{{s}}}"
+                    elif col in second_best and second_best[col] == i:
+                        s = f"\\underline{{{s}}}"
                     cells.append(s)
                 all_lines.append(" & ".join(cells) + " \\\\")
             all_lines += ["\\bottomrule", "\\end{tabular}", ""]
@@ -256,6 +273,12 @@ def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_dir
                 if col in chunk:
                     gt = gt.tab_style(
                         style=style.text(weight="bold"),
+                        locations=loc.body(columns=col, rows=[row_idx]),
+                    )
+            for col, row_idx in second_best.items():
+                if col in chunk:
+                    gt = gt.tab_style(
+                        style=style.text(decorate="underline"),
                         locations=loc.body(columns=col, rows=[row_idx]),
                     )
             html_parts.append(gt.as_raw_html())

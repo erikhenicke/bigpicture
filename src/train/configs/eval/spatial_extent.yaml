@@ -3,18 +3,33 @@
 # Runs without an explicit "config@" prefix resolve against the matching run
 # config src/train/configs/run/spatial_extent.yaml.
 
+metric_directions:
+  test/test-od-task-ece: min
+  test/test-id-task-ece: min
+  test/test-od-task-entropy-correct: min
+  test/test-id-task-entropy-correct: min
+
 primary_metrics:
   - test/test-id-task-acc
   - test/test-id-top5-task-acc
+  - test/test-id-region-europe-task-acc
+  - test/test-id-region-asia-task-acc
+  - test/test-id-region-americas-task-acc
+  - test/test-id-region-africa-task-acc
+  - test/test-id-region-oceania-task-acc
+  - test/test-id-task-ece
+  - test/test-id-task-entropy-correct
+  - test/test-id-task-entropy-incorrect
   - test/test-od-task-acc
-  - test/test-od-top5-task-acc
-  - test/test-od-worst-group-task-acc
-  - test/test-od-worst-group-top5-task-acc
-
+  - test/test-od-top5-task-acc 
+  - test/test-od-region-europe-task-acc
+  - test/test-od-region-asia-task-acc
+  - test/test-od-region-americas-task-acc
+  - test/test-od-region-africa-task-acc
+  - test/test-od-region-oceania-task-acc
   - test/test-od-task-ece
-
-metric_directions:
-  test/test-od-task-ece: min
+  - test/test-od-task-entropy-correct
+  - test/test-od-task-entropy-incorrect
 
 # HR-only DenseNet baseline (no LR context), drawn as a horizontal reference
 # line with a shaded across-seed std band, just like in decision_plots.py.
