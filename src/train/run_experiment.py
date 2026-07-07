@@ -400,7 +400,7 @@ def run_experiment(cfg: DictConfig) -> None:
     best_run_metric = cfg.trainer.get("best_run_metric", "test/test-od-worst-group-task-acc")
 
     run_results: list[tuple[float, str]] = []
-    for run_idx in [2]:
+    for run_idx in [1, 2]:
         test_results, checkpoint_dir = _run_once(cfg, run_idx, default_root_dir, wandb_group)
         score = _best_run_score(test_results, best_run_metric)
         run_results.append((score, checkpoint_dir))
