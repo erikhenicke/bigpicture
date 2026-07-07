@@ -32,8 +32,29 @@ groups:
       - dinov3_lr_baseline
       - satclip_le_enc_baseline_l_40
       - satclip_le_enc_baseline_l_40_no_domain
+      - satclip_le_enc_baseline
+      - satclip_le_enc_baseline_no_domain
     additional_metrics:
+      - test/test-id-top5-task-acc
+      - test/test-id-region-europe-task-acc
+      - test/test-id-region-asia-task-acc
+      - test/test-id-region-americas-task-acc
+      - test/test-id-region-africa-task-acc
+      - test/test-id-region-oceania-task-acc
+      - test/test-id-task-ece
+      - test/test-id-task-entropy-correct
+      - test/test-id-task-entropy-incorrect
+      - test/test-od-top5-task-acc 
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+      - test/test-od-task-ece
+      - test/test-od-task-entropy-correct
+      - test/test-od-task-entropy-incorrect
       - test/test-od-lr-domain-acc
+
 
   - name: SatCLIP Fusion
     runs:
