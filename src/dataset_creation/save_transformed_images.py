@@ -1,6 +1,16 @@
 """
-Script to preprocess and save all RGB and Landsat images as PyTorch tensors.
-This converts images to normalized .pt files for faster loading during training.
+save_transformed_images.py
+
+Preprocesses and saves both RGB (HR) and Landsat (LR) images from
+`FMoWMultiScaleDataset` as normalized PyTorch tensors (`.pt` files), so training can
+load pre-transformed tensors instead of raw images/GeoTIFFs. Unlike
+`save_fullres_landsat.py`, which stores only the Landsat branch at native resolution,
+this script saves both branches at the dataset's standard (resized) resolution.
+
+Main function:
+    - save_transformed_images: Iterates over all Landsat-indexed samples, applies the
+      dataset's transforms/normalization, and writes each sample's RGB and Landsat
+      tensors to `<output_dir>/fmow_preprocessed/{fmow_rgb,landsat}/`.
 """
 
 import argparse
@@ -17,14 +27,22 @@ def save_transformed_images(
     batch_size=1,
     image_norm="fmow-statistics",
 ):
-    """
-    Load all images from the dataset, apply transforms, and save as .pt files.
-    
+    """Load all images from the dataset, apply transforms, and save as .pt files.
+
+    Iterates over every sample index found in `landsat_dir`'s GeoTIFF filenames, builds
+    an `FMoWMultiScaleDataset`, and for each not-yet-preprocessed index runs it through
+    the dataset (applying its RGB/Landsat transforms and normalization), buffering
+    `batch_size` samples before writing them out as individual `.pt` tensor files.
+
     Args:
-        fmow_dir: Directory containing FMoW dataset
-        landsat_dir: Directory containing Landsat dataset
-        output_dir: Directory to save preprocessed .pt files
-        batch_size: Number of images to process before saving
+        fmow_dir (str): Directory containing the FMoW dataset.
+        landsat_dir (str): Directory containing the Landsat dataset (GeoTIFFs read from
+            `<landsat_dir>/fmow_landsat/images`).
+        output_dir (str): Directory under which `fmow_preprocessed/{fmow_rgb,landsat}`
+            are created and the `.pt` files are saved.
+        batch_size (int): Number of samples to buffer in memory before writing them to
+            disk.
+        image_norm (str): Normalization scheme forwarded to `FMoWMultiScaleDataset`.
     """
     
     # Create output directories

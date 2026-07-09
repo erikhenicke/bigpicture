@@ -9,6 +9,16 @@ task accuracy. Two things happen per seed:
      metrics still reproduce.
   2. The full rerun metric set (including the new per-class / top-5 metrics) is
      written to ``metrics_rerun.csv`` next to the original ``metrics.csv``.
+
+Per-seed per-sample task logits are also captured during the rerun (via
+``attach_logit_collector``) and cached to ``logits_rerun.npz`` (via
+``write_rerun_logits``), keyed by the dataset's stable ``file_idx`` so a later
+analysis can tie a logit row back to its source image (``loader_file_indices``).
+``evaluate_checkpoint`` drives one seed's rerun end to end; ``compare_metrics``,
+``categorize_metric``, ``compute_abs_diffs`` and ``print_run_summary`` turn the
+original-vs-rerun metric maps into the printed reproduction report. ``main``
+loads the run config and checkpoints (via ``results.utils``) and loops over
+every seed checkpoint.
 """
 
 import argparse
@@ -32,7 +42,20 @@ RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
 
 
 def find_run_dir(exp_key: str) -> Path | None:
-    """Return the most recent log directory for the given experiment key."""
+    """Return the most recent log directory for the given experiment key.
+
+    Searches every ``LOG_RUNS/<date>/`` directory for entries named
+    ``train_<exp_key>-*`` and returns the one with the lexicographically latest
+    (date dir, run dir) pair.
+
+    Args:
+        exp_key (str): Experiment key, matched against directories named
+            ``train_<exp_key>-*``.
+
+    Returns:
+        Path | None: Path to the most recent matching run directory, or None if
+            no run directory matches.
+    """
     job_name = f"train_{exp_key}"
     prefix = job_name + "-"
 
@@ -66,6 +89,18 @@ def attach_logit_collector(module) -> dict[int, dict[str, Any]]:
     change what test_step computes, so the reproduced metrics are unaffected. The
     returned dict is filled in place as testing proceeds, keyed by dataloader
     index (matching ``module.test_loader_names``).
+
+    Args:
+        module (MultiScaleClassificationModule): Lightning module to instrument
+            in place; its ``_shared_forward`` and ``test_step`` methods are
+            monkey-patched.
+
+    Returns:
+        dict[int, dict[str, Any]]: Empty at call time, filled in place during
+            ``trainer.test()``. Maps dataloader index to a dict with keys
+            ``"logits"``, ``"labels"``, ``"domains"``, each a list of per-batch
+            ``torch.Tensor``s (task logits ``[B, num_classes]``, labels ``[B]``,
+            region codes ``[B]``) to be concatenated by the caller.
     """
     collected: dict[int, dict[str, list[torch.Tensor]]] = {}
     last_logits: dict[str, torch.Tensor] = {}
@@ -106,6 +141,14 @@ def loader_file_indices(loader) -> np.ndarray:
     (``rgb_img_{file_idx}.png`` etc.) by ``base.full_idxs[idx]`` (see
     FMoWMultiScaleDataset.__getitem__). Composing the two gives the file index per
     served row, which is the stable id that ties a logit row back to its inputs.
+
+    Args:
+        loader (torch.utils.data.DataLoader): Unshuffled test dataloader whose
+            ``.dataset`` is a WILDS subset over an ``FMoWMultiScaleDataset``.
+
+    Returns:
+        np.ndarray: 1-D int array of length ``len(loader.dataset)``, the global
+            ``file_idx`` of each served row in iteration order.
     """
     subset = loader.dataset
     base = subset.dataset
@@ -129,6 +172,25 @@ def write_rerun_logits(
       - ``<name>/file_idx`` int64   ``[N]`` (dataset file index, the input-file id)
     Rows are in test-iteration order and aligned across the four arrays, so
     ``file_idx[r]`` is the input-file id of the sample whose logits are ``logits[r]``.
+
+    Args:
+        run_dir (Path): Run's top-level log directory.
+        run_idx (int): Seed index; output goes under ``run{run_idx}/version_0/``.
+        collected (dict[int, dict[str, Any]]): Per-dataloader capture as filled by
+            ``attach_logit_collector`` and augmented with a ``"file_idx"``
+            ``np.ndarray`` per bucket (see ``evaluate_checkpoint``). Keys
+            ``"logits"``, ``"labels"``, ``"domains"`` are lists of tensors to be
+            concatenated.
+        loader_names (list[str]): Display name for each dataloader index (e.g.
+            ``cfg.data.test_loader_names``); indices without a name fall back to
+            ``"loader{idx}"``.
+
+    Returns:
+        Path: Path to the written ``logits_rerun.npz``.
+
+    Raises:
+        ValueError: If a bucket's captured file-index count does not match its
+            logit row count (loader order and captured rows out of sync).
     """
     out_dir = run_dir / f"run{run_idx}" / "version_0"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -167,8 +229,20 @@ def evaluate_checkpoint(ckpt_path: Path, cfg, run_idx: int) -> tuple[list[dict],
     determined by these two things (not by the trained weights). `run_idx` is the
     original run index (run{run_idx}) for this checkpoint.
 
-    Returns the per-dataloader metric dicts from trainer.test() and the captured
-    per-sample logits (keyed by dataloader index; see attach_logit_collector).
+    Args:
+        ckpt_path (Path): Path to the seed's checkpoint file (``.ckpt``).
+        cfg (omegaconf.DictConfig): Hydra run config, as loaded by
+            ``results.utils.load_hydra_config``.
+        run_idx (int): Original run index this checkpoint belongs to
+            (``run{run_idx}``), used to reproduce the seed and the frac<1.0 test
+            subset.
+
+    Returns:
+        tuple[list[dict], dict]: ``(results, logits)`` where ``results`` is
+            trainer.test()'s list of per-dataloader metric dicts, and ``logits``
+            is the per-dataloader capture from ``attach_logit_collector``, with a
+            ``"file_idx"`` ``np.ndarray`` added per bucket (from
+            ``loader_file_indices``).
     """
     # Recreate the RNG state the original run used right before it built its loaders.
     seed_everything(cfg.seed + run_idx, workers=True)
@@ -218,6 +292,15 @@ def load_original_test_metrics(run_dir: Path, run_idx: int) -> dict[str, float]:
 
     During training, `trainer.test(...)` logs one final row of `test/...` columns to
     `run{run_idx}/version_0/metrics.csv`. We return that row as a flat metric->value dict.
+
+    Args:
+        run_dir (Path): Run's top-level log directory.
+        run_idx (int): Seed index; reads ``run{run_idx}/version_0/metrics.csv``.
+
+    Returns:
+        dict[str, float]: Map of ``test/*`` metric name to value from the last
+            row with any non-empty test column; empty dict if the file is
+            missing or has no such row.
     """
     metrics_path = run_dir / f"run{run_idx}" / "version_0" / "metrics.csv"
     if not metrics_path.exists():
@@ -241,6 +324,15 @@ def write_rerun_metrics(run_dir: Path, run_idx: int, rerun_metrics: dict[str, fl
     high-cardinality per-class rows (62 classes + region x class) stay readable
     and greppable. Lives at ``run{run_idx}/version_0/metrics_rerun.csv``,
     alongside the original ``metrics.csv`` produced during training.
+
+    Args:
+        run_dir (Path): Run's top-level log directory.
+        run_idx (int): Seed index; output goes to
+            ``run{run_idx}/version_0/metrics_rerun.csv``.
+        rerun_metrics (dict[str, float]): Flat metric name -> value map to write.
+
+    Returns:
+        Path: Path to the written ``metrics_rerun.csv``.
     """
     out_dir = run_dir / f"run{run_idx}" / "version_0"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -254,7 +346,19 @@ def write_rerun_metrics(run_dir: Path, run_idx: int, rerun_metrics: dict[str, fl
 
 
 def compare_metrics(original: dict[str, float], rerun: dict[str, float]) -> None:
-    """Print a side-by-side comparison of original vs. rerun test metrics."""
+    """Print a side-by-side comparison of original vs. rerun test metrics.
+
+    Prints a table (one row per metric key present in either dict, "-" for a
+    missing value) followed by the maximum absolute difference and a count of
+    metrics present in only one of the two sets.
+
+    Args:
+        original (dict[str, float]): Metric values from the original training
+            run (see ``load_original_test_metrics``); an empty dict skips the
+            comparison.
+        rerun (dict[str, float]): Metric values from the rerun (see
+            ``evaluate_checkpoint``).
+    """
     if not original:
         print("  (no original test metrics found in metrics.csv - skipping comparison)")
         return
@@ -296,7 +400,15 @@ def categorize_metric(name: str) -> str:
 
     Checked in this order so substrings don't collide (a domain-acc metric still
     counts as Acc, but ece/entropy/loss are matched first since none of them are
-    accuracies)."""
+    accuracies).
+
+    Args:
+        name (str): Metric name (case-insensitive match against "ece", "entropy",
+            "loss", "acc").
+
+    Returns:
+        str: One of ``CATEGORIES`` ("Acc", "ECE", "Loss", "Entropy", "Other").
+    """
     n = name.lower()
     if "ece" in n:
         return "ECE"
@@ -310,7 +422,17 @@ def categorize_metric(name: str) -> str:
 
 
 def compute_abs_diffs(original: dict[str, float], rerun: dict[str, float]) -> dict[str, float]:
-    """Absolute deviation per metric present in both the original and rerun results."""
+    """Absolute deviation per metric present in both the original and rerun results.
+
+    Args:
+        original (dict[str, float]): Original metric values (see
+            ``load_original_test_metrics``).
+        rerun (dict[str, float]): Rerun metric values (see ``evaluate_checkpoint``).
+
+    Returns:
+        dict[str, float]: Metric name -> ``abs(rerun[k] - original[k])``,
+            restricted to keys present in both inputs.
+    """
     return {k: abs(rerun[k] - original[k]) for k in set(original) & set(rerun)}
 
 
@@ -322,7 +444,15 @@ def print_run_summary(exp_key: str, n_seeds: int, category_diffs: dict[str, list
         metrics that reproduce bitwise-exactly, i.e. diff == 0).
       - ``avg|diff| dev``: mean over only the metrics that deviate (diff > 0).
     No threshold is applied; precision noise vs. significant divergence is read off
-    the magnitudes directly."""
+    the magnitudes directly.
+
+    Args:
+        exp_key (str): Experiment key, used in the summary header.
+        n_seeds (int): Number of seed checkpoints evaluated, used in the summary header.
+        category_diffs (dict[str, list[float]]): Absolute deviations (see
+            ``compute_abs_diffs``) pooled across all seeds, grouped by category
+            (see ``categorize_metric``); categories with no entries are skipped.
+    """
     print(f"\n=== Reproduction summary: {exp_key}  ({n_seeds} seed(s)) ===")
     print(f"  {'category':<9}  {'metrics':>7}  {'deviating':>9}  {'avg|diff| all':>14}  {'avg|diff| dev':>14}")
     print(f"  {'-' * 9}  {'-' * 7}  {'-' * 9}  {'-' * 14}  {'-' * 14}")
@@ -337,7 +467,17 @@ def print_run_summary(exp_key: str, n_seeds: int, category_diffs: dict[str, list
 
 
 def load_run_config(config_path: Path) -> tuple[dict, str]:
-    """Load a run config YAML from the given path."""
+    """Load a run config YAML from the given path.
+
+    Args:
+        config_path (Path): Path to the run config YAML (e.g.
+            ``src/train/configs/run/feature_fusion.yaml``).
+
+    Returns:
+        tuple[dict, str]: ``(cfg, config_name)`` where ``cfg`` is the parsed YAML
+            (with an ``"experiments"`` key mapping experiment keys to their
+            definitions) and ``config_name`` is the file's stem.
+    """
     if not config_path.exists():
         print(f"Run config not found: {config_path}", file=sys.stderr)
         sys.exit(1)
@@ -347,6 +487,15 @@ def load_run_config(config_path: Path) -> tuple[dict, str]:
 
 
 def main() -> None:
+    """CLI entry point: evaluate every seed checkpoint of an experiment and print a reproduction summary.
+
+    Parses ``--config``/``--run-name`` (and optional batch-size/num-workers
+    overrides), locates the run directory and its seed checkpoints, then for each
+    checkpoint reruns evaluation (``evaluate_checkpoint``), writes the rerun
+    metrics and logits, compares against the original metrics
+    (``compare_metrics``), and accumulates per-category deviations for the final
+    ``print_run_summary``.
+    """
     parser = argparse.ArgumentParser(description="Per-class evaluation of a trained model")
     parser.add_argument("--config", type=str, required=True, help="Path to run config YAML (e.g. src/train/configs/run/feature_fusion.yaml)")
     parser.add_argument("--run-name", type=str, required=True, help="Experiment key to evaluate (e.g. film_om_bin_pe)")

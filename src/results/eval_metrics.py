@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Evaluate experiment groups and generate per-group HTML result tables."""
+"""Evaluate experiment groups and generate per-group result tables (HTML or LaTeX).
+
+Reads an eval YAML (``src/train/configs/eval/*.yaml``) whose ``groups`` list each
+name a set of run references and a metric list, resolves each run to its log
+directory, loads its per-seed test metrics (and optionally its checkpoint
+parameter count) via ``load_test_metrics``/``load_all_metrics``, and formats
+them into cells (``format_cell``) and human-readable metric/experiment names
+(``format_metric_name``, via ``results.utils.format_experiment_name``). Each
+group becomes one table (``build_group_table`` -> ``write_table``), rendered as
+a ``great_tables`` HTML snippet or a LaTeX ``booktabs`` snippet with the best and
+second-best value per column highlighted (``_ranked_rows_per_col``); an optional
+summary table ranks every unique run across groups (``build_summary_table``).
+With ``--latex``/``--both``, the generated ``.tex`` snippets are also assembled
+into one standalone document (``build_latex_document``) for the thesis repo.
+``main`` is the CLI entry point tying all of this together.
+"""
 
 import argparse
 import json
@@ -56,7 +71,20 @@ LATEX_TABLE_TEMPLATE = """\
 """
 
 def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float]]:
-    """Load final test metrics from all seeds, preferring metrics_rerun.csv."""
+    """Load final test metrics from all seeds, preferring metrics_rerun.csv.
+
+    Args:
+        run_dir (Path): Run directory containing one ``run*`` subdirectory
+            per seed.
+        metrics (list[str]): Metric keys to load.
+
+    Returns:
+        dict[str, list[float]]: Mapping of each requested metric key to the
+            list of values found across seeds (via
+            `results.utils.load_seed_test_metrics`); a metric missing from a
+            given seed is simply omitted from its list, and metrics found in
+            no seed map to an empty list.
+    """
     results: dict[str, list[float]] = {m: [] for m in metrics}
 
     for seed_dir in sorted(run_dir.glob("run*")):
@@ -72,7 +100,18 @@ def load_test_metrics(run_dir: Path, metrics: list[str]) -> dict[str, list[float
 
 
 def _load_param_count(run_dir: Path) -> int | None:
-    """Load total parameter count, caching to model_info.json."""
+    """Load total parameter count, caching to model_info.json.
+
+    Args:
+        run_dir (Path): Run directory; the count is cached to
+            ``run_dir/model_info.json`` and, if not yet cached, computed
+            from ``run_dir/checkpoints/run0/last.ckpt``'s state dict.
+
+    Returns:
+        int | None: Total number of parameters (sum of ``.numel()`` over the
+            checkpoint's ``state_dict`` values), or None if neither the
+            cache file nor the checkpoint exists.
+    """
     info_path = run_dir / "model_info.json"
     if info_path.exists():
         with info_path.open() as f:
@@ -94,7 +133,22 @@ def _load_param_count(run_dir: Path) -> int | None:
 
 
 def load_all_metrics(run_dir: Path | None, metrics: list[str]) -> dict[str, list[float]]:
-    """Load metrics from CSV and param_count from checkpoint/cache."""
+    """Load metrics from CSV and param_count from checkpoint/cache.
+
+    Args:
+        run_dir (Path | None): Run directory to load from, or None if the
+            run has no resolved log directory (all values come back empty).
+        metrics (list[str]): Metric keys to load; the special key
+            ``"param_count"`` is handled separately via `_load_param_count`
+            instead of being read from the CSVs.
+
+    Returns:
+        dict[str, list[float]]: Mapping of each requested metric key to its
+            values -- per-seed floats for ordinary metrics (via
+            `load_test_metrics`), or a single-element list with the
+            checkpoint's parameter count (as a float) for
+            ``"param_count"``, empty if unavailable.
+    """
     csv_metrics = [m for m in metrics if m != "param_count"]
     results = load_test_metrics(run_dir, csv_metrics) if run_dir and csv_metrics else {m: [] for m in csv_metrics}
     if "param_count" in metrics:
@@ -104,6 +158,25 @@ def load_all_metrics(run_dir: Path | None, metrics: list[str]) -> dict[str, list
 
 
 def format_cell(values: list[float], format_percent: bool = False, format_count: bool = False, latex: bool = False) -> str:
+    """Format a list of per-seed metric values as a single table cell string.
+
+    Args:
+        values (list[float]): Per-seed values to summarize (e.g. from
+            `load_all_metrics`).
+        format_percent (bool): If True, format as a percentage (values
+            multiplied by 100). Defaults to False.
+        format_count (bool): If True, treat `values[0]` as a raw integer
+            count and format it with a ``K``/``M`` suffix instead of a
+            mean +/- std. Defaults to False.
+        latex (bool): If True, format the mean/std as ``"mean (std)"``
+            (LaTeX-friendly); otherwise as ``"mean ± std"``. Ignored
+            when `format_count` is True. Defaults to False.
+
+    Returns:
+        str: ``"—"`` if `values` is empty; the ``K``/``M``-suffixed
+            count string if `format_count`; otherwise the formatted
+            mean/std string (1 decimal place if `format_percent`, else 2).
+    """
     if not values:
         return "—"
     if format_count:
@@ -136,13 +209,29 @@ def format_metric_name(
     """Format metric name from translations (global + local overrides) or via string manipulation.
 
     Args:
-        metric: Metric key (e.g., "test/test-od-task-acc")
-        translations: Dict with "metrics" key containing metric name mappings
-        local_overrides: Group-level overrides for this metric
-        remove_task_prefix: Legacy flag for string-based formatting
-        remove_acc: Legacy flag for string-based formatting
-        remove_od: Legacy flag for string-based formatting
-        latex: Use LaTeX versions if available
+        metric (str): Metric key (e.g., "test/test-od-task-acc").
+        translations (dict | None): Dict with a "metrics" key mapping metric
+            keys to either a plain display string or a
+            ``{"plain": ..., "latex": ...}`` dict.
+        local_overrides (dict | None): Group-level overrides for this
+            metric, keyed by metric name, in the same shape as
+            `translations`'s "metrics" values; checked before
+            `translations`.
+        remove_task_prefix (bool): Legacy flag for the string-based
+            fallback formatting: strip a ``"-task"`` substring. Defaults to
+            True.
+        remove_acc (bool): Legacy flag for the string-based fallback
+            formatting: strip a ``"-acc"`` substring. Defaults to False.
+        remove_od (bool): Legacy flag for the string-based fallback
+            formatting: strip an ``"od"`` substring. Defaults to False.
+        latex (bool): Use the "latex" variant of a translation entry when
+            available, falling back to "plain". Defaults to False.
+
+    Returns:
+        str: Display name for `metric` -- "Parameters" for
+            ``"param_count"``; the matching `local_overrides` or
+            `translations` entry if found; otherwise a title-cased,
+            string-manipulated fallback derived from `metric` itself.
     """
     if metric == "param_count":
         return "Parameters"
@@ -198,7 +287,19 @@ METRIC_CHUNK_SIZE = 5
 
 
 def _chunk_metrics(metric_cols: list[str], chunk_size: int) -> list[list[str]]:
-    """Split metric_cols into as-equal-as-possible chunks of at most chunk_size each."""
+    """Split metric_cols into as-equal-as-possible chunks of at most chunk_size each.
+
+    Args:
+        metric_cols (list[str]): Metric column names to split.
+        chunk_size (int): Maximum chunk size; chunks are only larger than
+            this if `metric_cols` fits in one chunk already.
+
+    Returns:
+        list[list[str]]: `metric_cols` split into contiguous chunks whose
+            sizes differ by at most 1, each chunk no larger than
+            `chunk_size` (unless `metric_cols` itself has `chunk_size` or
+            fewer elements, in which case a single chunk is returned).
+    """
     n = len(metric_cols)
     if n <= chunk_size:
         return [metric_cols]
@@ -214,6 +315,16 @@ def _chunk_metrics(metric_cols: list[str], chunk_size: int) -> list[list[str]]:
 
 
 def _parse_mean(cell: str) -> float | None:
+    """Parse the leading mean value out of a `format_cell`-produced string.
+
+    Args:
+        cell (str): Cell text, e.g. ``"12.34 ± 0.56"`` or ``"—"``.
+
+    Returns:
+        float | None: The leading whitespace-delimited token parsed as a
+            float, or None if `cell` is empty or its first token isn't a
+            valid float (e.g. the ``"—"`` placeholder).
+    """
     try:
         return float(str(cell).split()[0])
     except (ValueError, IndexError):
@@ -221,7 +332,23 @@ def _parse_mean(cell: str) -> float | None:
 
 
 def _ranked_rows_per_col(df: pd.DataFrame, metric_cols: list[str], directions: dict[str, str]) -> dict[str, list[int]]:
-    """Return, per column, row indices with parseable values ordered from best to worst."""
+    """Return, per column, row indices with parseable values ordered from best to worst.
+
+    Args:
+        df (pd.DataFrame): Table whose `metric_cols` columns hold
+            `format_cell`-produced strings.
+        metric_cols (list[str]): Column names to rank.
+        directions (dict[str, str]): Per-column optimization direction,
+            ``"max"`` or ``"min"``; columns absent from this dict default to
+            ``"max"``.
+
+    Returns:
+        dict[str, list[int]]: For each column in `metric_cols`, the row
+            indices (positions, via `df[col]`'s enumeration) whose cell
+            parses to a float (via `_parse_mean`), sorted best-first
+            according to that column's direction. Unparseable rows are
+            omitted.
+    """
     ranked: dict[str, list[int]] = {}
     for col in metric_cols:
         minimize = directions.get(col, "max") == "min"
@@ -232,6 +359,31 @@ def _ranked_rows_per_col(df: pd.DataFrame, metric_cols: list[str], directions: d
 
 
 def write_table(df: pd.DataFrame, title: str, output: Path, latex: bool, col_directions: dict[str, str]) -> None:
+    """Write a formatted result table to disk as HTML or LaTeX.
+
+    Splits wide tables into `METRIC_CHUNK_SIZE`-column chunks (each rendered
+    as a separate ``booktabs`` tabular or ``great_tables`` snippet), bolding
+    the best value and underlining the second-best value per metric column
+    (per `_ranked_rows_per_col`/`col_directions`).
+
+    Args:
+        df (pd.DataFrame): Table to render; its first column is the
+            experiment name (rendered without a header), the remaining
+            columns are `format_cell`-formatted metric cells.
+        title (str): Table title (HTML header, or a leading ``"% <title>"``
+            LaTeX comment read back by `_table_title`).
+        output (Path): Output file path (``.html`` or ``.tex`` content,
+            regardless of extension).
+        latex (bool): If True, write LaTeX ``booktabs`` tabular snippets
+            (with ``\\hbf``/``\\underline`` highlighting); if False, write
+            concatenated ``great_tables`` HTML snippets.
+        col_directions (dict[str, str]): Per metric-column optimization
+            direction (``"max"`` or ``"min"``), used to pick the
+            best/second-best row to highlight.
+
+    Returns:
+        None
+    """
     exp_col = df.columns[0]
     metric_cols = list(df.columns[1:])
 
@@ -295,7 +447,30 @@ def build_group_table(
     metric_directions: dict[str, str],
     default_config: str,
 ) -> bool:
-    """Build and write a table for one group. Returns False if skipped."""
+    """Build and write a table for one group. Returns False if skipped.
+
+    Args:
+        group (dict): Eval-YAML group dict with a ``"name"``, a ``"runs"``
+            list of run references, and optional ``"additional_metrics"``,
+            ``"metric_display_names"``, ``"model_display_names"``, and
+            ``"param_display_names"`` overrides.
+        primary_metrics (list[str]): Metric keys included in every group's
+            table (in addition to the group's own
+            ``"additional_metrics"``).
+        output (Path): Output file path for the table (see `write_table`).
+        latex (bool): Whether to render as LaTeX (True) or HTML (False).
+        run_experiments (dict): Mapping of run reference to its resolved
+            experiment definition, from `results.utils.resolve_experiments`.
+        translations (dict): Metric/model/param name translation table.
+        metric_directions (dict[str, str]): Per-metric optimization
+            direction (``"max"``/``"min"``), keyed by raw metric key.
+        default_config (str): Default run-config name used to resolve bare
+            run references (without an ``"@"`` prefix).
+
+    Returns:
+        bool: True if the table was written; False (nothing written) if
+            every metric cell for this group is empty.
+    """
     metrics = primary_metrics + group.get("additional_metrics", [])
     run_refs: list[str] = group["runs"]
     metric_display_overrides = group.get("metric_display_names", {})
@@ -339,7 +514,28 @@ def build_summary_table(
     metric_directions: dict[str, str],
     default_config: str,
 ) -> None:
-    """Build a table ranking all unique experiments by the summary metrics."""
+    """Build a table ranking all unique experiments by the summary metrics.
+
+    Args:
+        groups (list[dict]): Eval-YAML group dicts, each with a ``"runs"``
+            list of run references; the union of every group's runs
+            (deduplicated, first-seen order) becomes the table's rows.
+        summary_metrics (list[str]): Metric keys to include as columns; rows
+            are sorted by the mean of the first metric, descending.
+        output (Path): Output file path for the table (see `write_table`).
+        latex (bool): Whether to render as LaTeX (True) or HTML (False).
+        run_experiments (dict): Mapping of run reference to its resolved
+            experiment definition.
+        translations (dict): Metric/model/param name translation table
+            (used globally, without per-group overrides).
+        metric_directions (dict[str, str]): Per-metric optimization
+            direction (``"max"``/``"min"``), keyed by raw metric key.
+        default_config (str): Default run-config name used to resolve bare
+            run references.
+
+    Returns:
+        None
+    """
     seen: set[str] = set()
     run_refs: list[str] = []
     for group in groups:
@@ -375,7 +571,17 @@ def build_summary_table(
 
 
 def _table_title(tex_path: Path) -> str:
-    """Read the leading '% <title>' comment written by write_table, else fall back to the filename."""
+    """Read the leading '% <title>' comment written by write_table, else fall back to the filename.
+
+    Args:
+        tex_path (Path): Path to a ``.tex`` file previously written by
+            `write_table`.
+
+    Returns:
+        str: The title from the leading ``"% <title>"`` comment line, or a
+            title-cased version of `tex_path`'s stem (underscores replaced
+            with spaces) if the first line isn't such a comment.
+    """
     first_line = tex_path.read_text(encoding="utf-8").splitlines()[0]
     if first_line.startswith("% "):
         return first_line.removeprefix("% ")
@@ -384,7 +590,17 @@ def _table_title(tex_path: Path) -> str:
 
 def build_latex_document() -> None:
     """Recursively collect every generated .tex snippet under LATEX_OUTPUT_DIR and
-    assemble them into a single standalone document at LATEX_SCRIPT."""
+    assemble them into a single standalone document at LATEX_SCRIPT.
+
+    Snippets are grouped by their parent directory (one eval run's output
+    dir) into a section per run, each table wrapped in a ``table`` float
+    with its title (via `_table_title`) as the caption, and rendered through
+    `LATEX_TABLE_TEMPLATE`. Does nothing if `LATEX_OUTPUT_DIR` has no
+    ``.tex`` files.
+
+    Returns:
+        None
+    """
     tex_files = sorted(LATEX_OUTPUT_DIR.rglob("*.tex"))
     if not tex_files:
         return
@@ -414,6 +630,21 @@ def build_latex_document() -> None:
 
 
 def main() -> None:
+    """CLI entry point: load an eval YAML and write its group and summary tables.
+
+    Reads the eval YAML given as the positional argument (or prompts the
+    user to pick one from `EVAL_CONFIG_DIR` if omitted), resolves every
+    referenced run's experiment definition, and writes one table per group
+    (`build_group_table`) plus an optional summary table
+    (`build_summary_table`) to ``results/<eval_name>/`` (HTML) and/or
+    ``THESIS_ROOT/results/<eval_name>/`` (LaTeX), depending on
+    ``--latex``/``--both``. With LaTeX output, also rebuilds the combined
+    document via `build_latex_document`. Exits with status 1 if no eval
+    YAML is found/given or the given path doesn't exist.
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description="Evaluate experiment groups")
     parser.add_argument(
         "eval_yaml",

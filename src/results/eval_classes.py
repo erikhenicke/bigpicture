@@ -25,6 +25,17 @@ falling back to ``metrics.csv``; they are averaged across all seeds first. A run
 loaded metrics lack the per-class keys is skipped with a warning. Class occurrence
 counts come from the FMoW metadata CSV (``--metadata``) and are read from the OOD test
 split (``split == 'test'``); if the file is absent the weighted plots are skipped.
+
+The module is organized in four groups: metric extraction (``worst_region``,
+``ood_class_accs``, ``region_class_accs``) pulls per-class accuracy dicts out of a
+run's flat metrics dict; occurrence/delta helpers (``load_test_class_counts``,
+``all_deltas``, ``top_deltas``, ``weighted_deltas``, ``pareto_weighted``,
+``weighted_accs``, ``occurrence_norm``, ``occurrence_colors``) turn those accuracy
+dicts plus class counts into the values/colors the charts render; low-level plotting
+(``plot_colorbar``, ``prettify_class``, ``save_figure``, ``plot_bars``, ``sorted_accs``,
+``plot_abs_bars``, ``plot_acc_vs_count``) draws and saves individual figures; and
+``emit_abs``/``emit_setting`` combine the above into the full set of figures for one
+run/scope, driven by ``main``, the CLI entry point.
 """
 
 import argparse
@@ -91,7 +102,17 @@ _OOD_CLASS_RE = re.compile(r"^test/test-od-class-(.+)-task-acc$")
 # Metric extraction
 # --------------------------------------------------------------------------- #
 def worst_region(metrics: dict[str, float]) -> str | None:
-    """Region with the lowest OOD top-1 task accuracy, or ``None`` if unavailable."""
+    """Region with the lowest OOD top-1 task accuracy, or ``None`` if unavailable.
+
+    Args:
+        metrics (dict[str, float]): Flat run metrics dict (as returned by
+            `results.utils.load_run_metrics`), keyed by metric name.
+
+    Returns:
+        str | None: The `models.utils.DOMAIN_NAMES` entry with the lowest
+            ``test/test-od-region-<region>-task-acc`` value, or None if none
+            of those keys are present in `metrics`.
+    """
     region_accs = {
         r: metrics[f"{OOD_PREFIX}-region-{r.lower()}-task-acc"]
         for r in DOMAIN_NAMES
@@ -103,7 +124,17 @@ def worst_region(metrics: dict[str, float]) -> str | None:
 
 
 def ood_class_accs(metrics: dict[str, float]) -> dict[str, float]:
-    """Per-class overall OOD top-1 accuracy keyed by FMoW class name."""
+    """Per-class overall OOD top-1 accuracy keyed by FMoW class name.
+
+    Args:
+        metrics (dict[str, float]): Flat run metrics dict, keyed by metric
+            name.
+
+    Returns:
+        dict[str, float]: Mapping of FMoW class name to top-1 accuracy
+            (fraction in [0, 1]), extracted from every
+            ``test/test-od-class-<ClassName>-task-acc`` key in `metrics`.
+    """
     out: dict[str, float] = {}
     for k, v in metrics.items():
         m = _OOD_CLASS_RE.match(k)
@@ -113,7 +144,20 @@ def ood_class_accs(metrics: dict[str, float]) -> dict[str, float]:
 
 
 def region_class_accs(metrics: dict[str, float], region: str) -> dict[str, float]:
-    """Per-class OOD top-1 accuracy within ``region`` keyed by FMoW class name."""
+    """Per-class OOD top-1 accuracy within ``region`` keyed by FMoW class name.
+
+    Args:
+        metrics (dict[str, float]): Flat run metrics dict, keyed by metric
+            name.
+        region (str): Region name (one of `models.utils.DOMAIN_NAMES`,
+            case-insensitive).
+
+    Returns:
+        dict[str, float]: Mapping of FMoW class name to top-1 accuracy
+            (fraction in [0, 1]) within `region`, extracted from every
+            ``test/test-od-region-<region>-class-<ClassName>-task-acc`` key
+            in `metrics`.
+    """
     prefix = f"{OOD_PREFIX}-region-{region.lower()}-class-"
     suffix = "-task-acc"
     out: dict[str, float] = {}
@@ -135,6 +179,18 @@ def load_test_class_counts(
     and ``per_region`` maps region name -> {class name -> count} for the five named
     regions. Counts are taken from rows with ``split == 'test'`` (the OOD test split
     that the ``test-od`` loader evaluates). Returns empty dicts if the file is absent.
+
+    Args:
+        metadata_path (Path): Path to the FMoW metadata CSV (must have
+            ``split``, ``region``, and ``category`` columns).
+
+    Returns:
+        tuple[dict[str, int], dict[str, dict[str, int]]]: ``(overall,
+            per_region)``. `overall` maps FMoW class name to its sample
+            count on the OOD test split. `per_region` maps each name in
+            `models.utils.DOMAIN_NAMES` to a ``{class name: count}`` dict
+            for that region's OOD test rows. Both are empty dicts if
+            `metadata_path` does not exist.
     """
     if not metadata_path.exists():
         print(f"Warning: metadata not found at {metadata_path}; skipping weighted plots.", file=sys.stderr)
@@ -154,7 +210,19 @@ def load_test_class_counts(
 # Deltas
 # --------------------------------------------------------------------------- #
 def all_deltas(baseline: dict[str, float], run: dict[str, float]) -> list[tuple[str, float]]:
-    """Per-class deltas (run - baseline) for every class in both, sorted descending."""
+    """Per-class deltas (run - baseline) for every class in both, sorted descending.
+
+    Args:
+        baseline (dict[str, float]): Baseline per-class accuracy, keyed by
+            FMoW class name.
+        run (dict[str, float]): Comparison run's per-class accuracy, keyed
+            by FMoW class name.
+
+    Returns:
+        list[tuple[str, float]]: ``(class, run[class] - baseline[class])``
+            pairs for every class present in both, sorted by delta
+            descending.
+    """
     common = set(baseline) & set(run)
     return sorted(((c, run[c] - baseline[c]) for c in common), key=lambda kv: kv[1], reverse=True)
 
@@ -163,7 +231,22 @@ def top_deltas(
     baseline: dict[str, float], run: dict[str, float], n: int = TOP_N
 ) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
     """Return (gains, losses): the n largest positive and n largest negative
-    per-class deltas (run - baseline) over classes present in both."""
+    per-class deltas (run - baseline) over classes present in both.
+
+    Args:
+        baseline (dict[str, float]): Baseline per-class accuracy, keyed by
+            FMoW class name.
+        run (dict[str, float]): Comparison run's per-class accuracy, keyed
+            by FMoW class name.
+        n (int): Maximum number of gains/losses to return each. Defaults to
+            `TOP_N`.
+
+    Returns:
+        tuple[list[tuple[str, float]], list[tuple[str, float]]]: ``(gains,
+            losses)`` -- up to `n` ``(class, delta)`` pairs with the largest
+            positive deltas (`gains`, descending) and up to `n` pairs with
+            the largest negative deltas (`losses`, most negative first).
+    """
     ordered = all_deltas(baseline, run)  # descending
     gains = [cd for cd in ordered if cd[1] > 0][:n]
     losses = [cd for cd in reversed(ordered) if cd[1] < 0][:n]
@@ -185,6 +268,20 @@ def weighted_deltas(
     ``Var = [p_r(1-p_r) + p_b(1-p_b)] / n_c`` (an upper bound -- it ignores the
     positive correlation between the two models, which a paired/McNemar estimate
     would exploit) and scale by ``n_c / N``.
+
+    Args:
+        baseline (dict[str, float]): Baseline per-class accuracy (fraction
+            in [0, 1]), keyed by FMoW class name.
+        run (dict[str, float]): Comparison run's per-class accuracy
+            (fraction in [0, 1]), keyed by FMoW class name.
+        counts (dict[str, int]): Per-class sample counts, keyed by FMoW
+            class name (e.g. the ``overall`` or one region's dict from
+            `load_test_class_counts`).
+
+    Returns:
+        list[tuple[str, float, float]]: ``(class, w, se)`` triples, one per
+            class present in `baseline`, `run`, and `counts`, sorted by `w`
+            descending.
     """
     common = set(baseline) & set(run) & set(counts)
     total = sum(counts[c] for c in common)
@@ -212,8 +309,33 @@ def pareto_weighted(
     contribution, plus the largest negative contributors covering ``coverage`` of
     the total negative magnitude. The negligible middle is dropped. Returned
     sorted by ``w`` descending.
+
+    Args:
+        items (list[tuple[str, float, float]]): ``(class, w, se)`` triples,
+            e.g. from `weighted_deltas`.
+        coverage (float): Fraction (in [0, 1]) of the total positive (resp.
+            negative) contribution magnitude to retain on each side.
+            Defaults to `COVERAGE`.
+
+    Returns:
+        list[tuple[str, float, float]]: The selected ``(class, w, se)``
+            triples (positive-`w` and negative-`w` sides each independently
+            filtered to `coverage`), sorted by `w` descending.
     """
     def _cover(side: list[tuple[str, float, float]]) -> list[tuple[str, float, float]]:
+        """Keep the largest-magnitude prefix of one side (all-positive or
+        all-negative `w`) whose cumulative ``|w|`` reaches `coverage` of that
+        side's total.
+
+        Args:
+            side (list[tuple[str, float, float]]): ``(class, w, se)``
+                triples already sorted by descending contribution magnitude,
+                all with `w` of the same sign.
+
+        Returns:
+            list[tuple[str, float, float]]: The retained prefix of `side`
+                (empty if `side`'s total magnitude is 0).
+        """
         tot = sum(abs(t[1]) for t in side)
         if tot <= 0:
             return []
@@ -239,6 +361,17 @@ def weighted_accs(
     Each value is ``acc_c * n_c / N`` over classes present in both ``accs`` and
     ``counts`` -- the class's contribution to the overall accuracy. The values
     therefore sum to that overall (or region) accuracy.
+
+    Args:
+        accs (dict[str, float]): Per-class accuracy (fraction in [0, 1]),
+            keyed by FMoW class name.
+        counts (dict[str, int]): Per-class sample counts, keyed by FMoW
+            class name.
+
+    Returns:
+        list[tuple[str, float]]: ``(class, acc_c * n_c / N)`` pairs for
+            classes present in both `accs` and `counts`, sorted by value
+            descending. Empty if the total count is 0.
     """
     common = set(accs) & set(counts)
     total = sum(counts[c] for c in common)
@@ -252,7 +385,18 @@ def occurrence_norm(counts: dict[str, int]) -> mcolors.LogNorm | None:
     """LogNorm spanning the *full* positive class-fraction range of ``counts``
     (``n_c / N`` over every class, not just a plotted subset), or ``None`` if no
     class has a positive count. Shared by the bar colors and the standalone
-    colorbar so a class keeps the same color across every plot of one scope."""
+    colorbar so a class keeps the same color across every plot of one scope.
+
+    Args:
+        counts (dict[str, int]): Per-class sample counts, keyed by FMoW
+            class name.
+
+    Returns:
+        matplotlib.colors.LogNorm | None: Log-scale normalizer spanning
+            ``[min, max]`` of ``n_c / N`` over classes with a positive
+            count, or None if the total count is 0 or no class has a
+            positive count.
+    """
     total = sum(counts.values())
     if total <= 0:
         return None
@@ -273,6 +417,21 @@ def occurrence_colors(
     count. The color scale spans the *full* class-count distribution (not just
     the shown ``items``), so a class keeps the same color across full, filtered,
     and top-5 plots.
+
+    Args:
+        items (list[tuple[str, float]]): ``(class, value)`` pairs to color,
+            e.g. from `weighted_deltas` (with the `se` dropped) or
+            `weighted_accs`.
+        counts (dict[str, int]): Per-class sample counts (the full scope's
+            distribution, not just the classes in `items`), keyed by FMoW
+            class name.
+
+    Returns:
+        tuple[list, matplotlib.colors.LogNorm | None]: ``(colors, norm)`` --
+            one RGBA color per entry of `items` (aligned, light grey for
+            zero-count classes), and the `occurrence_norm` used to compute
+            them (None if no class in `counts` has a positive count, in
+            which case every color is the zero-count grey).
     """
     norm = occurrence_norm(counts)
     if norm is None:
@@ -292,7 +451,21 @@ def plot_colorbar(counts: dict[str, int], out_path: Path, label: str,
 
     Uses the same :func:`occurrence_norm` as the bars, so it is the shared key for
     every weighted plot of that scope (which no longer carry their own colorbar).
-    Returns False (and writes nothing) if the scope has no positive counts."""
+    Returns False (and writes nothing) if the scope has no positive counts.
+
+    Args:
+        counts (dict[str, int]): Per-class sample counts for the scope,
+            keyed by FMoW class name.
+        out_path (Path): Output SVG path.
+        label (str): Colorbar axis label.
+        label_size (int): Font size for `label`. Defaults to 8.
+        tick_size (int): Font size for the colorbar tick labels. Defaults
+            to 7.
+
+    Returns:
+        bool: True if the colorbar was written, False if `counts` has no
+            positive entries (nothing written).
+    """
     norm = occurrence_norm(counts)
     if norm is None:
         return False
@@ -320,6 +493,20 @@ LABEL_WRAP_AFTER = 7
 
 
 def prettify_class(name: str, include_id: bool = True) -> str:
+    """Format an FMoW class name for display, optionally with its class id.
+
+    Long multi-word labels are wrapped onto a second line after the first
+    space past `LABEL_WRAP_AFTER` characters (see that constant).
+
+    Args:
+        name (str): Raw FMoW class name (e.g. ``"crop_field"``).
+        include_id (bool): Whether to append the class's integer id (from
+            `CLASS_IDS`) in parentheses, if known. Defaults to True.
+
+    Returns:
+        str: Title-cased, space-separated class name, optionally
+            id-suffixed and wrapped onto two lines with an embedded newline.
+    """
     pretty = name.replace("_", " ").title()
     cid = CLASS_IDS.get(name)
     label = f"{pretty} ({cid})" if (include_id and cid is not None) else pretty
@@ -335,7 +522,18 @@ def prettify_class(name: str, include_id: bool = True) -> str:
 def save_figure(fig, out_path: Path, **savefig_kwargs) -> None:
     """Write `fig` to `out_path` in the repo figures dir and mirror it into the
     thesis images dir under the same ``<run_name>/`` subfolder (``out_path``'s
-    parent dir name) when the thesis repo is present -- matching decision_plots.py."""
+    parent dir name) when the thesis repo is present -- matching decision_plots.py.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure to save.
+        out_path (Path): Destination SVG path in this repo (its parent
+            directory name is reused as the thesis-side subfolder).
+        **savefig_kwargs: Extra keyword arguments forwarded to
+            ``fig.savefig`` (in addition to ``format="svg"``).
+
+    Returns:
+        None
+    """
     fig.savefig(out_path, format="svg", **savefig_kwargs)
     if THESIS_IMAGES_DIR.parent.exists():
         thesis_dir = THESIS_IMAGES_DIR / out_path.parent.name
@@ -384,6 +582,52 @@ def plot_bars(
     same physical size but stretch their bars to fill it (rather than padding with
     blank slots). Plots with more bars than ``fixed_rows`` grow taller at the
     reference bar thickness.
+
+    Args:
+        items (list[tuple[str, float]]): Pre-sorted ``(class, value)``
+            pairs, values as fractions (multiplied by 100 for display); the
+            first item is drawn at the top.
+        title (str): Figure title (shown only if `show_title`).
+        subtitle (str): Figure subtitle, shown below `title`.
+        xlabel (str): X-axis label.
+        out_path (Path): Output SVG path.
+        annotate (bool): Whether to print each bar's signed value next to
+            it, and to use the wider default row spacing/label font size
+            associated with annotated plots.
+        bar_colors (list | None): Per-bar colors aligned with `items`; if
+            None, bars are colored green (>= 0) / red (< 0).
+        cbar (tuple[matplotlib.colors.LogNorm, str] | None): Optional
+            ``(norm, label)`` to draw a colorbar matching `bar_colors`.
+        errors (list[float] | None): Per-bar symmetric error magnitudes
+            (fractions, aligned with `items`) for horizontal error bars, or
+            None to omit them.
+        show_title (bool): Whether to draw the title/subtitle block.
+            Defaults to True.
+        ylabel_size (int | None): Font size for the class y-tick labels;
+            falls back to 8 (annotate) / 6 (not annotate) if None.
+        xlabel_size (int | None): Font size for `xlabel`; falls back to 8
+            (annotate) / 6 (not annotate) if None.
+        xtick_size (int | None): Font size for the x-axis tick numbers; left
+            at the matplotlib default if None.
+        label_bold (bool): Whether the y-tick and x-axis labels are bold.
+            Defaults to False.
+        show_class_id (bool): Whether `prettify_class` appends the class id.
+            Defaults to True.
+        row_height (float | None): Vertical space per class row (figure
+            inches); falls back to 0.32 (annotate) / 0.20 (not annotate) if
+            None.
+        bar_height (float | None): Bar thickness as a fraction of a row
+            (``barh``'s ``height``); uses matplotlib's default if None.
+        fig_width (float): Figure width in inches. Defaults to 8.0.
+        fixed_rows (int | None): If set, the figure height is sized for at
+            least this many rows (never fewer than ``len(items)``), and bars
+            with fewer than `fixed_rows` items stretch to fill it (capped by
+            `MAX_BAR_STRETCH`) instead of leaving blank space. If None, the
+            height is sized exactly to ``len(items)`` rows.
+
+    Returns:
+        bool: True if the figure was written, False if `items` is empty
+            (nothing written).
     """
     if not items:
         return False
@@ -459,7 +703,16 @@ def plot_bars(
 
 
 def sorted_accs(accs: dict[str, float]) -> list[tuple[str, float]]:
-    """Class accuracies as ``(class, acc)`` pairs sorted by accuracy descending."""
+    """Class accuracies as ``(class, acc)`` pairs sorted by accuracy descending.
+
+    Args:
+        accs (dict[str, float]): Per-class accuracy (fraction in [0, 1]),
+            keyed by FMoW class name.
+
+    Returns:
+        list[tuple[str, float]]: ``(class, acc)`` pairs sorted by `acc`
+            descending.
+    """
     return sorted(accs.items(), key=lambda kv: kv[1], reverse=True)
 
 
@@ -477,6 +730,22 @@ def plot_abs_bars(
     ``fixed_xlim`` the x-axis spans 0-100% (for plain accuracies); pass False to
     autoscale (for the small occurrence-weighted contributions). Returns False
     (and writes nothing) if empty.
+
+    Args:
+        items (list[tuple[str, float]]): Pre-sorted ``(class, value)``
+            pairs, values as fractions (multiplied by 100 for display); the
+            first item is drawn at the top.
+        title (str): Figure title.
+        subtitle (str): Figure subtitle, shown below `title`.
+        xlabel (str): X-axis label.
+        out_path (Path): Output SVG path.
+        fixed_xlim (bool): If True, fix the x-axis to ``[0, 100]``; if
+            False, autoscale to the data with a small margin. Defaults to
+            True.
+
+    Returns:
+        bool: True if the figure was written, False if `items` is empty
+            (nothing written).
     """
     if not items:
         return False
@@ -513,6 +782,19 @@ def plot_acc_vs_count(
     its integer class id. Sets each class's accuracy in perspective of how many
     samples back it (low-count classes have noisy accuracy). Returns False (and
     writes nothing) if there is nothing to plot.
+
+    Args:
+        accs (dict[str, float]): Per-class accuracy (fraction in [0, 1]),
+            keyed by FMoW class name.
+        counts (dict[str, int]): Per-class sample counts, keyed by FMoW
+            class name.
+        title (str): Figure title.
+        subtitle (str): Figure subtitle, shown below `title`.
+        out_path (Path): Output SVG path.
+
+    Returns:
+        bool: True if the figure was written, False if no class has a
+            positive count in both `accs` and `counts` (nothing written).
     """
     common = [c for c in (set(accs) & set(counts)) if counts[c] > 0]
     if not common:
@@ -549,7 +831,25 @@ def emit_abs(
     accs: dict[str, float],
     counts: dict[str, int],
 ) -> None:
-    """Write the absolute, occurrence-weighted, and accuracy-vs-count plots."""
+    """Write the absolute, occurrence-weighted, and accuracy-vs-count plots.
+
+    Args:
+        figures_dir (Path): Directory to write the output SVGs to.
+        exp_key (str): Experiment key, used in output file names.
+        label (str): Run display name, used as the figure title.
+        scope_key (str): Scope identifier (e.g. ``"test-od"`` or a
+            lowercased region name), used in output file names.
+        scope_label (str): Human-readable scope label, used in figure
+            subtitles.
+        accs (dict[str, float]): Per-class accuracy (fraction in [0, 1]) for
+            this run and scope, keyed by FMoW class name.
+        counts (dict[str, int]): Per-class sample counts for this scope,
+            keyed by FMoW class name. If empty, only the absolute-accuracy
+            plot is written.
+
+    Returns:
+        None
+    """
     stem = f"classacc_{exp_key}_{scope_key}"
     if plot_abs_bars(
         sorted_accs(accs), label,
@@ -592,6 +892,31 @@ def emit_setting(
     By default only the thesis-facing occurrence-weighted *filtered* plot is
     written. With ``all_figures`` the top-5, all-class, and unfiltered weighted
     plots are written too.
+
+    Args:
+        figures_dir (Path): Directory to write the output SVGs to.
+        exp_key (str): Comparison run's experiment key, used in output file
+            names.
+        run_label (str): Comparison run's display name.
+        base_name (str): Baseline run's display name, used in the "vs."
+            title.
+        scope_key (str): Scope identifier (e.g. ``"test-od"`` or a
+            lowercased region name), used in output file names.
+        scope_label (str): Human-readable scope label, used in figure
+            subtitles.
+        base_accs (dict[str, float]): Baseline per-class accuracy (fraction
+            in [0, 1]) for this scope, keyed by FMoW class name.
+        run_accs (dict[str, float]): Comparison run's per-class accuracy
+            (fraction in [0, 1]) for this scope, keyed by FMoW class name.
+        counts (dict[str, int]): Per-class sample counts for this scope,
+            keyed by FMoW class name. If empty, the weighted plots are
+            skipped.
+        all_figures (bool): If True, also write the top-5, all-class, and
+            unfiltered weighted plots (not just the filtered one). Defaults
+            to False.
+
+    Returns:
+        None
     """
     head = f"{run_label} vs. {base_name}"
     delta_xlabel = "Top-1 accuracy delta vs. baseline (pp)"
@@ -631,6 +956,22 @@ def emit_setting(
         )
 
         def _weighted_plot(rows, subtitle, out_name, thesis=False):
+            """Render one occurrence-weighted delta bar chart from `weighted_deltas` rows.
+
+            Args:
+                rows (list[tuple[str, float, float]]): ``(class, w, se)``
+                    triples to plot, e.g. from `weighted_deltas` or
+                    `pareto_weighted`.
+                subtitle (str): Figure subtitle.
+                out_name (str): Output SVG file name (within `figures_dir`).
+                thesis (bool): If True, use the thesis-facing style
+                    (`thesis_style`, `thesis_xlabel`, no inline colorbar); if
+                    False, use the default style with an inline colorbar.
+                    Defaults to False.
+
+            Returns:
+                None
+            """
             items = [(c, w) for c, w, _ in rows]
             errs = [se for _, _, se in rows]
             colors, norm = occurrence_colors(items, counts)
@@ -664,6 +1005,22 @@ def emit_setting(
 
 
 def main() -> None:
+    """CLI entry point: load the eval YAML and write every per-class figure.
+
+    Reads the ``class-eval`` section of the eval YAML given as the
+    positional argument (default ``feature_fusion.yaml``), resolves the
+    baseline and comparison runs' per-class metrics, loads class occurrence
+    counts from ``--metadata``, and writes (to ``figures/<eval_name>/``) the
+    baseline's worst-region lookup, per-scope colorbars, and -- for each
+    comparison run -- the delta plots for the overall Test-OOD setting and
+    the baseline's worst OOD region (`emit_setting`, plus `emit_abs` for
+    absolute accuracies with ``--all``). Exits with status 1 if the eval
+    YAML is missing, has no ``class-eval`` section, or the baseline has no
+    per-class OOD metrics.
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description="Per-class accuracy gain/loss plots")
     parser.add_argument(
         "eval_yaml",

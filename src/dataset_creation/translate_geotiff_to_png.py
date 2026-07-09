@@ -1,3 +1,11 @@
+"""
+translate_geotiff_to_png.py
+
+Converts every multi-band Landsat GeoTIFF in `IMAGES_DIR` (bands read in the order
+blue, green, red as bands 1, 2, 3, per the code below) into an 8-bit RGB PNG for visual
+inspection, normalizing each band from a reflectance range into [0, 255] via
+`normalize_band`. Skips files that already have a corresponding PNG.
+"""
 import pathlib
 import numpy as np
 import rasterio
@@ -8,7 +16,18 @@ DATA_DIR = PROJECT_ROOT / "data" / "fmow_landsat"
 IMAGES_DIR = DATA_DIR / "images"
 
 def normalize_band(band_data, min_val=0, max_val=0.3):
-    """Normalize band data to 0-255 range."""
+    """Linearly rescale reflectance values to an 8-bit [0, 255] range.
+
+    Args:
+        band_data (np.ndarray): Single-band reflectance array of shape (height, width),
+            dtype float.
+        min_val (float): Reflectance value mapped to 0. Defaults to 0.
+        max_val (float): Reflectance value mapped to 255. Defaults to 0.3.
+
+    Returns:
+        np.ndarray: Array of the same shape as `band_data`, dtype uint8, clipped to
+            [0, 255].
+    """
     normalized = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255)
     return normalized.astype(np.uint8)
 

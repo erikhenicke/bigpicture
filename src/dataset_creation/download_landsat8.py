@@ -1,7 +1,35 @@
 """
 download_landsat8.py
 
-This script downloads landsat8 satellite imagery for each fmow sample (WILDS version, [train, val, test]).
+Downloads Landsat imagery (Landsat 8, falling back to Landsat 5/7) from
+Google Earth Engine for each FMoW sample in the WILDS [train, val, test]
+splits, saving one GeoTIFF per sample under `IMAGES_DIR` and writing a
+metadata CSV recording which collection/date-range was used for each
+download.
+
+Functions:
+    main: Entry point; authenticates with Earth Engine, builds the Landsat
+        image collections, selects the WILDS + not-yet-downloaded rows from
+        the metadata CSV, and downloads them in parallel via `download_image`.
+    download_image: Downloads a single sample's Landsat GeoTIFF, retrying on
+        failure; used (via `functools.partial`) as the per-row worker for
+        `pandarallel`'s `parallel_apply` in `main`.
+    get_median_request / get_landsat_col: Build the median composite image
+        request for a sample's region of interest, searching progressively
+        wider date ranges and satellite collections until enough scenes are
+        found.
+    compute_img_span / extract_region_of_interest: Convert a sample's center
+        coordinates and span (km) into a lon/lat rectangle (Earth Engine
+        geometry).
+    get_date_range / month_add: Build and widen the date window searched for
+        each sample.
+    mask_slc_gaps / filter_dates_and_roi / scale_optical_bands: Earth Engine
+        image-collection preprocessing helpers (QA masking, date+ROI
+        filtering, DN-to-reflectance scaling) used by `get_landsat_col` and
+        `main`.
+    get_fmow_wilds_mask / get_missing_mask: Row-selection helpers used by
+        `main` to restrict the metadata to WILDS rows / rows not yet
+        downloaded.
 """
 import os
 import pathlib
@@ -84,6 +112,17 @@ def extract_region_of_interest(sample_metadata: pd.Series, span_km: float) -> ee
 
 
 def get_date_range(sample_metadata, day_span=90):
+    """Build a date range centered on a sample's acquisition timestamp.
+
+    Args:
+        sample_metadata (pd.Series): Metadata for one FMoW sample; must
+            contain a `timestamp` field formatted as `%Y-%m-%dT%H:%M:%SZ`.
+        day_span (int): Total width of the date range in days, centered on
+            the sample's timestamp. Defaults to 90.
+
+    Returns:
+        tuple[str, str]: `(start_date, end_date)` as `%Y-%m-%d` strings.
+    """
     sample_date = datetime.strptime(
         sample_metadata["timestamp"], '%Y-%m-%dT%H:%M:%SZ')
     start_date = sample_date - relativedelta(days=(day_span // 2))
@@ -92,12 +131,16 @@ def get_date_range(sample_metadata, day_span=90):
 
 
 def month_add(date: str, months_to_add=1) -> str:
-    ''' date should be string in `'2020-02-01' format`
+    """Add (or subtract, if negative) whole months to a date string.
 
-    Usage
-        `day_add('2020-12-30',days_to_add = 2)`
+    Args:
+        date (str): Date string in `%Y-%m-%d` format, e.g. "2020-02-01".
+        months_to_add (int): Number of months to add; negative to subtract.
+            Defaults to 1.
 
-    '''
+    Returns:
+        str: The resulting date, formatted as `%Y-%m-%d`.
+    """
     date_time_obj = datetime.strptime(date, '%Y-%m-%d')
     new_date_time_obj = date_time_obj + relativedelta(months=+months_to_add)
     new_date_str = new_date_time_obj.strftime('%Y-%m-%d')
@@ -105,12 +148,43 @@ def month_add(date: str, months_to_add=1) -> str:
 
 
 def mask_slc_gaps(image):
+    """Mask out flagged pixels using the Landsat `QA_PIXEL` band.
+
+    Keeps only pixels where the low 6 bits of `QA_PIXEL` are all zero, i.e.
+    pixels not flagged by any of Collection 2's fill/cloud/shadow/snow QA
+    bits (this also removes Landsat 7 SLC-off scan-line gaps, which are
+    flagged as fill).
+
+    Args:
+        image (ee.Image): Landsat surface reflectance image with a
+            `QA_PIXEL` band.
+
+    Returns:
+        ee.Image: The same image with an updated mask hiding flagged pixels.
+    """
     qa_pixel = image.select('QA_PIXEL')
     full_mask = qa_pixel.bitwiseAnd(63).eq(0)
     return image.updateMask(full_mask)
 
 
 def filter_dates_and_roi(col, date_range, roi, contains_roi=True):
+    """Filter an Earth Engine image collection by date range, ROI, and QA mask.
+
+    Applies `mask_slc_gaps` to every image after filtering by date and
+    bounding geometry. If `contains_roi` is True, further restricts to
+    images whose footprint fully contains `roi`.
+
+    Args:
+        col (ee.ImageCollection): Landsat image collection to filter.
+        date_range (tuple[str, str]): `(start_date, end_date)` as
+            `%Y-%m-%d` strings.
+        roi (ee.Geometry.Rectangle): Region of interest to filter/intersect against.
+        contains_roi (bool): If True, only keep images whose footprint fully
+            contains `roi`. Defaults to True.
+
+    Returns:
+        ee.ImageCollection: The filtered (and QA-masked) collection.
+    """
     fcol = (col.filterDate(date_range[0], date_range[1])
             .filterBounds(roi)
             .map(mask_slc_gaps))
@@ -120,6 +194,30 @@ def filter_dates_and_roi(col, date_range, roi, contains_roi=True):
 
 
 def get_landsat_col(cols, date_range: tuple, region_of_interest):
+    """Find a Landsat collection with enough scenes covering the ROI, widening the date range if needed.
+
+    Tries each collection in `cols` filtered to `date_range` and
+    `region_of_interest`, first requiring images whose footprint fully
+    contains the ROI (`contains_roi=True`), then relaxing to any
+    intersecting image (`contains_roi=False`). Returns the first
+    (collection, contains_roi) combination whose filtered size exceeds
+    `MIN_COL_SIZE`. If none qualify, recurses with the date range widened by
+    2 months on each side.
+
+    Args:
+        cols (dict[str, ee.ImageCollection]): Candidate Landsat collections
+            keyed by name (e.g. "l8", "l5", "l7"), tried in dict order.
+        date_range (tuple[str, str]): `(start_date, end_date)` as
+            `%Y-%m-%d` strings.
+        region_of_interest (ee.Geometry.Rectangle): Region of interest to
+            filter against.
+
+    Returns:
+        tuple[ee.ImageCollection, tuple[str, str], str, int]:
+            `(filtered_col, date_range, col_name, col_size)` for the
+            collection/date range that satisfied `MIN_COL_SIZE`;
+            `date_range` reflects any widening that occurred.
+    """
 
     for contains_roi in [True, False]:
         for col_name, col in cols.items():
@@ -135,6 +233,27 @@ def get_landsat_col(cols, date_range: tuple, region_of_interest):
 
 
 def get_median_request(sample_metadata, cols, cols_bands, span_km):
+    """Build a median-composite Landsat image request for one sample's region of interest.
+
+    Combines `extract_region_of_interest`, `get_date_range`, and
+    `get_landsat_col` to find a suitable collection/date range, then takes
+    the per-pixel median across the resulting collection, clips it to the
+    ROI, and reprojects to EPSG:3857 at 30m resolution.
+
+    Args:
+        sample_metadata (pd.Series): Metadata for one FMoW sample containing
+            image center coordinates, span, and timestamp.
+        cols (dict[str, ee.ImageCollection]): Candidate Landsat collections
+            keyed by name, passed through to `get_landsat_col`.
+        cols_bands (dict[str, list[str]]): Optical band names per collection.
+            Not used directly here; kept for a uniform signature with
+            `download_image`, which selects bands from the result via `col_name`.
+        span_km (float): Size of the region of interest to request, in kilometers.
+
+    Returns:
+        tuple[ee.Image, ee.Geometry.Rectangle, tuple[str, str], str, int]:
+            `(median_img, region_of_interest, date_range, col_name, col_size)`.
+    """
     region_of_interest = extract_region_of_interest(sample_metadata, span_km)
     col, date_range, col_name, col_size = get_landsat_col(
         cols, get_date_range(sample_metadata), region_of_interest)
@@ -144,14 +263,30 @@ def get_median_request(sample_metadata, cols, cols_bands, span_km):
 
 
 def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float, pixel_dim: int, logger: logging.Logger):
-    """Downloads Landsat8 image from Google Earth Engine for the image coordinates of the given sample.
+    """Download the median-composite Landsat GeoTIFF for one FMoW sample from Google Earth Engine.
+
+    Retries up to 30 times (combined across both steps) on any exception:
+    first to build the median image request via `get_median_request`, then
+    to fetch and save the GeoTIFF via its download URL to
+    `IMAGES_DIR/image_<sample_idx>.tif`, where `sample_idx` is
+    `sample_metadata.name` (the row's index/id).
 
     Args:
-        sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
-        l7 (ee.ImageCollection): Landsat7 image collection.
-        l8 (ee.ImageCollection): Landsat8 image collection.
-        span_km (float): Image size in kilometer to download.
-        logger (logging.Logger):
+        sample_metadata (pd.Series): Metadata for one FMoW sample containing
+            image center coordinates, span, and timestamp; `.name` is used
+            as the sample id for the output filename.
+        cols (dict[str, ee.ImageCollection]): Candidate Landsat collections
+            keyed by name, passed through to `get_median_request`.
+        cols_bands (dict[str, list[str]]): Optical band names per collection,
+            used to select which bands to download once a collection is chosen.
+        span_km (float): Size of the region of interest to download, in kilometers.
+        pixel_dim (int): Width/height of the downloaded image, in pixels.
+        logger (logging.Logger): Logger used to record retry attempts.
+
+    Returns:
+        pd.Series: `{"date_range": ..., "col_size": ..., "col": ...}`
+            recording which date range, collection size, and collection name
+            were used (each `None` if the request could never be built).
     """
     date_range, col_size, col_name = None, None, None
     attempts = 30
@@ -199,9 +334,20 @@ def download_image(sample_metadata: pd.Series, cols, cols_bands, span_km: float,
 
 
 def scale_optical_bands(image, optical_bands):
-    """Scale factors taken from:
-        https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LE07_C02_T1_L2#bands
-        https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C02_T1_L2#bands
+    """Scale Landsat Collection 2 optical bands from DN to surface reflectance.
+
+    Applies the standard `DN * 0.0000275 - 0.2` scaling factor (see
+    https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LE07_C02_T1_L2#bands
+    and .../LANDSAT_LC08_C02_T1_L2#bands) to the given bands and replaces
+    them in place.
+
+    Args:
+        image (ee.Image): Landsat Collection 2 surface reflectance image.
+        optical_bands (list[str]): Names of the optical bands to scale.
+
+    Returns:
+        ee.Image: The same image with `optical_bands` replaced by their
+            scaled (reflectance) values.
     """
     scaled_optical_bands = (image
                             .select(optical_bands)
@@ -211,6 +357,23 @@ def scale_optical_bands(image, optical_bands):
 
 
 def get_fmow_wilds_mask(metadata):
+    """Build a boolean mask selecting metadata rows that belong to the WILDS FMoW dataset.
+
+    Mirrors the split construction in
+    `download_preprocessed_subset.assign_wilds_split`: a row is included if
+    it is a `train`/`val`/`test` row whose timestamp falls in the matching
+    WILDS time window - `train`, `val`, or `test` within [2002, 2013) (ID
+    period), `val` within [2013, 2016) (OOD-Val), or `test` within
+    [2016, 2018) (OOD-Test). `split == "seq"` rows and any row outside these
+    windows are excluded.
+
+    Args:
+        metadata (pd.DataFrame): Metadata with `timestamp` and `split` columns.
+
+    Returns:
+        pd.Series: Boolean mask, one entry per row of `metadata`, True for
+            rows inside the WILDS dataset.
+    """
     timestamps = pd.to_datetime(metadata['timestamp'])
     utc = pytz.UTC
     id_mask = (timestamps >= utc.localize(datetime(2002, 1, 1))) & (
@@ -226,15 +389,18 @@ def get_fmow_wilds_mask(metadata):
 
 
 def get_missing_mask(metadata):
-    """
-    Reads all TIFF files in IMAGE_DIR, extracts indices from filenames ('image_<idx>.tif'),
-    and returns a mask for rows in metadata where the index is missing from the folder.
+    """Find metadata rows whose Landsat GeoTIFF has not yet been downloaded.
 
-    Parameters:
-    - metadata (pd.DataFrame): Pandas DataFrame with metadata, must have an 'index' column (or specify index_col).
+    Reads all `.tif` filenames in `IMAGES_DIR`, extracts their sample
+    indices (`image_<idx>.tif`), and compares them against `metadata`'s index.
+
+    Args:
+        metadata (pd.DataFrame): Metadata indexed by sample id (the same ids
+            used in `image_<idx>.tif` filenames).
 
     Returns:
-    - np.ndarray: Boolean mask where True indicates missing files.
+        np.ndarray: Boolean mask, one entry per row of `metadata` (in index
+            order), True where that row's GeoTIFF is missing from `IMAGES_DIR`.
     """
     # Read all TIFF filenames
     tiff_files = [f for f in os.listdir(IMAGES_DIR) if f.endswith('.tif')]
@@ -256,6 +422,23 @@ def get_missing_mask(metadata):
 
 
 def main():
+    """Download Landsat imagery for all not-yet-downloaded WILDS FMoW samples.
+
+    Authenticates with Google Earth Engine, builds the Landsat 5/7/8 image
+    collections (scaled to reflectance via `scale_optical_bands`), restricts
+    `rgb_metadata_extended.csv` to WILDS rows (`get_fmow_wilds_mask`) that
+    are not already downloaded (`get_missing_mask`, when `APPEND_DOWNLOAD`
+    is True), computes a shared download span/pixel size from the largest
+    selected sample's `img_span_km` times `EXTENSION_FACTOR`, then downloads
+    each selected sample in parallel via `download_image` (through
+    `pandarallel`). Writes the resulting metadata (augmented with the
+    download's date range/collection info) to `rgb_metadata_download.csv`.
+
+    Raises:
+        NotADirectoryError: If `PROJECT_ROOT` or `DATA_DIR` does not exist.
+        Exception: Re-raises whatever error `ee.Authenticate()` /
+            `ee.Initialize()` raise, after printing an authentication hint.
+    """
     if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR)):
         raise NotADirectoryError()
 

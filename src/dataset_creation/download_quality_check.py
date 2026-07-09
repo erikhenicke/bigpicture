@@ -1,3 +1,19 @@
+"""
+download_quality_check.py
+
+Quality-checks downloaded Landsat8 GeoTIFFs in `IMAGES_DIR`: verifies that all FMoW
+WILDS train/val/test/id_val/id_test indices have a corresponding downloaded image, then
+runs a sample (or all) of the GeoTIFFs through `check_image_quality` to flag images with
+too many zero, masked, or NaN/Inf pixels. Results are written to `quality_check.log`.
+
+Main functions:
+    - check_image_quality: Computes zero/mask/NaN-Inf pixel fractions for one GeoTIFF and
+      checks them against thresholds.
+    - get_downloaded_indices: Extracts and sorts the FMoW sample indices present in a list
+      of downloaded GeoTIFF filenames.
+    - main: Sets up logging, checks download completeness against the FMoW WILDS dataset,
+      and runs the quality check over a (sub)sample of downloaded images.
+"""
 import os
 import pathlib
 import random
@@ -19,18 +35,27 @@ LOG_FILE = LOG_DIR / 'quality_check.log'
 
 
 def check_image_quality(image_path, zero_threshold=0.01, mask_threshold=0.01, nan_inf_threshold=0.0):
-    """
-    Comprehensive check: zeros (masked+non-masked), masked pixels, NaN/Inf.
-    FAILS if ANY threshold exceeded (zero tolerance for NaN/Inf).
+    """Check a Landsat8 GeoTIFF for zero, masked, and NaN/Inf pixels against thresholds.
+
+    Reads every band and computes the fraction of masked pixels, the fraction of
+    exact-zero pixels (masked or not), and the fraction of non-finite (NaN/Inf) pixels
+    across the whole image. The image fails the check if any of these fractions exceeds
+    its threshold.
 
     Args:
         image_path (str): Path to the GeoTIFF file.
-        zero_threshold (float): Max fraction zeros (default 5%).
-        mask_threshold (float): Max fraction masked (default 95%).
-        nan_inf_threshold (float): Max fraction NaN/Inf (default 0%).
+        zero_threshold (float): Maximum allowed fraction of zero-valued pixels. Defaults
+            to 0.01.
+        mask_threshold (float): Maximum allowed fraction of masked pixels. Defaults to
+            0.01.
+        nan_inf_threshold (float): Maximum allowed fraction of NaN/Inf pixels. Defaults
+            to 0.0.
 
     Returns:
-        tuple: (bool: passes, dict: metrics)
+        tuple[bool, dict]: Whether the image passes all thresholds, and a dict with keys
+            `zero_frac`, `mask_frac`, `nan_inf_frac` (float fractions) and `total_pixels`
+            (int, summed over bands). If the image has zero total pixels, returns
+            `(False, {...})` with all fractions set to 1.0.
     """
     with rasterio.open(image_path) as src:
         zero_counts = []
@@ -77,6 +102,19 @@ def check_image_quality(image_path, zero_threshold=0.01, mask_threshold=0.01, na
 
 
 def get_downloaded_indices(tiff_files, logger):
+    """Extract and sort the FMoW sample indices encoded in downloaded GeoTIFF filenames.
+
+    Args:
+        tiff_files (list[str]): Paths/filenames of downloaded GeoTIFFs, expected to match
+            `.*image_(\\d+)\\.tif$`.
+        logger (logging.Logger): Logger used to report filenames that don't match the
+            pattern.
+
+    Returns:
+        np.ndarray: Sorted array of shape (len(tiff_files),), dtype float64, containing
+            the extracted sample indices. Entries for filenames that fail to match the
+            pattern are left uninitialized (`np.empty`) rather than skipped.
+    """
     size_indices = len(tiff_files)
     downloaded_indices = np.empty(shape=(size_indices,))
     pattern = r'.*image_(\d+)\.tif$'
@@ -90,6 +128,21 @@ def get_downloaded_indices(tiff_files, logger):
 
 
 def main(num_samples=None, zero_threshold=0.01, mask_threshold=0.01, nan_inf_threshold=0.0):
+    """Check download completeness and run a quality check over downloaded Landsat8 GeoTIFFs.
+
+    Sets up file logging, confirms every FMoW WILDS train/val/test/id_val/id_test index
+    has a corresponding GeoTIFF in `IMAGES_DIR`, then runs `check_image_quality` over
+    either a random `num_samples` GeoTIFFs or all of them, logging PASS/FAIL per image and
+    a summary of failures.
+
+    Args:
+        num_samples (int | None): Number of GeoTIFFs to randomly sample for the quality
+            check. If None, not an int, or larger than the number of files found, all
+            downloaded GeoTIFFs are checked.
+        zero_threshold (float): Passed through to `check_image_quality`.
+        mask_threshold (float): Passed through to `check_image_quality`.
+        nan_inf_threshold (float): Passed through to `check_image_quality`.
+    """
 
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)

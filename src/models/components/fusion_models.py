@@ -1,3 +1,27 @@
+"""Full multi-scale classification models, each combining branches + a fusion
+strategy behind the common :class:`MultiScaleModel` interface.
+
+``models/multi_scale_classification.py``'s ``MultiScaleClassificationModule``
+(the Lightning training/eval harness) depends only on this interface -- every
+model here returns a dict containing at least ``task_logits`` from ``forward``,
+and advertises which auxiliary objectives it supports via the ``supports_*``
+methods, so the harness never needs to know which concrete model it is driving.
+
+Single-scale baselines (one encoder, no fusion): :class:`SingleBranchModel`
+(HR image), :class:`SingleBranchLRModel` (LR/Landsat image),
+:class:`SingleBranchLocationModel` (geographic coordinates).
+:class:`EarlyFusionModel` channel-concatenates HR and LR before a single
+encoder. :class:`FeatureFusionModel` runs a :class:`~models.components.
+branches.DualBranch` (or ``CoordDualBranch`` / ``DomainDualBranch``) and
+combines the two branches' features with a :class:`~models.components.
+fusion.Fusion` module; :class:`D3GModel` subclasses it to replace the single
+fused task classifier with per-domain heads gated by
+:class:`~models.components.domain_relations.D3GRelation` ("domain-gated
+feature fusion"). :class:`DecisionFusionModel` instead performs late/decision
+fusion of two already-trained single-branch classifiers' logits via a
+:class:`~models.components.fusion.DecisionRule`, loading their frozen (or
+shape-only) weights from prior single-branch training runs.
+"""
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -36,7 +60,28 @@ class MultiScaleModel(nn.Module, ABC):
     @abstractmethod
     def forward(
         self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None
-    ) -> Dict[str, torch.Tensor]: ...
+    ) -> Dict[str, torch.Tensor]:
+        """Run the model on a batch and return its output dict.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Batch input dict (keys vary by model;
+                typically includes ``"rgb"`` and/or ``"landsat"``, and may
+                include ``"coords"``, ``"domain"``, coordinate grids, etc. --
+                see each concrete model's ``forward``).
+            region_ids (Optional[torch.Tensor]): Shape ``(batch_size,)``,
+                integer -- ground-truth domain/region ids, already remapped to
+                the model's domain-label space by
+                ``MultiScaleClassificationModule._shared_forward``. Only
+                :class:`D3GModel` uses this; other models accept and ignore it.
+
+        Returns:
+            Dict[str, torch.Tensor]: Always contains ``"task_logits"``
+            (shape ``(batch_size, num_task_labels)``). May also contain
+            ``"lr_domain_logits"`` / ``"hr_domain_logits"`` (each
+            ``(batch_size, num_domain_labels)``) and/or ``"rel_logits"``,
+            depending on which ``supports_*`` flags are True.
+        """
+        ...
 
     def train_model(self) -> bool:
         """Whether this model is learned via ``Trainer.fit``.
@@ -45,24 +90,46 @@ class MultiScaleModel(nn.Module, ABC):
         exception is ``DecisionFusionModel``, which overrides this to return its own
         ``train_model`` flag -- False means its frozen heads are evaluated test-only,
         True means the decision heads are trained jointly from scratch.
+
+        Returns:
+            bool: True if this model should be fit via ``Trainer.fit``.
         """
         return True
 
     @abstractmethod
-    def supports_d3g_objective(self) -> bool: ...
-    @abstractmethod
-    def supports_lr_domain_classification(self) -> bool: ...
-    @abstractmethod
-    def supports_hr_domain_classification(self) -> bool: ...
-    @abstractmethod
-    def supports_branch_ablation(self) -> bool: ...
+    def supports_d3g_objective(self) -> bool:
+        """bool: Whether ``forward`` returns ``"rel_logits"`` for the D3G consistency loss."""
+        ...
 
     @abstractmethod
-    def task_parameters(self) -> List[torch.nn.Parameter]: ...
+    def supports_lr_domain_classification(self) -> bool:
+        """bool: Whether ``forward`` returns ``"lr_domain_logits"``."""
+        ...
+
     @abstractmethod
-    def lr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
+    def supports_hr_domain_classification(self) -> bool:
+        """bool: Whether ``forward`` returns ``"hr_domain_logits"``."""
+        ...
+
     @abstractmethod
-    def hr_domain_parameters(self) -> List[torch.nn.Parameter]: ...
+    def supports_branch_ablation(self) -> bool:
+        """bool: Whether :meth:`forward_branch_ablation` is available on this model."""
+        ...
+
+    @abstractmethod
+    def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Parameters optimized by the task-loss optimizer."""
+        ...
+
+    @abstractmethod
+    def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Parameters optimized by the LR-domain-loss optimizer."""
+        ...
+
+    @abstractmethod
+    def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Parameters optimized by the HR-domain-loss optimizer."""
+        ...
 
 
 class SingleBranchModel(MultiScaleModel):
@@ -82,6 +149,20 @@ class SingleBranchModel(MultiScaleModel):
         coord_channels_hr: bool = False,
         hr_spatial_encoding: Optional[nn.Module] = None,
     ):
+        """Build the encoder, task classifier, and HR domain classifier.
+
+        Args:
+            encoder (Branch): HR image encoder; must already be built with
+                ``in_channels`` matching 3 plus any enabled coordinate/PE extras.
+            num_task_labels (int): Number of task classes.
+            num_domain_labels (int): Number of domain (region) classes for the
+                HR domain classifier.
+            coord_channels_hr (bool): If True, concatenate ``x["coord_grid_hr"]``
+                onto the HR image before encoding.
+            hr_spatial_encoding (Optional[nn.Module]): If given (and
+                ``x["coord_grid_hr"]`` is present), applied to the HR coordinate
+                grid and the result concatenated onto the HR image.
+        """
         super().__init__()
         self.encoder = encoder
         self.coord_channels_hr = coord_channels_hr
@@ -90,18 +171,38 @@ class SingleBranchModel(MultiScaleModel):
         self.hr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
+        """bool: False -- no D3G relation heads."""
         return False
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: False -- no LR branch/domain classifier."""
         return False
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "hr_domain_logits"."""
         return True
 
     def supports_branch_ablation(self) -> bool:
+        """bool: False -- single-branch models have nothing to ablate."""
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Encode the (optionally augmented) HR image and classify it.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Must contain ``"rgb"``
+                (``(batch_size, 3, H, W)``, float32), and ``"coord_grid_hr"``
+                (``(batch_size, 2, H, W)``, float32) if :attr:`coord_channels_hr`
+                is True or :attr:`hr_spatial_encoding` is set.
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"``
+            (``(batch_size, num_task_labels)``) and ``"hr_domain_logits"``
+            (``(batch_size, num_domain_labels)``, computed from detached
+            features so the domain gradient does not flow into the encoder).
+        """
         hr_image = x["rgb"]
 
         # Independent, config-driven augmentations (mirrors DualBranch HR handling):
@@ -121,15 +222,18 @@ class SingleBranchModel(MultiScaleModel):
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Encoder + task classifier (+ spatial encoding, if any)."""
         params = list(self.encoder.parameters()) + list(self.task_classifier.parameters())
         if self.hr_spatial_encoding is not None:
             params += list(self.hr_spatial_encoding.parameters())
         return params
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no LR domain classifier."""
         return []
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The HR domain classifier's parameters."""
         return list(self.hr_domain_classifier.parameters())
 
 
@@ -144,6 +248,20 @@ class SingleBranchLRModel(MultiScaleModel):
         lr_domain_loss_coeff: float = 0.1667,
         landsat_channels: int = 6,
     ):
+        """Build the encoder, task classifier, and LR domain classifier.
+
+        Args:
+            encoder (Branch): LR (Landsat) image encoder; must already be built
+                with ``in_channels == landsat_channels``.
+            num_task_labels (int): Number of task classes.
+            num_domain_labels (int): Number of domain (region) classes for the
+                LR domain classifier.
+            lr_domain_loss_coeff (float): Weight of the LR domain loss in the
+                combined training objective (read by
+                ``MultiScaleClassificationModule``, not used directly here).
+            landsat_channels (int): Number of leading channels to keep from the
+                raw ``x["landsat"]`` tensor before encoding.
+        """
         super().__init__()
         self.encoder = encoder
         self.landsat_channels = landsat_channels
@@ -152,18 +270,36 @@ class SingleBranchLRModel(MultiScaleModel):
         self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
+        """bool: False -- no D3G relation heads."""
         return False
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "lr_domain_logits"."""
         return True
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: False -- no HR branch/domain classifier."""
         return False
 
     def supports_branch_ablation(self) -> bool:
+        """bool: False -- single-branch models have nothing to ablate."""
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Encode the (cropped) LR image and classify it.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Must contain ``"landsat"``
+                (``(batch_size, C, H, W)``, float32); only the first
+                :attr:`landsat_channels` channels are used.
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"``
+            (``(batch_size, num_task_labels)``) and ``"lr_domain_logits"``
+            (``(batch_size, num_domain_labels)``).
+        """
         features = self.encoder(x["landsat"][:, :self.landsat_channels, :, :])
         return {
             "task_logits": self.task_classifier(features),
@@ -171,12 +307,15 @@ class SingleBranchLRModel(MultiScaleModel):
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Encoder + task classifier."""
         return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The LR domain classifier's parameters."""
         return list(self.lr_domain_classifier.parameters())
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no HR domain classifier."""
         return []
 
 
@@ -190,6 +329,17 @@ class SingleBranchLocationModel(MultiScaleModel):
         num_domain_labels: int = 6,
         lr_domain_loss_coeff: float = 0.1667,
     ):
+        """Build the location encoder, task classifier, and LR domain classifier.
+
+        Args:
+            encoder (SatCLIPLocationBranch): Encoder applied to ``x["coords"]``.
+            num_task_labels (int): Number of task classes.
+            num_domain_labels (int): Number of domain (region) classes for the
+                domain classifier.
+            lr_domain_loss_coeff (float): Weight of the domain loss in the
+                combined training objective (read by
+                ``MultiScaleClassificationModule``, not used directly here).
+        """
         super().__init__()
         self.encoder = encoder
         self.lr_domain_loss_coeff = lr_domain_loss_coeff
@@ -197,18 +347,36 @@ class SingleBranchLocationModel(MultiScaleModel):
         self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
+        """bool: False -- no D3G relation heads."""
         return False
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "lr_domain_logits"."""
         return True
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: False -- no HR branch/domain classifier."""
         return False
 
     def supports_branch_ablation(self) -> bool:
+        """bool: False -- single-branch models have nothing to ablate."""
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Encode the geographic coordinates and classify them.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Must contain ``"coords"``
+                (``(batch_size, 2)``; see
+                ``models.components.branches.SatCLIPLocationBranch.forward``).
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"``
+            (``(batch_size, num_task_labels)``) and ``"lr_domain_logits"``
+            (``(batch_size, num_domain_labels)``).
+        """
         features = self.encoder(x["coords"])
         return {
             "task_logits": self.task_classifier(features),
@@ -216,12 +384,15 @@ class SingleBranchLocationModel(MultiScaleModel):
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Encoder + task classifier."""
         return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The domain classifier's parameters."""
         return list(self.lr_domain_classifier.parameters())
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no HR domain classifier."""
         return []
 
 class EarlyFusionModel(MultiScaleModel):
@@ -235,6 +406,21 @@ class EarlyFusionModel(MultiScaleModel):
         lr_domain_loss_coeff: float = 0.1667,
         landsat_channels: int = 6,
     ):
+        """Build the shared encoder, task classifier, and LR domain classifier.
+
+        Args:
+            encoder (Branch): Encoder applied to the channel-concatenated
+                HR + LR image; must already be built with
+                ``in_channels == 3 + landsat_channels``.
+            num_task_labels (int): Number of task classes.
+            num_domain_labels (int): Number of domain (region) classes for the
+                domain classifier.
+            lr_domain_loss_coeff (float): Weight of the domain loss in the
+                combined training objective (read by
+                ``MultiScaleClassificationModule``, not used directly here).
+            landsat_channels (int): Number of leading channels to keep from the
+                raw ``x["landsat"]`` tensor before concatenation.
+        """
         super().__init__()
         self.encoder = encoder
         self.landsat_channels = landsat_channels
@@ -243,18 +429,38 @@ class EarlyFusionModel(MultiScaleModel):
         self.lr_domain_classifier = nn.Linear(encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
+        """bool: False -- no D3G relation heads."""
         return False
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "lr_domain_logits"."""
         return True
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: False -- no separate HR branch/domain classifier (HR and LR share one encoder)."""
         return False
 
     def supports_branch_ablation(self) -> bool:
+        """bool: False -- single-branch/early-fusion models have nothing to ablate."""
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Channel-concatenate HR and (cropped) LR images and classify the pair.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Must contain ``"rgb"``
+                (``(batch_size, 3, H, W)``, float32) and ``"landsat"``
+                (``(batch_size, C, H, W)``, float32; only the first
+                :attr:`landsat_channels` channels are used). ``H``/``W`` must
+                match between the two.
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"``
+            (``(batch_size, num_task_labels)``) and ``"lr_domain_logits"``
+            (``(batch_size, num_domain_labels)``).
+        """
         stacked = torch.cat([x["rgb"], x["landsat"][:, :self.landsat_channels, :, :]], dim=1)
         features = self.encoder(stacked)
         return {
@@ -263,12 +469,15 @@ class EarlyFusionModel(MultiScaleModel):
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Encoder + task classifier."""
         return list(self.encoder.parameters()) + list(self.task_classifier.parameters())
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The domain classifier's parameters."""
         return list(self.lr_domain_classifier.parameters())
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no HR domain classifier."""
         return []
 
 
@@ -310,6 +519,24 @@ class DecisionFusionModel(MultiScaleModel):
         run_idx: int = 0,
         train_model: bool = False,
     ):
+        """Build the decision rule and load/initialize this seed's two heads.
+
+        Args:
+            num_task_labels (int): Number of task classes; must match both
+                loaded heads' output width.
+            rule (DecisionRule): Decision rule combining the two heads' logits.
+            hr_run_name (str): Experiment key of the HR single-branch training
+                run whose checkpoint supplies the HR head (see
+                :meth:`_load_heads`).
+            lr_run_name (str): Experiment key of the LR single-branch training
+                run whose checkpoint supplies the LR head.
+            run_idx (int): Which seed's checkpoint to load from each run
+                (indexes ``find_best_checkpoints``'s sorted seed list).
+            train_model (bool): If False (default), heads copy the trained
+                checkpoint weights and are frozen (test-only). If True, heads
+                are reinitialized (only their shape taken from the checkpoint)
+                and left trainable. See :meth:`_load_heads`.
+        """
         super().__init__()
         self.num_task_labels = num_task_labels
         self.rule = rule
@@ -321,21 +548,48 @@ class DecisionFusionModel(MultiScaleModel):
         self._load_heads(hr_run_name, lr_run_name, run_idx)
 
     def train_model(self) -> bool:
+        """bool: This instance's ``train_model`` flag (see :meth:`__init__`)."""
         return self._train_model
 
     def supports_d3g_objective(self) -> bool:
+        """bool: False -- decision fusion has no D3G relation heads."""
         return False
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: False -- domain metrics live in the single-branch runs; see class docstring."""
         return False
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: False -- domain metrics live in the single-branch runs; see class docstring."""
         return False
 
     def supports_branch_ablation(self) -> bool:
+        """bool: False -- nothing to ablate here; each head is already a single branch."""
         return False
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Apply each frozen/trainable head to its cached features and fuse via the rule.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Must contain ``"rgb"``
+                (``(batch_size, hr_in_dim)``, float32 -- cached HR encoder
+                features, not an image) and ``"landsat"``
+                (``(batch_size, lr_in_dim)``, float32 -- cached LR encoder
+                features), as served by the dataset in ``source="features"``
+                mode. ``hr_in_dim`` / ``lr_in_dim`` are the input widths read
+                from the loaded checkpoints (see :meth:`_load_heads`).
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``{"task_logits": ...}``, shape
+            ``(batch_size, num_task_labels)`` -- the log fused posterior from
+            :attr:`rule`.
+
+        Raises:
+            RuntimeError: If :attr:`hr_head` or :attr:`lr_head` is ``None``
+                (i.e. :meth:`_load_heads` did not run/succeed).
+        """
         if self.hr_head is None or self.lr_head is None:
             raise RuntimeError("DecisionFusionModel heads were not built in the constructor.")
         hr_logits = self.hr_head(x["rgb"])
@@ -357,6 +611,22 @@ class DecisionFusionModel(MultiScaleModel):
         are frozen. In training mode (``train_model=True``) only the shape is taken from
         the checkpoint -- the heads are reinitialized and left trainable so they can be
         learned jointly from scratch through the decision rule.
+
+        Args:
+            hr_run_name (str): Experiment key resolved via ``find_run_dir`` to
+                the HR single-branch run directory.
+            lr_run_name (str): Experiment key resolved via ``find_run_dir`` to
+                the LR single-branch run directory.
+            run_idx (int): Seed index into each run's sorted checkpoint list.
+
+        Returns:
+            None: Sets :attr:`hr_head` and :attr:`lr_head` in place.
+
+        Raises:
+            FileNotFoundError: If either run name does not resolve to a run
+                directory via ``find_run_dir``.
+            IndexError: If ``run_idx`` is out of range for either run's
+                available checkpoints.
         """
         hr_dir = find_run_dir(hr_run_name)
         lr_dir = find_run_dir(lr_run_name)
@@ -373,6 +643,15 @@ class DecisionFusionModel(MultiScaleModel):
             )
 
         def state(path: Path) -> dict:
+            """Load a checkpoint file's Lightning ``state_dict``.
+
+            Args:
+                path (Path): Checkpoint file path.
+
+            Returns:
+                dict: The checkpoint's ``"state_dict"`` entry (parameter name ->
+                tensor).
+            """
             return torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
 
         device = self.rule.log_class_prior.device
@@ -384,6 +663,24 @@ class DecisionFusionModel(MultiScaleModel):
             self.requires_grad_(False)
 
     def _build_head(self, state_dict: Dict[str, torch.Tensor], copy_weights: bool) -> nn.Linear:
+        """Build a single ``Linear`` head sized from a checkpoint's task-classifier weight.
+
+        Args:
+            state_dict (Dict[str, torch.Tensor]): A single-branch checkpoint's
+                ``state_dict``; must contain ``"model.task_classifier.weight"``
+                (shape ``(out_dim, in_dim)``) and ``"...bias"``.
+            copy_weights (bool): If True, copy the checkpoint's weight/bias into
+                the new head (test-only mode). If False, leave the head at its
+                fresh ``nn.Linear`` initialization (training-from-scratch mode).
+
+        Returns:
+            nn.Linear: A new ``Linear(in_dim, out_dim)`` head, optionally
+            initialized with the checkpoint's weights.
+
+        Raises:
+            ValueError: If the checkpoint's output width does not match
+                :attr:`num_task_labels`.
+        """
         weight = state_dict["model.task_classifier.weight"]
         bias = state_dict["model.task_classifier.bias"]
         out_dim, in_dim = weight.shape
@@ -399,6 +696,7 @@ class DecisionFusionModel(MultiScaleModel):
         return head
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty if frozen (``train_model=False``); otherwise both heads' parameters."""
         if not self._train_model:
             return []
         params: List[torch.nn.Parameter] = []
@@ -409,13 +707,31 @@ class DecisionFusionModel(MultiScaleModel):
         return params
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no domain classifier."""
         return []
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Empty -- this model has no domain classifier."""
         return []
 
 
 class FeatureFusionModel(MultiScaleModel):
+    """Feature fusion: two branches + a :class:`~models.components.fusion.Fusion`
+    module + task/domain classifiers.
+
+    Runs ``branches`` (typically a :class:`~models.components.branches.DualBranch`)
+    to get an HR and an LR feature vector, combines them with ``fusion``, and
+    feeds the result to a task classifier (or, if the fusion module already
+    :attr:`~models.components.fusion.Fusion.produces_logits`, uses its output as
+    the logits directly, with no extra classifier). Also carries independent LR
+    and HR domain classifiers, each fed from its own branch's *un-fused* features
+    (LR through :attr:`detach_lr_for_task` if that would otherwise leak into the
+    task gradient; HR always detached before the HR domain head). Subclassed by
+    :class:`D3GModel`, which replaces the single shared task classifier with
+    per-domain heads (hence :meth:`supports_d3g_objective` checks
+    ``isinstance(self, D3GModel)``).
+    """
+
     def __init__(
         self,
         branches: DualBranch,
@@ -425,6 +741,31 @@ class FeatureFusionModel(MultiScaleModel):
         lr_domain_loss_coeff: float = 0.1667,
         detach_lr_for_task: bool = False,
     ):
+        """Build the branches wrapper, task classifier (if needed), and domain classifiers.
+
+        Args:
+            branches (DualBranch): Runs the HR and LR encoders; see
+                :class:`~models.components.branches.DualBranch`.
+            fusion (Optional[Fusion]): Combines the two branches' features. May
+                be ``None`` for a subclass (e.g. :class:`D3GModel`) that
+                overrides ``forward`` and does not use a shared fusion module;
+                the base :meth:`forward` requires it to be set.
+            num_task_labels (int): Number of task classes.
+            num_domain_labels (int): Number of domain (region) classes for both
+                domain classifiers.
+            lr_domain_loss_coeff (float): Weight of the LR domain loss in the
+                combined training objective (read by
+                ``MultiScaleClassificationModule``, not used directly here).
+            detach_lr_for_task (bool): If True, detach the LR branch features
+                before fusion/task-classification (so no task gradient flows
+                into the LR encoder), while still using the un-detached LR
+                features for the LR domain classifier.
+
+        Raises:
+            AssertionError: If ``fusion`` is given, produces logits directly
+                (``fusion.produces_logits``), and its ``out_dim`` does not equal
+                ``num_task_labels``.
+        """
         super().__init__()
 
         self.branches: DualBranch = branches
@@ -443,12 +784,15 @@ class FeatureFusionModel(MultiScaleModel):
         self.hr_domain_classifier = nn.Linear(branches.hr_encoder.out_dim, num_domain_labels)
 
     def supports_d3g_objective(self) -> bool:
+        """bool: True only for :class:`D3GModel` instances (the D3G consistency loss)."""
         return isinstance(self, D3GModel)
 
     def supports_lr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "lr_domain_logits"."""
         return True
 
     def supports_hr_domain_classification(self) -> bool:
+        """bool: True -- ``forward`` returns "hr_domain_logits"."""
         return True
 
     def forward(
@@ -456,6 +800,26 @@ class FeatureFusionModel(MultiScaleModel):
         x: Dict[str, torch.Tensor],
         region_ids: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
+        """Encode both branches, fuse them, and classify task + both domains.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Batch dict forwarded to
+                :attr:`branches` (see
+                ``models.components.branches.DualBranch.forward``).
+            region_ids (Optional[torch.Tensor]): Unused; present to satisfy the
+                :class:`MultiScaleModel` interface.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"``
+            (``(batch_size, num_task_labels)``), ``"lr_domain_logits"`` and
+            ``"hr_domain_logits"`` (each ``(batch_size, num_domain_labels)``).
+            The HR domain logits are always computed from detached HR features;
+            the LR domain logits use un-detached LR features regardless of
+            :attr:`detach_lr_for_task`.
+
+        Raises:
+            RuntimeError: If :attr:`fusion` is ``None``.
+        """
         if self.fusion is None:
             raise RuntimeError("FeatureFusionModel requires a fusion module for forward().")
 
@@ -473,11 +837,24 @@ class FeatureFusionModel(MultiScaleModel):
         return outputs
 
     def supports_branch_ablation(self) -> bool:
+        """bool: True if a fusion module is set (branch ablation needs ``Fusion.forward_branch_ablation``)."""
         return self.fusion is not None
 
     def forward_branch_ablation(
         self, x: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
+        """Run the fusion module with each branch ablated in turn, to isolate its contribution.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Batch dict forwarded to
+                :attr:`branches`.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"lr_ablated_logits"`` (LR branch zeroed
+            out) and ``"hr_ablated_logits"`` (HR branch zeroed out), each shape
+            ``(batch_size, num_task_labels)`` if :attr:`task_classifier` is set,
+            else ``(batch_size, fusion.out_dim)``.
+        """
         hr_features, lr_features = self.branches(x)
         lr_ablated = self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="lr")
         hr_ablated = self.fusion.forward_branch_ablation(hr_features, lr_features, cutoff="hr")
@@ -490,6 +867,7 @@ class FeatureFusionModel(MultiScaleModel):
         }
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Branches + fusion (if any) + task classifier (if any)."""
         parameters = list(self.branches.parameters())
         if self.fusion is not None:
             parameters += list(self.fusion.parameters())
@@ -498,13 +876,30 @@ class FeatureFusionModel(MultiScaleModel):
         return parameters
 
     def lr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The LR domain classifier's parameters."""
         return list(self.lr_domain_classifier.parameters())
 
     def hr_domain_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: The HR domain classifier's parameters."""
         return list(self.hr_domain_classifier.parameters())
 
 
 class D3GModel(FeatureFusionModel):
+    """D3G: domain-gated feature fusion with one task-classifier head per domain.
+
+    Instead of a single shared fused-feature classifier, keeps one ``nn.Linear``
+    task head per domain (``task_classifiers``, indexed 0..``num_domain_labels``
+    - 1), all applied to the (un-fused) HR features -- so ``fusion=None`` is
+    passed to the :class:`FeatureFusionModel` base. Each sample's task logits
+    are its ground-truth (train) or predicted (eval, if
+    ``pred_domain_for_d3g``) domain's head output. A consistency/relation loss
+    (``rel_logits``) additionally blends *other* domains' head outputs, weighted
+    by :class:`~models.components.domain_relations.D3GRelation` scores between
+    the LR branch features and each candidate domain -- encouraging nearby
+    domains' heads to agree. See ``D3GRelation`` for the relation-score formula
+    and :meth:`domain_weights` for how it is applied across all heads at once.
+    """
+
     def __init__(
         self,
         branches: DualBranch,
@@ -517,6 +912,37 @@ class D3GModel(FeatureFusionModel):
         detach_lr_for_consistency: bool = False,
         detach_hr_for_consistency: bool = False,
     ):
+        """Build the branches, per-domain task heads, and the D3G relation module.
+
+        Args:
+            branches (DualBranch): Runs the HR and LR encoders.
+            num_task_labels (int): Number of task classes (output width of each
+                per-domain head).
+            num_domain_labels (int): Number of domains; also the number of
+                per-domain task heads (:attr:`num_heads`) and the size of the
+                domain classifiers.
+            lr_domain_loss_coeff (float): Weight of the LR domain loss in the
+                combined training objective (read by
+                ``MultiScaleClassificationModule``).
+            consistency_loss_coeff (float): Weight of the D3G consistency loss
+                (computed from ``rel_logits``) in the combined training
+                objective (read by ``MultiScaleClassificationModule``).
+            learnable_relation_coeff (float): Passed to
+                :class:`~models.components.domain_relations.D3GRelation`;
+                blends the fixed domain-indicator relation with a learned
+                cosine-similarity relation.
+            pred_domain_for_d3g (bool): At eval time, if True, use the LR domain
+                classifier's argmax prediction as ``region_ids`` when
+                ``region_ids`` is not supplied; if False, require ground-truth
+                ``region_ids``.
+            detach_lr_for_consistency (bool): If True, detach the LR features
+                before computing the domain relation weights used in the
+                consistency loss.
+            detach_hr_for_consistency (bool): If True, detach the HR features
+                before recomputing per-domain head outputs for the consistency
+                loss (a second forward pass through ``task_classifiers``,
+                separate from the one used for ``task_logits``).
+        """
         super().__init__(
             branches=branches,
             fusion=None,
@@ -536,6 +962,31 @@ class D3GModel(FeatureFusionModel):
         )
 
     def forward(self, x: Dict[str, torch.Tensor], region_ids: Optional[torch.Tensor] = None):
+        """Route each sample to its domain's task head and compute the D3G consistency signal.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Batch dict forwarded to
+                :attr:`branches`.
+            region_ids (Optional[torch.Tensor]): Shape ``(batch_size,)``,
+                integer -- ground-truth domain ids. Required during training.
+                During eval, required only if :attr:`pred_domain_for_d3g` is
+                False; otherwise ignored in favor of the LR domain classifier's
+                prediction.
+
+        Returns:
+            Dict[str, torch.Tensor]: ``"task_logits"`` and ``"rel_logits"``
+            (each ``(batch_size, num_task_labels)``), plus
+            ``"lr_domain_logits"`` / ``"hr_domain_logits"``
+            (each ``(batch_size, num_domain_labels)``). In training,
+            ``task_logits`` is each sample's own-domain head output and
+            ``rel_logits`` is the *other*-domain-weighted average of head
+            outputs (the consistency target); in eval, both equal the
+            domain-relation-weighted average across all heads.
+
+        Raises:
+            ValueError: If ``region_ids`` is ``None`` during training, or during
+                eval when :attr:`pred_domain_for_d3g` is False.
+        """
         hr_features, lr_features = self.branches(x)
 
         if self.training:
@@ -584,6 +1035,7 @@ class D3GModel(FeatureFusionModel):
         return outputs
 
     def task_parameters(self) -> List[torch.nn.Parameter]:
+        """List[torch.nn.Parameter]: Branches + D3G relation module + all per-domain task heads."""
         return (
             list(self.branches.parameters())
             + list(self.d3g_relation.parameters())
@@ -595,6 +1047,26 @@ class D3GModel(FeatureFusionModel):
         region_ids: torch.Tensor,
         lr_features: torch.Tensor,
     ) -> torch.Tensor:
+        """Compute each sample's D3G relation score against every domain head.
+
+        Calls :attr:`d3g_relation` once per head index (0..:attr:`num_heads` -
+        1) and concatenates the per-head ``(batch_size, 1)`` scores.
+
+        Args:
+            region_ids (torch.Tensor): Shape ``(batch_size,)``, integer --
+                each sample's (ground-truth or predicted) domain id, passed to
+                :class:`~models.components.domain_relations.D3GRelation` as
+                ``domain_id``.
+            lr_features (torch.Tensor): Shape ``(batch_size, lr_features_dim)``,
+                float32 -- LR branch features, used by the relation module's
+                learned term.
+
+        Returns:
+            torch.Tensor: Shape ``(batch_size, num_heads, 1)``, float32 --
+            relation score of each sample against each domain head, broadcast-
+            ready to weight ``(batch_size, num_heads, num_task_labels)`` head
+            outputs.
+        """
         weights = torch.cat(
             [
                 self.d3g_relation(

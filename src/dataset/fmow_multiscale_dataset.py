@@ -1,3 +1,27 @@
+"""FMoW/Landsat multi-scale PyTorch Dataset.
+
+Defines `FMoWMultiScaleDataset`, a WILDS-compatible dataset that pairs each
+FMoW-WILDS high-resolution (HR) RGB satellite image with a broader-scale
+low-resolution (LR) Landsat GeoTIFF covering the same location, for this
+thesis's multi-scale fusion models. The dataset can serve three mutually
+exclusive input representations per branch (`source="raw"|"preprocessed"|
+"features"`): raw images read from disk and transformed on the fly,
+pre-transformed tensors cached by the preprocessing pipeline, or pooled
+encoder features cached by `extract_features.py`. It can also emit optional
+spatial encodings (per-pixel coordinate grids and an HR/LR overlap mask) for
+spatially-aware model variants, and supports a geographic
+leave-one-continent-out split (`leave_asia_out`) and a spatial-extent-ablation
+crop of the LR branch (`lr_crop_km`).
+
+Helper functions:
+    `_host_data_root`: Resolve the machine-specific base data directory.
+    `resolve_preprocessed_dir`: Build the host-specific preprocessed-data path.
+    `resolve_feature_dir`: Build the host-specific cached-feature path for a
+        given run.
+    `collate_multiscale`: `DataLoader` collate function matching this
+        dataset's `__getitem__` output, stacking per-branch tensors (or
+        passing through `None` for branches unused in feature mode).
+"""
 import platform
 from pathlib import Path
 import torch
@@ -12,7 +36,17 @@ from wilds.datasets.wilds_dataset import WILDSDataset
 DEFAULT_PREPROCESSED_DIR = "FMoW_LandSat"
 
 def _host_data_root() -> str:
-    """Host-specific directory holding the preprocessed and feature datasets."""
+    """Resolve the base data directory for the current machine.
+
+    Different hosts (SLURM/compute nodes) mount the FMoW/Landsat datasets at
+    different paths; this maps `platform.node()` to that host's data root.
+
+    Returns:
+        str: Absolute path to the host's data root directory.
+
+    Raises:
+        ValueError: If the current host name is not one of the known hosts.
+    """
     node = platform.node()
     if node in {"gaia4", "gaia5", "gaia6", "gaia7"}:
         return "/data/henicke"
@@ -26,17 +60,41 @@ def _host_data_root() -> str:
 
 
 def resolve_preprocessed_dir(preprocessed_dir: str | None = DEFAULT_PREPROCESSED_DIR) -> str | None:
+    """Resolve a preprocessed-dataset directory name to a host-specific absolute path.
+
+    Args:
+        preprocessed_dir (str | None): Base directory name under the host's
+            data root (e.g. `"FMoW_LandSat"`), or `None` to skip resolution.
+            Defaults to `DEFAULT_PREPROCESSED_DIR`.
+
+    Returns:
+        str | None: `"<host_data_root>/<preprocessed_dir>"`, or `None` if
+        `preprocessed_dir` is `None`.
+    """
     if preprocessed_dir is None:
         return None
     return f"{_host_data_root()}/{preprocessed_dir}"
 
 
 def resolve_feature_dir(run_name: str, run_idx: int, branch_subdir: str) -> Path:
-    """Locate cached features on the current host (written by extract_features.py).
+    """Build the host-specific path to cached encoder features for one branch.
 
-    Mirrors resolve_preprocessed_dir's host map:
-    ``<data-root>/FMoW_LandSat_<run_name>_Features/run<run_idx>/fmow_features/<branch_subdir>``,
-    where ``branch_subdir`` is ``fmow_rgb`` (HR) or ``landsat`` (LR).
+    Mirrors `resolve_preprocessed_dir`'s host map:
+    ``<data-root>/FMoW_LandSat_<run_name.title()>_Features/run<run_idx>/fmow_features/<branch_subdir>``,
+    where ``branch_subdir`` is ``fmow_rgb`` (HR) or ``landsat`` (LR). Features
+    are written by `extract_features.py`.
+
+    Args:
+        run_name (str): Name of the feature-extraction run (title-cased into
+            the directory name).
+        run_idx (int): Index of the rerun whose features to load (0/1/2 ->
+            run0/run1/run2).
+        branch_subdir (str): Branch subdirectory to point at: `"fmow_rgb"`
+            for the HR branch or `"landsat"` for the LR branch.
+
+    Returns:
+        Path: Absolute path to the cached-feature directory for this
+        run/branch.
     """
     return (
         Path(_host_data_root())
@@ -48,12 +106,33 @@ def resolve_feature_dir(run_name: str, run_idx: int, branch_subdir: str) -> Path
 
 
 class FMoWMultiScaleDataset(WILDSDataset):
-    """
-    Extended FMoW Dataset that loads both:
-    1. FMoW RGB images (224x224, 3 channels) - high resolution FMoW samples
-    2. Landsat GeoTIFF images (224x224, 6 bands) - broader scale context
+    """WILDS-compatible dataset pairing each FMoW-WILDS sample with a co-located Landsat image.
 
-    Inherits from WILDSDataset to maintain compatibility with WILDS package.
+    Extends the FMoW-WILDS dataset with a second, broader-scale input branch:
+    for every FMoW high-resolution (HR) RGB image (224x224, 3 channels) it
+    also serves a Landsat GeoTIFF (6 bands) covering a wider ground footprint
+    around the same location, at either native or 224x224 resolution
+    depending on configuration. Reuses the base WILDS dataset's splits,
+    labels and metadata array (extended here with `lat`/`lon`/`img_span_km`
+    columns from `extended_metadata_csv`), and inherits from `WILDSDataset`
+    (e.g. `get_subset`) for compatibility with the WILDS evaluation tooling.
+
+    Each sample can be served in one of three mutually exclusive
+    representations (`source`): raw images transformed on the fly, tensors
+    pre-transformed and cached to disk, or pooled encoder features cached by
+    `extract_features.py`. Optional spatial encodings (per-pixel coordinate
+    grids and an HR/LR overlap mask) and a leave-one-continent-out split
+    variant are also supported; see `__init__` for the corresponding
+    parameters.
+
+    Attributes:
+        _dataset_name (str): WILDS dataset identifier (`"fmow_multiscale"`).
+        _IMG_SIZE (int): Side length in pixels that RGB and (by default)
+            Landsat tensors are resized to (224).
+        _LANDSAT_FULLRES_SIZE (int): Side length in pixels of the stored
+            full-resolution Landsat tensors used by `lr_crop_km` (497).
+        _SOURCES (tuple[str, ...]): Valid values for the `source` constructor
+            argument: `("raw", "preprocessed", "features")`.
     """
 
     _dataset_name = "fmow_multiscale"
@@ -91,18 +170,65 @@ class FMoWMultiScaleDataset(WILDSDataset):
         feature_run_idx=None,
         leave_asia_out=False,
     ):
-        """
+        """Initialize the dataset: load base WILDS FMoW metadata and configure input/spatial options.
+
         Args:
-            split_scheme: 'official' (time_after_2016) or other WILDS split schemes
-            transform_rgb: Transforms for RGB images
-            transform_landsat: Transforms for Landsat images
-            scale_to_img_size: If True (default), Landsat images are resized to
+            fmow_dir (str): Root directory of the FMoW-WILDS dataset, passed
+                to `wilds.get_dataset`; also used to locate raw HR images
+                (``<fmow_dir>/fmow_v<version>/images``) when ``source="raw"``.
+                Defaults to ``"data"``.
+            landsat_dir (str): Root directory for Landsat data; used to
+                locate raw LR images (``<landsat_dir>/fmow_landsat/images``)
+                when ``source="raw"`` and to load ``extended_metadata_csv``
+                regardless of ``source``. Defaults to ``"data"``.
+            source (str): Which input mode to serve (mutually exclusive):
+                - ``"raw"``: read raw images from ``fmow_dir`` (HR) and
+                  ``landsat_dir`` (LR); transforms applied on the fly.
+                - ``"preprocessed"``: read pre-transformed tensors from the single
+                  ``preprocessed_dir`` (``fmow_preprocessed/{fmow_rgb,landsat}``).
+                - ``"features"``: read cached encoder features (written by
+                  extract_features.py); see ``hr_feature_run_name``/``lr_feature_run_name``.
+                Only the dirs for the active mode are read; the others are ignored.
+                Defaults to ``"raw"``.
+            preprocessed_dir (str | None): Base dir name for ``source="preprocessed"``
+                (required there); host-resolved internally via
+                `resolve_preprocessed_dir`, so pass the config name (e.g.
+                ``"FMoW_LandSat"``), not an absolute path. Defaults to `None`.
+            extended_metadata_csv (str): Filename, relative to
+                ``<landsat_dir>/fmow_landsat/``, of the CSV providing per-sample
+                ``lat``/``lon``/``img_span_km`` (appended to the base WILDS
+                metadata array/fields). Rows with ``split == "seq"`` are
+                excluded. Defaults to ``"rgb_metadata_extended.csv"``.
+            split_scheme (str): 'official' (time_after_2016) or other WILDS
+                split schemes, forwarded to `wilds.get_dataset`. Defaults to
+                ``"official"``.
+            transform_rgb (Callable | None): Transform applied to raw HR
+                images (``source="raw"``). Defaults to
+                `get_default_transform_rgb()` if `None`.
+            transform_landsat (Callable | None): Transform applied to raw LR
+                images (``source="raw"``). Defaults to
+                `get_default_transform_landsat()` if `None`.
+            augment (bool): If True, apply a shared random horizontal/vertical
+                flip to the HR/LR images (and spatial tensors) in
+                `__getitem__`, skipped when ``source="features"``. Defaults
+                to `False`.
+            hflip_prob (float): Probability of a horizontal flip when
+                `augment` is True. Defaults to 0.5.
+            vflip_prob (float): Probability of a vertical flip when
+                `augment` is True. Defaults to 0.5.
+            image_norm (str): Normalization statistics scheme used by
+                `get_default_transform_rgb`/`get_default_transform_landsat`:
+                ``"fmow-statistics"`` (dataset-specific mean/std), ``"const"``
+                (fixed 0.5/0.5, RGB only), or any other value (ImageNet stats
+                for RGB, theoretical DN-to-reflectance stats for Landsat).
+                Defaults to ``"fmow-statistics"``.
+            scale_to_img_size (bool): If True (default), Landsat images are resized to
                 ``_IMG_SIZE`` (224). If False, they are kept at their native
                 resolution (e.g. 497x497) — still normalized, just not downscaled.
                 Only valid with ``source="raw"`` (the preprocessed/feature paths
                 serve already-sized tensors); raises otherwise. Used by the
                 full-res preprocessing step for the spatial-extent ablation.
-            lr_crop_km: If set, center-crop the stored full-res Landsat tensor to
+            lr_crop_km (float | None): If set, center-crop the stored full-res Landsat tensor to
                 this spatial extent (km) and resize the crop back to ``_IMG_SIZE``.
                 Only valid with ``source="preprocessed"`` pointing at the full-res
                 set (normalized 497x497). Must lie in ``(0, full_span]`` where the
@@ -111,33 +237,54 @@ class FMoWMultiScaleDataset(WILDSDataset):
                 This is the knob for the spatial-extent ablation: a smaller value
                 keeps a tighter centered patch (then up/downsampled to 224). When
                 spatial features are on, it also defines ``lr_span_km`` so the coord
-                grid / overlap mask track the cropped footprint.
-            source: Which input mode to serve (mutually exclusive):
-                - ``"raw"``: read raw images from ``fmow_dir`` (HR) and
-                  ``landsat_dir`` (LR); transforms applied on the fly.
-                - ``"preprocessed"``: read pre-transformed tensors from the single
-                  ``preprocessed_dir`` (``fmow_preprocessed/{fmow_rgb,landsat}``).
-                - ``"features"``: read cached encoder features (written by
-                  extract_features.py); see ``hr_feature_run_name``/``lr_feature_run_name``.
-                Only the dirs for the active mode are read; the others are ignored.
-            preprocessed_dir: Base dir name for ``source="preprocessed"`` (required
-                there); host-resolved internally via resolve_preprocessed_dir, so
-                pass the config name (e.g. ``"FMoW_LandSat"``), not an absolute path.
-            hr_feature_run_name: For ``source="features"``: run-name of the cached HR
+                grid / overlap mask track the cropped footprint. Defaults to `None`.
+            spatial_coord_grid (bool): If True, precompute and emit per-pixel
+                coordinate grid tensors (``coord_grid_lr``/``coord_grid_hr``, in
+                ``[-1, 1]``) from `__getitem__`. Not compatible with
+                ``source="features"``. Defaults to `False`.
+            spatial_overlap_mask (bool): If True, emit an ``overlap_mask``
+                tensor marking where the HR footprint falls inside the LR
+                image, shaped by `overlap_mask_type`. Not compatible with
+                ``source="features"``. Defaults to `False`.
+            overlap_mask_type (str): ``"binary"`` (hard box mask, default) or
+                ``"gaussian"`` (soft Gaussian falloff), used when
+                `spatial_overlap_mask` is True.
+            lr_extension_factor (float): Multiplier applied to the
+                metadata-inferred max HR image span to obtain the full LR
+                (Landsat) footprint in km, used both to validate/size
+                `lr_crop_km` and, when no crop is set, as `lr_span_km` for the
+                spatial encodings. Defaults to 3.0.
+            hr_feature_run_name (str | None): For ``source="features"``: run-name of the cached HR
                 features (the ``<run>`` in ``FMoW_LandSat_<hr_feature_run_name>_Features``). When
-                set, ``x["rgb"]`` is the precomputed HR feature vector.
-            lr_feature_run_name: As ``hr_feature_run_name`` for the LR/landsat branch
-                (``x["landsat"]``).
-            feature_run_idx: For ``source="features"``: index of the rerun to load
+                set, ``x["rgb"]`` is the precomputed HR feature vector. Defaults to `None`.
+            lr_feature_run_name (str | None): As ``hr_feature_run_name`` for the LR/landsat branch
+                (``x["landsat"]``). Defaults to `None`.
+            feature_run_idx (int | None): For ``source="features"``: index of the rerun to load
                 (0/1/2 -> run0/run1/run2). Required there. Leaving one of the two
                 run-names ``None`` yields a ``None`` tensor for that branch (e.g.
                 retraining a single-branch classifier on the other modality).
-            leave_asia_out: If True, turn the WILDS split scheme into a geographic
+                Defaults to `None`.
+            leave_asia_out (bool): If True, turn the WILDS split scheme into a geographic
                 leave-one-continent-out split while keeping the split names intact:
                 Asia samples are dropped from ``train``/``id_val``/``val`` and
                 non-Asia samples are dropped from ``id_test``/``test`` (set to the
                 ``-1`` unused code). The model then trains and is model-selected on
                 non-Asia and is evaluated exclusively on the unseen Asia continent.
+                Defaults to `False`.
+
+        Raises:
+            ValueError: If ``source`` is not one of `_SOURCES`; if
+                ``scale_to_img_size=False`` is combined with a ``source``
+                other than ``"raw"``; if ``source="preprocessed"`` and
+                ``preprocessed_dir`` is `None`; if ``source="features"`` and
+                ``feature_run_idx`` is `None`/negative, or both
+                ``hr_feature_run_name``/``lr_feature_run_name`` are `None`;
+                if ``lr_crop_km`` is set with ``source`` other than
+                ``"preprocessed"``, or lies outside ``(0, full_span_km]``; or
+                if a spatial encoding (`spatial_coord_grid`/
+                `spatial_overlap_mask`) is requested with ``source="features"``.
+            FileNotFoundError: If the resolved HR or LR cached-feature
+                directory does not exist when ``source="features"``.
         """
         from wilds import get_dataset
 
@@ -304,7 +451,19 @@ class FMoWMultiScaleDataset(WILDSDataset):
 
 
     def get_default_transform_rgb(self):
-        """Default transform for RGB images."""
+        """Build the default RGB normalization transform based on `self.image_norm`.
+
+        Converts a PIL image to a float32 tensor scaled to ``[0, 1]`` and
+        normalizes it with one of three statistics sets, selected by
+        `self.image_norm`: ``"fmow-statistics"`` uses per-channel mean/std
+        computed over the FMoW dataset, ``"const"`` uses a fixed 0.5/0.5
+        normalization, and any other value falls back to standard ImageNet
+        mean/std.
+
+        Returns:
+            torchvision.transforms.v2.Compose: Transform mapping a PIL RGB
+            image to a ``(3, H, W)`` float32 normalized tensor.
+        """
         if self.image_norm == "fmow-statistics":
             return transforms.Compose(
                 [
@@ -335,11 +494,18 @@ class FMoWMultiScaleDataset(WILDSDataset):
             )
 
     def get_default_transform_landsat(self):
-        """
-        Default transform for Landsat images.
+        """Build the default Landsat normalization transform based on `self.image_norm`.
 
         See https://developers.google.com/earth-engine/datasets/catalog/landsat/ for scaling info.
-        GeoTIFFs store reflectance values directly; stats computed over the full dataset.
+        GeoTIFFs already store reflectance values directly, so unlike the RGB
+        transform this only normalizes (no `ToImage`/`ToDtype` conversion).
+        ``"fmow-statistics"`` uses per-band mean/std computed over the full
+        dataset; any other value uses a theoretical linear DN (0-65353) to
+        reflectance scaling to derive a fixed mean/std applied to all 6 bands.
+
+        Returns:
+            torchvision.transforms.v2.Compose: Transform normalizing a
+            ``(6, H, W)`` float32 Landsat tensor in place.
         """
         if self.image_norm == "fmow-statistics":
             return transforms.Compose(
@@ -367,7 +533,27 @@ class FMoWMultiScaleDataset(WILDSDataset):
             )
 
     def _apply_augmentation(self, rgb_img, landsat_img, spatial_tensors=None):
-        """Apply the same spatial augmentation to images and optional spatial tensors."""
+        """Apply a shared random horizontal/vertical flip to the HR/LR images and spatial tensors.
+
+        Each flip is independently sampled once per call (not per tensor), so
+        the RGB image, Landsat image, and any spatial tensors (e.g.
+        coordinate grids, overlap mask) stay spatially consistent with each
+        other.
+
+        Args:
+            rgb_img (torch.Tensor): ``(3, H, W)`` HR image tensor.
+            landsat_img (torch.Tensor): ``(6, H, W)`` LR image tensor.
+            spatial_tensors (dict[str, torch.Tensor] | None): Optional extra
+                ``(C, H, W)`` spatial-encoding tensors (as produced by
+                `_build_spatial_tensors`) to flip identically. Defaults to
+                `None` (treated as ``{}``).
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]: The
+            ``(rgb_img, landsat_img, spatial_tensors)`` tensors/dict after
+            applying the sampled flips (`spatial_tensors` values are flipped
+            in place and the same dict is returned).
+        """
         if spatial_tensors is None:
             spatial_tensors = {}
 
@@ -389,6 +575,37 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return rgb_img, landsat_img, spatial_tensors
 
     def _build_spatial_tensors(self, img_span_km):
+        """Build optional per-sample spatial-encoding tensors for one sample.
+
+        Called from `__getitem__` with that sample's HR image span. Returns
+        an empty dict unless `self.spatial_coord_grid` or
+        `self.spatial_overlap_mask` is enabled (set in `__init__`, gated to
+        ``source != "features"``).
+
+        Args:
+            img_span_km (float): Ground distance (km) covered by this
+                sample's HR image, used to place the HR coordinate grid
+                within the shared LR footprint and to size the overlap mask.
+
+        Returns:
+            dict[str, torch.Tensor]: Zero or more of:
+                "coord_grid_lr": ``(2, _IMG_SIZE, _IMG_SIZE)`` float32, the
+                    dataset-wide LR pixel coordinate grid in ``[-1, 1]``
+                    (`self._coord_grid_lr`, precomputed in `__init__`;
+                    identical across samples). Present if
+                    `self.spatial_coord_grid` is True.
+                "coord_grid_hr": ``(2, _IMG_SIZE, _IMG_SIZE)`` float32, this
+                    sample's HR pixel coordinate grid, in the same
+                    ``[-1, 1]`` space as "coord_grid_lr" but covering only
+                    the (smaller) HR footprint centered within it. Present
+                    if `self.spatial_coord_grid` is True.
+                "overlap_mask": ``(1, _IMG_SIZE, _IMG_SIZE)`` float32 mask
+                    marking where the HR footprint falls inside the LR
+                    image: a hard box (``overlap_mask_type="binary"``) or a
+                    soft Gaussian falloff (``overlap_mask_type="gaussian"``),
+                    sized by the ratio of the HR to LR ground span. Present
+                    if `self.spatial_overlap_mask` is True.
+        """
         tensors = {}
         if not (self.spatial_coord_grid or self.spatial_overlap_mask):
             return tensors
@@ -421,9 +638,69 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return tensors
 
     def __len__(self):
+        """Number of samples in the dataset.
+
+        Returns:
+            int: Number of labeled samples (``len(self._y_array)``).
+        """
         return len(self._y_array)
 
     def __getitem__(self, idx):
+        """Load one sample: HR/LR images (or features), label, and metadata.
+
+        Maps `idx` to the underlying file id via `self.full_idxs`, loads the
+        HR input via `get_rgb_input` and the LR input via
+        `get_landsat_input`, then attaches per-sample metadata (lat/lon,
+        region, HR image span) and optional spatial encodings from
+        `_build_spatial_tensors`. When `self.augment` is enabled (and
+        ``source != "features"``, since features are pooled vectors with no
+        spatial extent), a shared random flip is applied to the images and
+        any spatial tensors via `_apply_augmentation`.
+
+        Args:
+            idx (int): Sample index in ``[0, len(self))``, indexing
+                `self._y_array` / `self._metadata_array` / `self.full_idxs`.
+
+        Returns:
+            tuple: ``(x, y, metadata)`` where:
+                x (dict[str, torch.Tensor | None]): Model input dict with
+                    keys:
+                    "rgb": HR branch tensor from `get_rgb_input`. For
+                        ``source in {"raw", "preprocessed"}``:
+                        ``(3, _IMG_SIZE, _IMG_SIZE)`` float32, normalized RGB
+                        image. For ``source="features"``: cached pooled
+                        feature vector, or `None` if `hr_feature_run_name`
+                        was not set.
+                    "landsat": LR branch tensor from `get_landsat_input`. For
+                        ``source in {"raw", "preprocessed"}``:
+                        ``(6, _IMG_SIZE, _IMG_SIZE)`` float32 normalized
+                        Landsat image (or ``(6, _LANDSAT_FULLRES_SIZE,
+                        _LANDSAT_FULLRES_SIZE)`` when ``source="raw"`` and
+                        `scale_to_img_size` is False). For
+                        ``source="features"``: cached pooled feature vector,
+                        or `None` if `lr_feature_run_name` was not set.
+                    "coords": ``(2,)`` float32 tensor, ``[lat, lon]`` for
+                        this sample.
+                    "domain": scalar float32 tensor, the WILDS region code
+                        (see `self._metadata_map["region"]`).
+                    "img_span_km": scalar float32 tensor, ground span (km)
+                        covered by the HR image.
+                    "coord_grid_lr" / "coord_grid_hr" (optional):
+                        ``(2, _IMG_SIZE, _IMG_SIZE)`` float32 tensors of
+                        per-pixel (x, y) coordinates in ``[-1, 1]``, present
+                        only if `self.spatial_coord_grid` is True (see
+                        `_build_spatial_tensors`).
+                    "overlap_mask" (optional): ``(1, _IMG_SIZE, _IMG_SIZE)``
+                        float32 tensor marking where the HR footprint falls
+                        inside the LR image, present only if
+                        `self.spatial_overlap_mask` is True.
+                y (torch.Tensor): Scalar tensor, the integer class label for
+                    this sample (from the base WILDS `_y_array`).
+                metadata (torch.Tensor): ``(len(self._metadata_fields),)``
+                    float32 tensor, the full metadata row for this sample
+                    (WILDS metadata fields followed by the appended "lat",
+                    "lon", "img_span_km").
+        """
         file_idx = self.full_idxs[idx]
 
         rgb_img = self.get_rgb_input(file_idx)
@@ -456,10 +733,25 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return x, y, metadata
 
     def get_rgb_input(self, idx):
-        """Load the HR input for the active ``source`` mode.
+        """Load the HR (FMoW RGB) input for one sample under the active `source` mode.
 
-        features: cached HR feature vector (or None if no HR run was given).
-        preprocessed: pre-transformed RGB tensor. raw: RGB image + transforms.
+        Args:
+            idx (int): File id used to locate the sample's image/feature
+                file (i.e. `self.full_idxs[dataset_idx]`, not the dataset
+                index itself).
+
+        Returns:
+            torch.Tensor | None:
+                - ``source="features"``: cached pooled HR feature vector
+                  loaded from ``self.hr_features_dir / f"rgb_img_{idx}.pt"``,
+                  or `None` if `self.hr_features_dir` is unset (no
+                  `hr_feature_run_name` given).
+                - ``source="preprocessed"``: pre-transformed tensor loaded
+                  from ``self.fmow_images_preprocessed / f"rgb_img_{idx}.pt"``.
+                - ``source="raw"``: ``(3, _IMG_SIZE, _IMG_SIZE)`` float32
+                  tensor, the RGB PNG at
+                  ``self.fmow_images / f"rgb_img_{idx}.png"`` after
+                  `self.transform_rgb`.
         """
         if self.source == "features":
             if self.hr_features_dir is None:
@@ -478,10 +770,30 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return img
 
     def get_landsat_input(self, idx):
-        """Load the LR input for the active ``source`` mode.
+        """Load the LR (Landsat) input for one sample under the active `source` mode.
 
-        features: cached LR feature vector (or None if no LR run was given).
-        preprocessed: pre-transformed LR tensor. raw: Landsat GeoTIFF (6, 224, 224).
+        Args:
+            idx (int): File id used to locate the sample's image/feature
+                file (i.e. `self.full_idxs[dataset_idx]`, not the dataset
+                index itself).
+
+        Returns:
+            torch.Tensor | None:
+                - ``source="features"``: cached pooled LR feature vector
+                  loaded from ``self.lr_features_dir / f"image_{idx}.pt"``,
+                  or `None` if `self.lr_features_dir` is unset (no
+                  `lr_feature_run_name` given).
+                - ``source="preprocessed"``: pre-transformed tensor loaded
+                  from ``self.landsat_images_preprocessed / f"image_{idx}.pt"``,
+                  further center-cropped and resized to ``_IMG_SIZE`` via
+                  `_crop_resize_landsat` if `self.lr_crop_km` is set.
+                - ``source="raw"``: 6-band GeoTIFF at
+                  ``self.landsat_images / f"image_{idx}.tif"``, read via
+                  rasterio, resized to ``(6, _IMG_SIZE, _IMG_SIZE)`` float32
+                  with bilinear interpolation if `self.scale_to_img_size` is
+                  True and the native size differs, then passed through
+                  `self.transform_landsat`. If `self.scale_to_img_size` is
+                  False, the tensor keeps its native on-disk resolution.
         """
         if self.source == "features":
             if self.lr_features_dir is None:
@@ -517,13 +829,26 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return landsat_tensor
 
     def _crop_resize_landsat(self, landsat_tensor):
-        """Center-crop a stored full-res Landsat tensor to ``lr_crop_km`` and
-        resize the crop back to ``_IMG_SIZE``.
+        """Center-crop a stored full-res Landsat tensor to `lr_crop_km` and resize back to `_IMG_SIZE`.
 
-        The full-res set is normalized fp16 at ``_LANDSAT_FULLRES_SIZE`` px. We
-        cast to fp32, take the centered ``_crop_px`` window, and resize
-        down (or plain bilinear up) to 224. ``_crop_px`` is precomputed from
-        ``lr_crop_km`` and the metadata-inferred footprint in ``__init__``.
+        The full-res preprocessed set is stored at ``_LANDSAT_FULLRES_SIZE``
+        px (normalized). This casts to fp32, takes the centered
+        ``self._crop_px`` window (precomputed from `lr_crop_km` and the
+        metadata-inferred footprint in `__init__`), and bilinearly resizes
+        the crop to ``_IMG_SIZE``.
+
+        Args:
+            landsat_tensor (torch.Tensor): ``(6, _LANDSAT_FULLRES_SIZE,
+                _LANDSAT_FULLRES_SIZE)`` full-resolution normalized Landsat
+                tensor.
+
+        Returns:
+            torch.Tensor: ``(6, _IMG_SIZE, _IMG_SIZE)`` float32 tensor, the
+            centered crop resized to the model's expected input size.
+
+        Raises:
+            ValueError: If `landsat_tensor` is not `_LANDSAT_FULLRES_SIZE`
+                square.
         """
         landsat_tensor = landsat_tensor.float()
         _, H, W = landsat_tensor.shape
@@ -548,6 +873,25 @@ class FMoWMultiScaleDataset(WILDSDataset):
         return landsat_tensor
 
 def collate_multiscale(batch):
+    """DataLoader collate function for `FMoWMultiScaleDataset.__getitem__` samples.
+
+    Stacks each per-sample tensor into a batch dimension, except for keys
+    whose value is `None` for every sample in the batch (e.g. an unused
+    branch under ``source="features"``), which are passed through as `None`
+    so single-branch feature loading doesn't require dummy tensors.
+
+    Args:
+        batch (list[tuple[dict, torch.Tensor, torch.Tensor]]): List of
+            ``(x, y, metadata)`` samples as returned by
+            `FMoWMultiScaleDataset.__getitem__`.
+
+    Returns:
+        tuple[dict[str, torch.Tensor | None], torch.Tensor, torch.Tensor]:
+        ``(x_batch, y_batch, metadata_batch)`` where `x_batch` has the same
+        keys as each sample's `x`, each stacked to ``(batch_size, ...)`` (or
+        `None`); `y_batch` is ``(batch_size,)``; and `metadata_batch` is
+        ``(batch_size, num_metadata_fields)``.
+    """
     xs, ys, metas = zip(*batch)
     keys = xs[0].keys()
     # A key is None for every sample (e.g. an unused branch in feature mode); keep

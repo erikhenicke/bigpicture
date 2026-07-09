@@ -1,8 +1,19 @@
 """
 metadata_extension.py
 
-This module extends the WILDS metadata with image center coordinates and image span 
-information in degree.
+Extends the WILDS fmow metadata with image center coordinates and image span
+information in degrees/kilometers, computed from the original (non-WILDS) fmow
+bounding-box metadata, and writes the result to `rgb_metadata_extended.csv`.
+
+Main functions:
+    - build_fmow_metadata_path: Resolves a WILDS metadata row to its original fmow
+      metadata JSON path.
+    - compute_img_span_km: Converts a latitude span in degrees to kilometers.
+    - compute_center_coordinates_and_span: Computes image center coordinates and span
+      (km) from one original fmow metadata sample's bounding box.
+    - extract_center_coords_and_img_span: Combines the above to compute center/span for
+      one WILDS metadata row.
+    - main: Applies the above to the full WILDS metadata and writes the extended CSV.
 """
 import json
 import os
@@ -124,6 +135,20 @@ def compute_center_coordinates_and_span(fmow_metadata_sample: pd.core.series.Ser
 
 
 def extract_center_coords_and_img_span(wilds_metadata_sample):
+    """Look up and compute the image center coordinates and span for one WILDS metadata row.
+
+    For `split == "seq"` rows (no corresponding original fmow metadata), all three
+    values are returned as None. Otherwise the original fmow metadata JSON is loaded via
+    `build_fmow_metadata_path` and passed to `compute_center_coordinates_and_span`.
+
+    Args:
+        wilds_metadata_sample (pd.core.series.Series): One row of the WILDS fmow
+            metadata, containing at least `split` and `img_filename`.
+
+    Returns:
+        pd.Series: Series with `img_center_lon`, `img_center_lat` (float, degrees) and
+            `img_span_km` (float, kilometers), or all None for `split == "seq"` rows.
+    """
 
     if wilds_metadata_sample["split"] == "seq":
         return pd.Series(
@@ -146,6 +171,12 @@ def extract_center_coords_and_img_span(wilds_metadata_sample):
 
 
 def main():
+    """Extend the WILDS fmow metadata with image center coordinates and span, and save it.
+
+    Loads the fmow WILDS dataset metadata, applies `extract_center_coords_and_img_span`
+    to every row, concatenates the result onto the original metadata, and writes it to
+    `rgb_metadata_extended.csv` in `DEST_DIR`.
+    """
     dataset = get_dataset(dataset="fmow", download=False, root_dir="/home/henicke/data")
     metadata = dataset.metadata
     coords_and_span = metadata.progress_apply(

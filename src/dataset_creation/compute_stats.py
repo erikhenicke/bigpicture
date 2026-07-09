@@ -1,6 +1,18 @@
 """
-Script to compute channel-wise mean and standard deviation for
-FMoW RGB and Landsat images.
+compute_stats.py
+
+Compute channel-wise mean and standard deviation for raw (untransformed)
+FMoW RGB and Landsat images, using Welford's online algorithm for numerical
+stability over large datasets.
+
+Functions:
+    compute_stats: Main entry point; discovers RGB/Landsat sample pairs on
+        disk, accumulates per-channel statistics, prints/returns them, and
+        optionally writes them to a JSON file.
+    _load_raw_rgb / _load_raw_landsat: Helpers that load a single raw RGB PNG
+        / Landsat GeoTIFF into a (C, H, W) tensor for `compute_stats`.
+
+Run as a script with --fmow-dir/--landsat-dir/--output-json.
 """
 
 import argparse
@@ -16,11 +28,28 @@ from welford_torch import Welford
 
 
 def _load_raw_rgb(rgb_path):
+    """Load a raw FMoW RGB PNG as a normalized float tensor.
+
+    Args:
+        rgb_path (str | pathlib.Path): Path to the RGB PNG file.
+
+    Returns:
+        torch.Tensor: Image tensor of shape (3, H, W), dtype float32, scaled to [0, 1].
+    """
     rgb_np = np.asarray(Image.open(rgb_path).convert("RGB"), dtype=np.float32) / 255.0
     return torch.from_numpy(rgb_np).permute(2, 0, 1)  # Permute: (H, W, C) -> (C, H, W)
 
 
 def _load_raw_landsat(landsat_path):
+    """Load a raw Landsat GeoTIFF as a float tensor of its raw band values.
+
+    Args:
+        landsat_path (str | pathlib.Path): Path to the Landsat GeoTIFF file.
+
+    Returns:
+        torch.Tensor: Image tensor of shape (6, H, W), dtype float32, containing
+            the raw (unscaled) GeoTIFF band values.
+    """
     with rasterio.open(landsat_path) as src:
         landsat_np = src.read().astype(np.float32)
     return torch.from_numpy(landsat_np)
@@ -31,13 +60,35 @@ def compute_stats(
     landsat_dir="data",
     output_json=None,
 ):
-    """
-    Compute per-channel mean/std for untransformed RGB and Landsat samples.
+    """Compute per-channel mean/std for untransformed RGB and Landsat samples.
+
+    Discovers sample indices from `landsat_dir/fmow_landsat/images/image_*.tif`,
+    then for each index loads the matching raw RGB PNG
+    (`fmow_dir/fmow_v1.1/images/rgb_img_<idx>.png`) and Landsat GeoTIFF,
+    skipping any index where a file is missing or has an unexpected channel
+    count (RGB must have 3 channels, Landsat must have 6). Statistics are
+    accumulated online via `Welford` (numerically stable, single pass) over
+    all pixels, printed to stdout, and optionally written to a JSON file.
 
     Args:
-        fmow_dir: Directory containing FMoW dataset.
-        landsat_dir: Directory containing Landsat dataset.
-        output_json: Optional path to write stats as JSON.
+        fmow_dir (str): Directory containing the FMoW dataset (expects a
+            `fmow_v1.1/images/` subdirectory). Defaults to "data".
+        landsat_dir (str): Directory containing the Landsat dataset (expects
+            a `fmow_landsat/images/` subdirectory). Defaults to "data".
+        output_json (str | None): Optional path to write the computed stats
+            as JSON. If None, stats are not written to disk.
+
+    Returns:
+        dict: Statistics with keys `value_space`, `counts` (`processed` and
+            `skipped` sample counts), `rgb` (`mean`/`std` lists of length 3),
+            and `landsat` (`mean`/`std` lists of length 6).
+
+    Raises:
+        ValueError: If no Landsat `.tif` files are found in
+            `landsat_dir/fmow_landsat/images/`.
+        RuntimeError: If no sample was processed successfully (e.g. all
+            indices were skipped due to missing files or unexpected channel
+            counts).
     """
     landsat_images_dir = Path(landsat_dir) / "fmow_landsat" / "images"
     idxs = []

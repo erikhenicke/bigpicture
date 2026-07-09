@@ -1,3 +1,16 @@
+"""
+multi_scale_classification.py
+
+Defines `MultiScaleClassificationModule`, a `lightning.LightningModule`
+subclass that is the single fusion-agnostic training/eval harness for every
+`MultiScaleModel` architecture in `models.components.fusion_models`
+(single-branch, early/feature/decision fusion, D3G). It owns manual
+optimization (`automatic_optimization = False`) to support separate
+task/LR-domain/HR-domain optimizers, the multi-objective loss (task + LR/HR
+domain + D3G consistency), and the shared evaluation suite (ID/OOD splits,
+ECE, worst-group, per-class/region, branch ablation, domain confusion
+matrices logged to W&B).
+"""
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
@@ -30,14 +43,14 @@ from models.utils import (
 class MultiScaleClassificationModule(LightningModule):
     """Fusion-agnostic training/eval harness for multi-scale FMoW classification.
 
-    Wraps any model that fulfills the :class:`MultiScaleModel` contract -- single-scale
-    (``SingleBranchModel`` / ``SingleBranchLRModel`` / ``SingleBranchLocationModel``),
-    early fusion (``EarlyFusionModel``), feature fusion (``FeatureFusionModel``),
-    domain-gated feature fusion (``D3GModel``), or decision fusion
-    (``DecisionFusionModel``) -- and provides the multi-objective training (task +
+    Wraps any model that fulfills the `MultiScaleModel` contract -- single-scale
+    (`SingleBranchModel` / `SingleBranchLRModel` / `SingleBranchLocationModel`),
+    early fusion (`EarlyFusionModel`), feature fusion (`FeatureFusionModel`),
+    domain-gated feature fusion (`D3GModel`), or decision fusion
+    (`DecisionFusionModel`) -- and provides the multi-objective training (task +
     LR/HR domain + D3G consistency) and the shared evaluation suite (ID/OOD, ECE,
     worst-group, per-class/region, branch ablation). The wrapper depends only on the
-    model's ``task_logits`` output and ``supports_*`` capability flags, never on its
+    model's `task_logits` output and `supports_*` capability flags, never on its
     concrete architecture.
     """
 
@@ -65,7 +78,64 @@ class MultiScaleClassificationModule(LightningModule):
     ) -> None:
         """Initialize a `MultiScaleClassificationModule`.
 
-        :param model: A `MultiScaleModel` (any fusion strategy or single-branch model).
+        Args:
+            model (MultiScaleModel): The wrapped model (any fusion strategy or
+                single-branch model); its `supports_*` capability flags
+                determine which optimizers/losses/metrics are set up.
+            optimizer (Callable[..., torch.optim.Optimizer]): Hydra partial
+                factory for the task optimizer; called with
+                `params=self.model.task_parameters()`.
+            scheduler (Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]]):
+                Hydra partial factory for the task LR scheduler; called with
+                `optimizer=<task optimizer>`. If None, no task scheduler is used.
+            domain_optimizer (Optional[Callable[..., torch.optim.Optimizer]]):
+                Hydra partial factory for the LR-/HR-domain optimizer(s).
+                Required (non-None) if the model supports an LR or HR domain
+                classifier.
+            domain_scheduler (Optional[Callable[..., torch.optim.lr_scheduler.LRScheduler]]):
+                Hydra partial factory for the LR-/HR-domain LR scheduler(s).
+                If None, no domain scheduler is used.
+            num_task_labels (int): Number of task (FMoW category) classes.
+                Defaults to 62 (`len(categories)` in WILDS `fmow_dataset.py`).
+            num_domain_labels (int): Number of domain-classifier classes. Must
+                match `len(domain_label_names(leave_asia_out))`. Defaults to 6.
+            domain_index (int): Column index into the `(batch_size, 6)`
+                metadata tensor holding the raw WILDS region code. Defaults to 0.
+            ece_n_bins (int): Number of bins for the `MulticlassCalibrationError`
+                (ECE) metrics. Defaults to 10.
+            val_loader_names (List[str]): Names of the validation dataloaders,
+                in the order `Trainer.val_dataloaders` provides them; used as
+                metric key prefixes and to size `val_ece_metrics`. Defaults to
+                `["val"]`.
+            test_loader_names (List[str]): Names of the test dataloaders,
+                analogous to `val_loader_names`. Defaults to `["test"]`.
+            key_metric (str): Metric name monitored by `ReduceLROnPlateau`
+                schedulers (task and/or domain). Defaults to
+                `"val/val-od-worst-group-task-acc"`.
+            label_smoothing (float): Label smoothing passed to the task
+                cross-entropy criteria. Defaults to 0.0.
+            branch_ablation (bool): If True and the model supports it (see
+                `MultiScaleModel.supports_branch_ablation`), additionally run
+                the LR-ablated/HR-ablated forward pass during eval and log
+                branch-ablation accuracy metrics. Defaults to False.
+            alternating_freeze (bool): If True and the model is a
+                `FeatureFusionModel`, alternately freeze the LR or HR encoder
+                branch across training epochs (see `on_train_epoch_start`).
+                Defaults to False.
+            alternating_freeze_period (int): Number of consecutive epochs each
+                branch stays frozen before alternating, when
+                `alternating_freeze` is enabled. Defaults to 1.
+            leave_asia_out (bool): If True, use the Leave-Asia-Out domain label
+                space (Asia dropped, see `domain_label_names`) and mask Asia
+                out of domain metrics/losses. Defaults to False.
+
+        Raises:
+            ValueError: If the non-task loss coefficients (LR-domain loss
+                coefficient plus D3G consistency loss coefficient, as exposed
+                by the model) sum to 1.0 or more, leaving no weight for the
+                task loss.
+            ValueError: If `num_domain_labels` does not match the size of the
+                domain label space implied by `leave_asia_out`.
         """
         super().__init__()
 
@@ -223,6 +293,21 @@ class MultiScaleClassificationModule(LightningModule):
         regions: torch.Tensor,
         state: Dict[str, Any],
     ) -> None:
+        """Run the branch-ablation forward pass and accumulate per-branch accuracy.
+
+        Calls `self.model.forward_branch_ablation(x)` (dropping LR or HR
+        features via the fusion module) and accumulates overall and
+        per-region ablated-branch task accuracy into `state`, in place.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Model input dict (see `forward`).
+            y (torch.Tensor): Shape `(batch_size,)`, long, ground-truth task
+                class labels.
+            regions (torch.Tensor): Shape `(batch_size,)`, long, raw WILDS
+                region codes.
+            state (Dict[str, Any]): Evaluation state dict, as created by
+                `models.utils.make_eval_state`.
+        """
         result = self.model.forward_branch_ablation(x)
         lr_correct = result["lr_ablated_logits"].argmax(dim=1) == y
         hr_correct = result["hr_ablated_logits"].argmax(dim=1) == y
@@ -243,10 +328,22 @@ class MultiScaleClassificationModule(LightningModule):
         x: Dict[str, torch.Tensor],
         region_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Perform a forward pass through the model.
+        """Perform a forward pass through the wrapped model, returning task logits only.
 
-        :param x: A dict of images.
-        :return: A tensor of logits.
+        Args:
+            x (Dict[str, torch.Tensor]): Model input dict; keys depend on the
+                wrapped model, e.g. `"rgb"` shape `(batch_size, 3, H, W)`
+                float, `"landsat"` shape `(batch_size, C>=6, H, W)` float,
+                optionally `"coord_grid_hr"`/`"coord_grid_lr"` shape
+                `(batch_size, 2, H, W)`, `"overlap_mask"` shape
+                `(batch_size, 1, H, W)`, `"coords"` shape `(batch_size, 2)`.
+            region_ids (Optional[torch.Tensor]): Shape `(batch_size,)`, long,
+                raw WILDS region codes (0-5). Only used by `D3GModel`, which
+                routes by domain; ignored by other models. Defaults to None.
+
+        Returns:
+            torch.Tensor: Shape `(batch_size, num_task_labels)`, float,
+                `task_logits`.
         """
         return self._shared_forward(x, region_ids=region_ids)["task_logits"]
 
@@ -255,6 +352,21 @@ class MultiScaleClassificationModule(LightningModule):
         x: Dict[str, torch.Tensor],
         region_ids: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        """Remap region ids into domain-label space, then delegate to the wrapped model.
+
+        Args:
+            x (Dict[str, torch.Tensor]): Model input dict (see `forward`).
+            region_ids (Optional[torch.Tensor]): Shape `(batch_size,)`, long,
+                raw WILDS region codes (0-5). If given, remapped via
+                `_domain_targets` before being passed to `self.model`.
+                Defaults to None.
+
+        Returns:
+            Dict[str, torch.Tensor]: The wrapped model's full output dict.
+                Keys vary by capability: `task_logits` always; optionally
+                `lr_domain_logits`, `hr_domain_logits`, `rel_logits`,
+                depending on which `supports_*` flags the model reports.
+        """
         if region_ids is not None:
             # Map raw WILDS region codes to the contiguous domain-label space the
             # model's per-domain heads are indexed in. Identity in the full
@@ -266,7 +378,12 @@ class MultiScaleClassificationModule(LightningModule):
         return self.model(x, region_ids=region_ids)
 
     def on_train_start(self) -> None:
-        """Lightning hook that is called when training begins."""
+        """Lightning hook called when training begins.
+
+        Resets all train-phase metrics and prediction/target accumulators
+        (task, LR-domain, HR-domain, D3G consistency, best validation
+        accuracy) at the start of `Trainer.fit`.
+        """
         self.val_acc_best.reset()
         self.train_task_loss.reset()
         self.train_task_acc.reset()
@@ -284,10 +401,26 @@ class MultiScaleClassificationModule(LightningModule):
             self.train_consistency_loss.reset()
 
     def _set_branch_freeze(self, branch: nn.Module, frozen: bool) -> None:
+        """Set `requires_grad` on every parameter of `branch`.
+
+        Args:
+            branch (nn.Module): Sub-module whose parameters' `requires_grad`
+                is set, e.g. `self.model.branches.lr_encoder`.
+            frozen (bool): If True, disable gradients for `branch`'s
+                parameters (`requires_grad = False`); if False, enable them.
+        """
         for param in branch.parameters():
             param.requires_grad = not frozen
 
     def on_train_epoch_start(self) -> None:
+        """Lightning hook called at the start of a training epoch.
+
+        Restores train mode (validation/test leave the module in eval mode).
+        Then, only for a `FeatureFusionModel` with `alternating_freeze`
+        enabled, unfreezes both branches and re-freezes the LR or HR encoder
+        branch on alternating epoch periods (`alternating_freeze_period`),
+        logging which branch is frozen.
+        """
         # Validation/test put the module into eval mode; restore train mode so the
         # next training epoch runs with Dropout and BatchNorm batch statistics again.
         self._force_train_mode()
@@ -319,6 +452,11 @@ class MultiScaleClassificationModule(LightningModule):
         )
 
     def _unfreeze_all_branches(self) -> None:
+        """Undo the alternating branch freeze, restoring gradients on both branches.
+
+        No-op unless `alternating_freeze` is enabled and `self.model` is a
+        `FeatureFusionModel`.
+        """
         if not self.hparams.alternating_freeze or not isinstance(
             self.model, FeatureFusionModel
         ):
@@ -329,14 +467,24 @@ class MultiScaleClassificationModule(LightningModule):
     def model_step(
         self, batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Perform a single model step on a batch of data.
+        """Run the task forward pass and loss for one batch.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        Args:
+            batch (Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]):
+                `(x, y, metadata)` triple. `x` is the model input dict (see
+                `forward`); `y` has shape `(batch_size,)`, long, task class
+                labels; `metadata` has shape `(batch_size, 6)`, float32,
+                columns `[region, year, y, lat, lon, img_span_km]`.
 
-        :return: A tuple containing (in order):
-            - A tensor of losses.
-            - A tensor of predictions.
-            - A tensor of target labels.
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: `(loss, preds,
+                logits)`, in that order -- a scalar task cross-entropy loss,
+                the shape `(batch_size,)` long argmax predictions, and the
+                shape `(batch_size, num_task_labels)` float `task_logits`.
+                Note: despite the type hint's parameter-name-agnostic tuple
+                and a previous docstring describing this as
+                "predictions... targets", the third element returned is the
+                raw `task_logits`, not the ground-truth `y`.
         """
         x, y, metadata = batch
         regions = metadata[:, self.hparams.domain_index].long()
@@ -361,6 +509,21 @@ class MultiScaleClassificationModule(LightningModule):
         lr_domain_preds: torch.Tensor,
         domain_targets: torch.Tensor,
     ) -> None:
+        """Update and log the running train LR-domain loss/accuracy for one batch.
+
+        Updates `train_lr_domain_loss` (`MeanMetric`) and `train_lr_domain_acc`
+        (per-class `Accuracy`), logs the epoch-level loss, and buffers CPU
+        copies of the predictions/targets for the end-of-epoch confusion
+        matrix (see `on_train_epoch_end`).
+
+        Args:
+            lr_domain_loss (torch.Tensor): Scalar LR-domain cross-entropy loss
+                for this batch.
+            lr_domain_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax
+                LR-branch domain-class predictions.
+            domain_targets (torch.Tensor): Shape `(batch_size,)`, long,
+                remapped domain-class targets (see `_domain_targets`).
+        """
         self.train_lr_domain_loss(lr_domain_loss)
         self.log(
             "train/train-lr-domain-loss",
@@ -379,6 +542,21 @@ class MultiScaleClassificationModule(LightningModule):
         hr_domain_preds: torch.Tensor,
         domain_targets: torch.Tensor,
     ) -> None:
+        """Update and log the running train HR-domain loss/accuracy for one batch.
+
+        Updates `train_hr_domain_loss` (`MeanMetric`) and `train_hr_domain_acc`
+        (per-class `Accuracy`), logs the epoch-level loss, and buffers CPU
+        copies of the predictions/targets for the end-of-epoch confusion
+        matrix (see `on_train_epoch_end`).
+
+        Args:
+            hr_domain_loss (torch.Tensor): Scalar HR-domain cross-entropy loss
+                for this batch.
+            hr_domain_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax
+                HR-branch domain-class predictions.
+            domain_targets (torch.Tensor): Shape `(batch_size,)`, long,
+                remapped domain-class targets (see `_domain_targets`).
+        """
         self.train_hr_domain_loss(hr_domain_loss)
         self.log(
             "train/train-hr-domain-loss",
@@ -394,6 +572,16 @@ class MultiScaleClassificationModule(LightningModule):
     def log_task_metrics(
         self, task_loss: torch.Tensor, task_preds: torch.Tensor, y: torch.Tensor
     ) -> None:
+        """Update and log the running train task loss/accuracy for one batch.
+
+        Args:
+            task_loss (torch.Tensor): Scalar task cross-entropy loss for this
+                batch.
+            task_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax
+                task-class predictions.
+            y (torch.Tensor): Shape `(batch_size,)`, long, ground-truth task
+                class labels.
+        """
         self.train_task_loss(task_loss)
         self.train_task_acc(task_preds, y)
         self.log(
@@ -416,12 +604,36 @@ class MultiScaleClassificationModule(LightningModule):
         batch: Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor],
         batch_idx: int,
     ) -> torch.Tensor:
-        """Perform a single training step on a batch of data from the training set.
+        """Perform one manual-optimization, multi-objective training step.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target
-            labels.
-        :param batch_idx: The index of the current batch.
-        :return: A tensor of losses between model predictions and targets.
+        Always backpropagates the task loss; additionally the LR-domain loss
+        (if the model supports LR-domain classification) and the D3G
+        consistency loss (if the model supports the D3G objective) are added
+        to a shared `backbone_loss` and backpropagated together via a single
+        `manual_backward(backbone_loss)` call. The HR-domain loss (if
+        supported) is computed and backpropagated separately afterwards via
+        its own `manual_backward(hr_domain_loss)` call, so it does not
+        contribute a second, redundant gradient pass through the shared HR
+        encoder. Each active optimizer (`task_opt`, and optionally
+        `lr_domain_opt`/`hr_domain_opt`) is zeroed before, and stepped after,
+        its respective backward pass(es).
+
+        Args:
+            batch (Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]):
+                `(x, y, metadata)` triple (see `model_step`).
+            batch_idx (int): Index of the current batch within the epoch.
+
+        Returns:
+            torch.Tensor: The scalar task loss (used by Lightning for logging
+                purposes only; gradients are already applied via manual
+                optimization above).
+
+        Raises:
+            ValueError: If any sub-module of `self.model` is not in training
+                mode when this step runs.
+            ValueError: If a domain target of -1 (an out-of-label-space
+                region, e.g. Asia under Leave-Asia-Out) leaks into the train
+                split, for models with an LR- or HR-domain classifier.
         """
         if not all([module.training for module in self.model.modules()]):
             raise ValueError(
@@ -517,6 +729,31 @@ class MultiScaleClassificationModule(LightningModule):
         region_names: List[str],
         loader_label: str,
     ) -> None:
+        """Log a W&B confusion-matrix plot of domain predictions vs. targets.
+
+        Finds the (first) `WandbLogger` among `self.logger` (which may be a
+        single logger or a list of loggers) and logs the plot to its
+        `experiment`.
+
+        Args:
+            preds (torch.Tensor): Shape `(n,)`, long, domain-class predictions
+                for the whole split.
+            targets (torch.Tensor): Shape `(n,)`, long, domain-class targets
+                for the whole split.
+            label (str): W&B log key for the plot, e.g.
+                `"train/lr-domain-confusion-matrix"`.
+            feature_label (str): Branch label used in the plot title (`"lr"`
+                or `"hr"`).
+            region_names (List[str]): Domain-class names indexed by
+                domain-class id, used as the confusion matrix's class labels.
+            loader_label (str): Split/loader label used in the plot title
+                (e.g. `"Train"`, or a val/test loader name).
+
+        Raises:
+            AttributeError: If no `WandbLogger` is found among `self.logger`
+                (`logger` resolves to `None`, and `.experiment` is accessed on
+                it).
+        """
         logger = self.logger
         if isinstance(logger, list):
             logger = next((log for log in logger if isinstance(log, WandbLogger)), None)
@@ -534,7 +771,13 @@ class MultiScaleClassificationModule(LightningModule):
         )
 
     def on_train_epoch_end(self) -> None:
-        """Lightning hook that is called when a training epoch ends."""
+        """Lightning hook called when a training epoch ends.
+
+        Unfreezes any branch frozen by `alternating_freeze`, then computes and
+        logs epoch-level LR/HR domain accuracy (overall and per-class) and W&B
+        confusion matrices from the predictions/targets buffered during the
+        epoch by `log_lr_domain_metrics` / `log_hr_domain_metrics`.
+        """
         self._unfreeze_all_branches()
 
         # LR domain metrics
@@ -600,9 +843,27 @@ class MultiScaleClassificationModule(LightningModule):
     ) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target
-            labels.
-        :param batch_idx: The index of the current batch.
+        Runs the shared forward pass, updates the per-dataloader evaluation
+        state (task, LR-/HR-domain, and, if enabled, branch-ablation metrics)
+        in place; nothing is returned or logged here (see
+        `on_validation_epoch_end` for the reduction/logging).
+
+        Args:
+            batch (Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]):
+                `(x, y, metadata)` triple (see `model_step`).
+            batch_idx (int): Index of the current batch within the dataloader.
+            dataloader_idx (int): Index of the validation dataloader this
+                batch came from, into `self.val_loader_names` /
+                `self.val_ece_metrics` / `self._val_state`. Defaults to 0.
+
+        Raises:
+            ValueError: If `dataloader_idx` exceeds the number of configured
+                ECE metrics (i.e. more validation dataloaders were provided
+                than `val_loader_names` entries at construction time).
+            ValueError: If a domain target of -1 (an out-of-label-space
+                region, e.g. Asia under Leave-Asia-Out) leaks into a
+                validation split, for models with an LR- or HR-domain
+                classifier.
         """
 
         if dataloader_idx >= len(self.val_ece_metrics):
@@ -655,7 +916,13 @@ class MultiScaleClassificationModule(LightningModule):
             self._branch_ablation_step(x, y, regions, self._val_state[dataloader_idx])
 
     def on_validation_epoch_end(self) -> None:
-        """Lightning hook that is called when a validation epoch ends."""
+        """Lightning hook called when a validation epoch ends.
+
+        Reduces every validation dataloader's accumulated state into logged
+        `val/*` metrics via `compute_final_eval_metrics`, and (skipped during
+        Lightning's sanity-checking pass) logs domain confusion matrices and,
+        if `do_branch_ablation`, branch-ablation metrics for each loader.
+        """
         all_metrics: Dict[str, float] = {}
         for idx, state in self._val_state.items():
             loader_name = self.val_loader_names[idx]
@@ -734,9 +1001,24 @@ class MultiScaleClassificationModule(LightningModule):
     ) -> None:
         """Perform a single test step on a batch of data from the test set.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target
-            labels.
-        :param batch_idx: The index of the current batch.
+        Mirrors `validation_step`, with one difference: domain metrics are
+        masked to `valid = domain_targets >= 0` rather than asserted
+        non-negative, since (unlike validation) a test split can be the
+        Asia-only eval split under Leave-Asia-Out, where every domain target
+        is -1 and the whole batch is skipped for domain metrics.
+
+        Args:
+            batch (Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]):
+                `(x, y, metadata)` triple (see `model_step`).
+            batch_idx (int): Index of the current batch within the dataloader.
+            dataloader_idx (int): Index of the test dataloader this batch came
+                from, into `self.test_loader_names` / `self.test_ece_metrics`
+                / `self._test_state`. Defaults to 0.
+
+        Raises:
+            ValueError: If `dataloader_idx` exceeds the number of configured
+                ECE metrics (i.e. more test dataloaders were provided than
+                `test_loader_names` entries at construction time).
         """
 
         if dataloader_idx >= len(self.test_ece_metrics):
@@ -788,7 +1070,15 @@ class MultiScaleClassificationModule(LightningModule):
             self._branch_ablation_step(x, y, regions, self._test_state[dataloader_idx])
 
     def on_test_epoch_end(self) -> None:
-        """Lightning hook that is called when a test epoch ends."""
+        """Lightning hook called when a test epoch ends.
+
+        Mirrors `on_validation_epoch_end` (reduces every test dataloader's
+        state into logged `test/*` metrics, logs domain confusion matrices
+        and, if `do_branch_ablation`, branch-ablation metrics), except it is
+        not skipped during sanity-checking and always passes
+        `include_class_breakdown=True` to `compute_final_eval_metrics`, so
+        per-class task accuracy is always reported at test time.
+        """
         all_metrics: Dict[str, float] = {}
         for idx, state in self._test_state.items():
             loader_name = self.test_loader_names[idx]
@@ -838,13 +1128,29 @@ class MultiScaleClassificationModule(LightningModule):
             )
 
     def configure_optimizers(self) -> Any:
-        """Choose what optimizers and learning-rate schedulers to use in your optimization.
-        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+        """Build the task optimizer/scheduler, plus domain optimizer(s)/scheduler(s) if needed.
+
+        Always builds a task optimizer (over `self.model.task_parameters()`)
+        and, if `scheduler_factory` is set, a task LR scheduler. Additionally
+        builds an LR-domain and/or HR-domain optimizer/scheduler pair (over
+        `self.model.lr_domain_parameters()` / `hr_domain_parameters()`) if the
+        model supports the corresponding objective, in which case
+        `domain_optimizer_factory` must have been provided at construction
+        time. `ReduceLROnPlateau` schedulers are additionally configured to
+        monitor `self.hparams.key_metric`.
 
         Examples:
             https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
 
-        :return: A list of dicts containing the configured optimizers and learning-rate schedulers to be used for training.
+        Returns:
+            Any: A list of 1-3 Lightning optimizer/scheduler config dicts (one
+                each for task, LR-domain, HR-domain, in that order, omitting
+                any objective the model doesn't support).
+
+        Raises:
+            ValueError: If the model supports an LR- or HR-domain classifier
+                but no `domain_optimizer_factory` was provided at construction
+                time.
         """
         task_optimizer = self.optimizer_factory(params=self.model.task_parameters())
 

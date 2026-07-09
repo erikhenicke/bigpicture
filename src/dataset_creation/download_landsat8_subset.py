@@ -1,7 +1,21 @@
 """
-download_landsat8.py
+download_landsat8_subset.py
 
-This script downloads landsat8 satellite imagery for each fmow sample (WILDS version, [train, val, test]).
+Downloads a random subset (1,000 samples) of Landsat8 satellite imagery from Google
+Earth Engine for FMoW WILDS samples (train/val/test splits), using coordinates and
+image extent from ``rgb_metadata_extended.csv``. For each sampled point, the least
+cloudy single Landsat8 scene covering an extended region of interest is downloaded as
+an RGB PNG, falling back to a cloud-masked mosaic if no sufficiently cloud-free single
+scene is available.
+
+Main functions:
+    - compute_img_span: Converts a kilometer span to a degree longitude/latitude span.
+    - extract_region_of_interest: Builds the download region rectangle for a sample.
+    - mask_clouds_compute_validity: Cloud-masks a Landsat image and scores its pixel validity.
+    - get_requests: Chooses between a single least-cloudy image and a cloud-masked mosaic.
+    - download_image: Downloads and saves the RGB PNG for one sample, with retries.
+    - scale_l8: Applies Landsat Collection 2 reflectance scale factors to the RGB bands.
+    - main: Orchestrates authentication, sampling, parallel download, and metadata export.
 """
 import os
 import pathlib
@@ -117,11 +131,11 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
         span_km (float): Image size in kilometer to download.
 
     Returns:
-        tuple[ee.Image, ee.Geometry.Rectangle, bool, str]: 
-            - Request for least cloudy image
-            - Region of interes
-            - Bool that says if a composite will be returned
-            - String date of the image, if it is not a composite.
+        tuple[ee.Image, ee.Geometry.Rectangle, bool, str]:
+            - Request for the least cloudy image (or the mosaic, if it is used instead).
+            - Region of interest.
+            - Bool that is True if the least cloudy single image was used (i.e. no composite).
+            - String date of the image (GMT), or None if a composite was used instead.
     """
     date = None
     region_of_interest = extract_region_of_interest(sample_metadata, span_km)
@@ -148,11 +162,20 @@ def get_requests(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: fl
 def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: float, logger: logging.Logger):
     """Downloads Landsat8 image from Google Earth Engine for the image coordinates of the given sample.
 
+    Retries up to 30 times (with a short random delay between attempts) for building the
+    request and again for the actual download, saving the resulting PNG as
+    ``rgb_image_<sample_idx>.png`` in `IMAGES_DIR`.
+
     Args:
         sample_metadata (pd.Series): Metadata for fmow sample containing image coordinates and span.
         l8 (ee.ImageCollection): Landsat8 image collection to download image from.
         span_km (float): Image size in kilometer to download.
-        logger (logging.Logger):
+        logger (logging.Logger): Logger used to record retry attempts and errors.
+
+    Returns:
+        pd.Series: Series with keys `is_composition` (bool, True if a cloud-masked mosaic
+            was downloaded instead of a single least-cloudy image) and `date` (str or None,
+            the GMT acquisition date, only set when a single image was used).
     """
     date = None
     is_single_image = True
@@ -200,6 +223,19 @@ def download_image(sample_metadata: pd.Series, l8: ee.ImageCollection, span_km: 
 
 
 def scale_l8(image):
+    """Apply the Landsat Collection 2 surface reflectance scale factors to the RGB bands.
+
+    Converts the raw `SR_B4`, `SR_B3`, `SR_B2` band values to physical reflectance
+    using the USGS-documented scale (multiply by 0.0000275, add -0.2), then
+    overwrites those bands in the image.
+
+    Args:
+        image (ee.Image): Landsat 8 image with unscaled surface reflectance bands.
+
+    Returns:
+        ee.Image: Image with `SR_B4`, `SR_B3`, `SR_B2` bands replaced by their
+            scaled (reflectance) values.
+    """
     scaled_optical_bands = (image
                             .select(['SR_B4', 'SR_B3', 'SR_B2'])
                             .multiply(0.0000275)
@@ -208,6 +244,17 @@ def scale_l8(image):
 
 
 def main():
+    """Download a random 1,000-sample Landsat8 subset for the FMoW WILDS train/val/test splits.
+
+    Authenticates with Google Earth Engine, reads the extended FMoW metadata,
+    samples `test_size` rows from the train/val/test splits, downloads the
+    corresponding Landsat8 RGB PNGs in parallel via `download_image`, and writes
+    the augmented metadata (plus download outcome columns) to `test.csv` in
+    `DATA_DIR`.
+
+    Raises:
+        NotADirectoryError: If `PROJECT_ROOT` or `DATA_DIR` do not exist.
+    """
     if not (os.path.exists(PROJECT_ROOT) and os.path.exists(DATA_DIR)):
         raise NotADirectoryError()
 

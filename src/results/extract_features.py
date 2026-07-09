@@ -23,6 +23,13 @@ Everything runs in eval mode on purpose: cached features must be deterministic
 (BatchNorm running stats, dropout disabled). Any regularization for the
 downstream fusion module belongs inside that module, not baked into the cache.
 
+Key pieces: ``find_seed_checkpoints`` resolves each seed's best checkpoint;
+``resolve_branch`` maps the loaded model to the branch to export and its output
+naming; ``_IndexedSubset`` wraps a WILDS subset so each item carries its global
+``file_idx``; ``extract_split`` runs one dataset split through the encoder and
+writes the per-sample feature files; ``main`` drives the loop over seeds and
+splits.
+
 Usage:
     uv run --env-file .env src/results/extract_features.py <run_dir> [--batch-size N] [--overwrite]
 """
@@ -58,24 +65,68 @@ class _IndexedSubset(torch.utils.data.Dataset):
     """
 
     def __init__(self, subset, full_idxs):
+        """Store the subset and the base dataset's global file-index array.
+
+        Args:
+            subset: WILDS subset (e.g. from ``dataset.get_subset(split)``) whose
+                items are ``(x, y, metadata)`` tuples.
+            full_idxs (Sequence[int] | np.ndarray): Global file index of every row
+                of the base (un-subsetted) dataset, indexed by the base dataset's
+                row index (``dataset.full_idxs``).
+        """
         self.subset = subset
         self.full_idxs = full_idxs
 
     def __len__(self) -> int:
+        """Number of items in the wrapped subset.
+
+        Returns:
+            int: ``len(self.subset)``.
+        """
         return len(self.subset)
 
     def file_idx_at(self, i: int) -> int:
         """Resolve the global ``file_idx`` for subset position ``i`` without
-        loading the (heavy) image tensors."""
+        loading the (heavy) image tensors.
+
+        Args:
+            i (int): Row index into the subset.
+
+        Returns:
+            int: Global file index of that row.
+        """
         dataset_idx = int(self.subset.indices[i])
         return int(self.full_idxs[dataset_idx])
 
     def __getitem__(self, i: int):
+        """Fetch one sample, dropping the label and metadata.
+
+        Args:
+            i (int): Row index into the subset.
+
+        Returns:
+            tuple[int, dict[str, torch.Tensor]]: ``(file_idx, x)`` where
+                ``file_idx`` is the global file index (see ``file_idx_at``) and
+                ``x`` is the model input dict for this sample (e.g. keys like
+                ``"rgb"``, ``"landsat"``, ``"coords"`` depending on the dataset
+                configuration).
+        """
         x, _, _ = self.subset[i]
         return self.file_idx_at(i), x
 
 
 def _collate(batch):
+    """Collate a list of ``(file_idx, x)`` samples into a batched form.
+
+    Args:
+        batch (list[tuple[int, dict[str, torch.Tensor]]]): Samples as returned by
+            ``_IndexedSubset.__getitem__``.
+
+    Returns:
+        tuple[list[int], dict[str, torch.Tensor]]: File indices as a plain list,
+            and the per-key stacked tensors (each of shape
+            ``(batch_size, ...)``, stacked along a new leading dimension).
+    """
     file_idxs, xs = zip(*batch)
     keys = xs[0].keys()
     x_batch = {k: torch.stack([x[k] for x in xs], dim=0) for k in keys}
@@ -91,6 +142,18 @@ def find_seed_checkpoints(path: Path) -> list[tuple[int, Path]]:
     exactly ``NUM_RERUNS`` seeds, so a directory resolving to a different count is
     treated as an incomplete/wrong run and raises. Returns
     ``[(seed_idx, ckpt_path), ...]`` sorted by seed.
+
+    Args:
+        path (Path): Multi-seed run directory containing a ``checkpoints/`` subdir.
+
+    Returns:
+        list[tuple[int, Path]]: ``(seed_idx, checkpoint_path)`` pairs, sorted by
+            seed index.
+
+    Raises:
+        ValueError: If ``path`` is a file, lacks a ``checkpoints/`` subdirectory,
+            or the number of resolved seed checkpoints is not ``NUM_RERUNS``.
+        FileNotFoundError: If ``path`` does not exist.
     """
     if path.is_file():
         raise ValueError(f"Expected a run directory, got a file: {path}")
@@ -111,7 +174,17 @@ def find_seed_checkpoints(path: Path) -> list[tuple[int, Path]]:
 
 def build_dataset(cfg):
     """Build the eval-mode (augment=False) multiscale dataset, matching the
-    spatial-feature configuration the checkpoint was trained with."""
+    spatial-feature configuration the checkpoint was trained with.
+
+    Args:
+        cfg (omegaconf.DictConfig): Hydra run config (see
+            ``results.utils.load_hydra_config``), read for the data paths, image
+            normalization, LR crop/extension settings, and spatial-feature flags.
+
+    Returns:
+        The constructed multiscale dataset (as returned by
+            ``train.utils.make_multiscale_dataset``), with ``augment=False``.
+    """
     sc = _parse_spatial_cfg(cfg)
     return make_multiscale_dataset(
         fmow_dir=cfg.data.fmow_dir,
@@ -132,6 +205,18 @@ def resolve_output_base(cfg) -> Path:
     """The ``FMoW_LandSat_<run-name>_Features`` dir; per-seed run<i> is added later.
 
     Sits next to the (host-resolved) preprocessed dir, mirroring resolve_feature_dir.
+
+    Args:
+        cfg (omegaconf.DictConfig): Hydra run config; reads
+            ``cfg.data.preprocessed_dir`` and ``cfg.run_name``.
+
+    Returns:
+        Path: ``<preprocessed_dir's parent>/FMoW_LandSat_<Run_Name>_Features``,
+            with the ``train_`` prefix stripped from ``run_name`` and the
+            remainder title-cased.
+
+    Raises:
+        ValueError: If ``cfg.data.preprocessed_dir`` resolves to ``None``.
     """
     preprocessed_dir = resolve_preprocessed_dir(cfg.data.preprocessed_dir)
     if preprocessed_dir is None:
@@ -149,6 +234,23 @@ def resolve_branch(model):
     ``fmow_features/`` subdirectory, ``filename(file_idx)`` builds the per-sample
     filename (mirroring the preprocessed-image convention), and ``feature_fn(x)``
     runs the encoder on the right input. Raises for unsupported model types.
+
+    Args:
+        model: The wrapped model (``module.model``), expected to be one of
+            ``SingleBranchLRModel``, ``SingleBranchLocationModel``, or
+            ``SingleBranchModel``.
+
+    Returns:
+        tuple[str, Callable[[int], str], Callable[[dict], torch.Tensor]]:
+            ``(subdir, filename, feature_fn)`` — the output subdirectory name
+            (``"landsat"`` or ``"fmow_rgb"``), a function mapping a file index to
+            its output filename, and a function mapping the input dict ``x`` to
+            the encoder's output feature tensor (shape
+            ``(batch_size, feature_dim)``).
+
+    Raises:
+        ValueError: If ``model`` is not one of the supported single-branch model
+            types.
     """
     if isinstance(model, SingleBranchLRModel):
         n = model.landsat_channels
@@ -177,6 +279,23 @@ def resolve_branch(model):
 
 @torch.no_grad()
 def extract_split(branch, dataset, split, out_dir, args, device) -> None:
+    """Run one dataset split through the encoder and cache its feature vectors.
+
+    Skips samples whose output file already exists unless ``args.overwrite`` is
+    set. Each sample's feature is saved as its own ``.pt`` file (cloned off the
+    batch tensor so the whole batch isn't retained by ``torch.save``).
+
+    Args:
+        branch (tuple[str, Callable[[int], str], Callable[[dict], torch.Tensor]]):
+            Branch spec as returned by ``resolve_branch``.
+        dataset: Multiscale dataset (as returned by ``build_dataset``), supporting
+            ``get_subset(split, frac=1.0)`` and exposing ``full_idxs``.
+        split (str): Split name to extract (e.g. ``"train"``, ``"id_val"``).
+        out_dir (Path): Directory to write the per-sample feature files into.
+        args (argparse.Namespace): Parsed CLI args; reads ``batch_size``,
+            ``num_workers``, and ``overwrite``.
+        device (torch.device): Device to run the encoder on.
+    """
     _, filename, feature_fn = branch
     subset = dataset.get_subset(split, frac=1.0)
     if len(subset) == 0:
@@ -220,6 +339,12 @@ def extract_split(branch, dataset, split, out_dir, args, device) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for feature extraction.
+
+    Returns:
+        argparse.Namespace: Parsed args with ``checkpoint_path``, ``batch_size``,
+            ``num_workers``, ``seed``, and ``overwrite``.
+    """
     parser = argparse.ArgumentParser(
         description="Cache frozen single-branch (HR or LR) encoder features from checkpoint(s) (eval mode)."
     )
@@ -232,6 +357,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI entry point: extract and cache encoder features for every seed and split.
+
+    Seeds the RNG once (sample order is seed-independent since
+    ``get_subset(..., frac=1.0)`` with ``shuffle=False`` is used), builds the
+    model architecture once, then for each seed checkpoint loads its weights,
+    resolves the export branch, and runs ``extract_split`` over every dataset
+    split.
+    """
     args = parse_args()
     # frac=1.0 with shuffle=False makes the sample set seed-independent, so unlike
     # eval_reproduce.py we don't re-seed per run; one seed_everything suffices.

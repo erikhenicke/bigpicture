@@ -1,3 +1,34 @@
+"""Hydra entrypoint for training and evaluating multi-scale FMoW classification models.
+
+Builds datasets/dataloaders and a model from a Hydra config (composed from
+`configs/setup.yaml` and its defaults), trains it with a Lightning
+`Trainer` (or evaluates only, for parameter-free frozen decision-fusion
+models), logs to Weights & Biases and a CSV logger, and repeats the process
+for two fixed reruns (`run_idx` 1 and 2), reporting each run's key test
+metric.
+
+Functions:
+    `has_device_tensor_cores`: Check whether the current CUDA device
+        supports Tensor Cores.
+    `_make_loader` / `make_data_loaders`: Build the train/val/test
+        `DataLoader`s for a run from the Hydra config.
+    `_parse_spatial_cfg`: Resolve the spatial-encoding config block (coord
+        channels, Fourier positional encoding, overlap mask) into the
+        derived flags/channel counts used to build encoders and branches.
+    `make_model`: Instantiate the model architecture (single-branch,
+        early/feature/decision fusion, or D3G) and wrap it in
+        `MultiScaleClassificationModule` for training/eval.
+    `_run_once`: Run one seeded training + test pass (or test-only, for
+        frozen decision-fusion models).
+    `_best_run_score`: Extract a named metric from a Lightning
+        `Trainer.test` results list.
+    `run_experiment`: Hydra-decorated `main`; orchestrates the reruns and
+        reports the best one.
+
+Usage:
+    uv run src/train/run_experiment.py model=<model> [key=value ...]
+"""
+
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -20,7 +51,16 @@ from train.utils import make_multiscale_dataset, make_multiscale_loader
 
 
 def has_device_tensor_cores() -> bool:
-    """Check if the current GPU supports Tensor Cores: https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html"""
+    """Check whether the current CUDA device supports Tensor Cores.
+
+    See https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html
+    for the compute-capability reference (Tensor Cores from major version
+    7, i.e. Volta and later).
+
+    Returns:
+        bool: True if CUDA is available and the current device's compute
+        capability major version is >= 7; False if CUDA is unavailable.
+    """
     if not torch.cuda.is_available():
         return False
     device = torch.device("cuda")
@@ -29,6 +69,18 @@ def has_device_tensor_cores() -> bool:
 
 
 def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, shuffle: bool) -> DataLoader:
+    """Build a `DataLoader` for one split, pulling batch/worker settings from `cfg`.
+
+    Args:
+        dataset (FMoWMultiScaleDataset): Dataset to draw the subset from.
+        split (str): WILDS split name to load (e.g. `"train"`, `"id_val"`).
+        cfg (DictConfig): Hydra config; reads `cfg.data.frac`,
+            `cfg.data.batch_size`, `cfg.data.num_workers`.
+        shuffle (bool): Whether to shuffle samples each epoch.
+
+    Returns:
+        DataLoader: Loader over `dataset`'s `split` subset.
+    """
     return make_multiscale_loader(
         dataset,
         split=split,
@@ -40,6 +92,46 @@ def _make_loader(dataset: FMoWMultiScaleDataset, split: str, cfg: DictConfig, sh
 
 
 def _parse_spatial_cfg(cfg: DictConfig):
+    """Resolve the `cfg.model.spatial_encoding` block into derived spatial-encoding flags.
+
+    Reads the raw spatial-encoding config (raw coordinate channels, Fourier
+    positional encoding, and overlap mask, each independently toggleable
+    per branch) and derives: whether each branch needs raw coord channels /
+    Fourier PE, how many extra input channels each branch's encoder needs
+    (`hr_extra`/`lr_extra`), and whether the dataset needs to emit the
+    coordinate grid and/or overlap mask tensors at all (used to set
+    `FMoWMultiScaleDataset`'s `spatial_coord_grid`/`spatial_overlap_mask`).
+
+    Args:
+        cfg (DictConfig): Hydra config; reads keys under
+            `cfg.model.spatial_encoding` (all optional): `coord_channels`
+            (bool, default False), `coord_on_hr`/`coord_on_lr` (bool,
+            default True each), `overlap_mask` (bool, default False),
+            `overlap_mask_type` (str, default "binary"), `fourier_bands`
+            (int, default 0), `fourier_proj_dim` (int, default 0),
+            `fourier_on_hr`/`fourier_on_lr` (bool, default True each).
+
+    Returns:
+        dict: Derived spatial config with keys:
+            "use_coord_hr"/"use_coord_lr" (bool): Whether to add raw
+                coordinate channels to the HR/LR encoder input.
+            "overlap_mask" (bool): Whether an overlap-mask channel is added
+                to the LR encoder input.
+            "overlap_mask_type" (str): `"binary"` or `"gaussian"`.
+            "fourier_bands" (int), "fourier_proj_dim" (int): Fourier PE
+                hyperparameters.
+            "use_fourier" (bool): Whether Fourier PE is enabled at all.
+            "use_fourier_hr"/"use_fourier_lr" (bool): Whether Fourier PE is
+                applied on the HR/LR branch.
+            "hr_extra"/"lr_extra" (int): Extra input channels the HR/LR
+                encoder needs on top of its base image channels (2 for raw
+                coords, 1 for the overlap mask on LR,
+                `fourier_proj_dim` for Fourier PE).
+            "needs_coord_grid" (bool): Whether the dataset must emit
+                coordinate grid tensors (any coord or Fourier use).
+            "needs_overlap_mask" (bool): Whether the dataset must emit the
+                overlap-mask tensor (alias of "overlap_mask").
+    """
     spatial_cfg = cfg.model.get("spatial_encoding", {})
     coord_channels = spatial_cfg.get("coord_channels", False)
     # Per-branch raw-coord toggles (default both on -> existing symmetric behaviour).
@@ -97,6 +189,30 @@ def _parse_spatial_cfg(cfg: DictConfig):
 
 
 def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[DataLoader], List[DataLoader]]:
+    """Build the train, validation, and test `DataLoader`s for one run.
+
+    Constructs two `FMoWMultiScaleDataset`s from `cfg.data` (one with
+    augmentation for training, one without for eval), sized/spatially
+    configured via `_parse_spatial_cfg`, then wraps the requested splits in
+    `DataLoader`s.
+
+    Args:
+        cfg (DictConfig): Hydra config; reads `cfg.data.*` (dataset paths,
+            `source`, `augment_train`, `image_norm`, `lr_crop_km`,
+            `lr_extension_factor`, `hr_feature_run_name`,
+            `lr_feature_run_name`, `leave_asia_out`, `train_split`,
+            `val_splits`, `test_splits`) and `cfg.model.spatial_encoding`
+            (via `_parse_spatial_cfg`).
+        run_idx (int): Rerun index; used as `feature_run_idx` when
+            `cfg.data.source == "features"` to select that rerun's cached
+            features.
+
+    Returns:
+        tuple[DataLoader, list[DataLoader], list[DataLoader]]:
+        `(train_loader, val_loaders, test_loaders)`, where
+        `val_loaders`/`test_loaders` have one loader per split in
+        `cfg.data.val_splits`/`cfg.data.test_splits`.
+    """
     sc = _parse_spatial_cfg(cfg)
 
     spatial_kwargs = dict(
@@ -149,6 +265,37 @@ def make_data_loaders(cfg: DictConfig, run_idx: int) -> Tuple[DataLoader, List[D
 
 
 def make_model(cfg: DictConfig, run_idx: int = 0) -> MultiScaleClassificationModule:
+    """Instantiate the configured model architecture and wrap it for training/eval.
+
+    Dispatches on `cfg.model.model._target_` (and, for the generic fusion
+    path, `cfg.model.branches._target_`) to build one of: a single-branch
+    model (HR-only, LR-only, or location-only), early fusion, feature/D3G
+    fusion (dual-branch encoders + a fusion module), or decision fusion
+    (combining frozen or jointly-trained single-branch heads via a decision
+    rule). Encoders are instantiated with extra input channels/spatial
+    encoding modules as resolved by `_parse_spatial_cfg` when the
+    architecture uses spatial encodings. The resulting model, its
+    optimizer/scheduler factories (main + a separate domain-classifier
+    optimizer/scheduler), and the task/domain label counts are then wrapped
+    in a `MultiScaleClassificationModule` Lightning module.
+
+    Args:
+        cfg (DictConfig): Hydra config; reads `cfg.model.*` (model/branch/
+            fusion/encoder targets and their kwargs), `cfg.data.leave_asia_out`,
+            `cfg.num_task_labels`, `cfg.domain_index`, `cfg.trainer.*`
+            (`ece_n_bins`, `monitor_metric`, `label_smoothing`,
+            `branch_ablation`, `alternating_freeze`,
+            `alternating_freeze_period`), `cfg.optim.*`
+            (optimizer/scheduler and domain-optimizer/scheduler factories),
+            and `cfg.data.val_loader_names`/`cfg.data.test_loader_names`.
+        run_idx (int): Rerun index, forwarded to a decision-fusion model to
+            pick which rerun's cached single-branch checkpoints/features to
+            load. Defaults to 0.
+
+    Returns:
+        MultiScaleClassificationModule: The instantiated model wrapped in
+        the shared training/eval Lightning module.
+    """
 
     model_target = cfg.model.model.get("_target_", "")
 
@@ -318,12 +465,34 @@ def _run_once(
     default_root_dir: str,
     wandb_group: str,
 ) -> tuple[list[dict], str]:
-    """Run one training + test pass. Returns (test_results, checkpoint_dir).
+    """Run one seeded training + test pass, or test-only for frozen models.
 
-    A model that reports ``train_model() is False`` (a frozen decision-fusion model)
-    is parameter-free: there is nothing to fit, so we load this seed's frozen heads +
-    prior and run test only. Every other model -- including a decision-fusion model
-    whose heads are trained jointly from scratch -- goes through the fit + test path.
+    Seeds everything with `cfg.seed + run_idx`, builds the data loaders and
+    model for this run, and either (a) if the model is parameter-free
+    (``model.model.train_model()`` is False, e.g. a frozen decision-fusion
+    model using this seed's precomputed heads/prior), runs `Trainer.test`
+    directly, or (b) otherwise fits with `Trainer.fit` (checkpointing on
+    `cfg.trainer.monitor_metric`) and tests the best checkpoint. Logs to
+    both W&B (grouped under `wandb_group`) and a CSV logger, and calls
+    `wandb.finish()` before returning.
+
+    Args:
+        cfg (DictConfig): Hydra config for this run (trainer/wandb/data/
+            model settings).
+        run_idx (int): Rerun index; combined with `cfg.seed` to seed this
+            run, and used to select this run's checkpoint/feature-cache
+            subdirectory.
+        default_root_dir (str): Root output directory for the Lightning
+            `Trainer` and CSV logger (the Hydra run's output dir).
+        wandb_group (str): W&B run group name shared by all reruns of this
+            experiment; this run's W&B run name is
+            ``f"{wandb_group}-run{run_idx}"``.
+
+    Returns:
+        tuple[list[dict], str]: `(test_results, checkpoint_dir)`, where
+        `test_results` is the list of per-dataloader metric dicts returned
+        by `Trainer.test`, and `checkpoint_dir` is
+        ``f"{default_root_dir}/checkpoints/run{run_idx}"``.
     """
     seed_everything(cfg.seed + run_idx, workers=True)
 
@@ -381,6 +550,23 @@ def _run_once(
 
 
 def _best_run_score(test_results: list[dict], metric: str) -> float:
+    """Extract a named metric from a `Trainer.test` results list.
+
+    Searches the per-dataloader result dicts in order and returns the value
+    from the first dict that contains `metric`.
+
+    Args:
+        test_results (list[dict]): Per-test-dataloader metric dicts, as
+            returned by `Trainer.test`.
+        metric (str): Metric key to look up (e.g.
+            `"test/test-od-worst-group-task-acc"`).
+
+    Returns:
+        float: The metric's value from the first matching result dict.
+
+    Raises:
+        ValueError: If `metric` is not present in any of the result dicts.
+    """
     for result_dict in test_results:
         if metric in result_dict:
             return result_dict[metric]
@@ -389,6 +575,28 @@ def _best_run_score(test_results: list[dict], metric: str) -> float:
 
 @hydra.main(version_base=None, config_path="configs", config_name="setup")
 def run_experiment(cfg: DictConfig) -> None:
+    """Hydra entrypoint: run two seeded reruns of the configured experiment and report results.
+
+    Logs into W&B, derives a shared `wandb_group` name (`cfg.run_name` +
+    timestamp) for all reruns, then calls `_run_once` for `run_idx` in
+    `[1, 2]` (always exactly two reruns, regardless of `cfg.num_reruns`),
+    scoring each with `cfg.trainer.best_run_metric` (default
+    `"test/test-od-worst-group-task-acc"`) via `_best_run_score` and
+    printing each run's score. If `cfg.num_reruns > 1`, additionally prints
+    the best-scoring run's checkpoint directory and score.
+
+    Args:
+        cfg (DictConfig): Full Hydra config, composed from
+            `configs/setup.yaml` and its defaults (`data`, `spatial`,
+            `optim`, `trainer`, `wandb`, `model`) plus any CLI overrides.
+            Reads `cfg.run_name`, `cfg.seed`, `cfg.num_reruns`,
+            `cfg.trainer.best_run_metric`, and (via `_run_once`) the rest
+            of the config.
+
+    Returns:
+        None. Results are logged to W&B/CSV and printed; nothing is
+        returned to the Hydra runner.
+    """
     default_root_dir = str(Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir))
 
     wandb.login()

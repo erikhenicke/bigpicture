@@ -10,6 +10,14 @@ one tight bar group per decision rule, with the four ablation modes as bars
 within it (each mode has its own color, consistent across decision rules),
 and the shared baseline drawn as a dashed horizontal line across the full
 width.
+
+Three plot families share the module's parsing/color helpers (``split_family``,
+``parse_group_name``, ``context_and_trained``, ``backbone_of``, ``mode_color``):
+``plot_mode_bars``/``plot_mode_legend`` render the per-family ablation-mode bars
+described above; ``plot_context_bars``/``plot_context_legend`` and
+``plot_tradeoff_scatter``/``plot_tradeoff_legend`` render per-backbone summary
+plots (grouped via ``collect_backbones``) comparing image vs. location context.
+``main`` is the CLI entry point that loads the eval YAML and drives all three.
 """
 
 import argparse
@@ -43,7 +51,20 @@ THESIS_IMAGES_DIR = Path.home() / "git" / "thesis" / "images"
 
 def save_figure(fig, figures_dir: Path, filename: str, run_name: str, **savefig_kwargs) -> None:
     """Write `fig` to the repo figures dir and mirror it into the thesis images
-    dir under a ``<run_name>/`` subfolder when the thesis repo is present."""
+    dir under a ``<run_name>/`` subfolder when the thesis repo is present.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure to save.
+        figures_dir (Path): Destination directory for the SVG in this repo.
+        filename (str): Output file name, including extension.
+        run_name (str): Eval-config name, used as the thesis-side subfolder
+            (``THESIS_IMAGES_DIR/run_name/filename``).
+        **savefig_kwargs: Extra keyword arguments forwarded to
+            ``fig.savefig`` (in addition to ``format="svg"``).
+
+    Returns:
+        None
+    """
     out_path = figures_dir / filename
     fig.savefig(out_path, format="svg", **savefig_kwargs)
     print(f"  wrote {out_path}")
@@ -73,7 +94,18 @@ LR_DISPLAY_BY_SUFFIX = {
 
 def split_family(family: str) -> tuple[str, str]:
     """Split a family like "Decision Fusion DenseNet121 SatCLIP" into
-    ``(hr_display, lr_display)``."""
+    ``(hr_display, lr_display)``.
+
+    Args:
+        family (str): Family name of the form "Decision Fusion <HR model>
+            [<suffix>]".
+
+    Returns:
+        tuple[str, str]: ``(hr_display, lr_display)`` display names, resolved
+            via `HR_MODEL_DISPLAY` and `LR_DISPLAY_BY_SUFFIX` (LR falls back
+            to the HR display name if the suffix isn't in
+            `LR_DISPLAY_BY_SUFFIX`).
+    """
     body = family.removeprefix("Decision Fusion ").strip()
     hr_key, _, suffix = body.partition(" ")
     hr_display = HR_MODEL_DISPLAY.get(hr_key, hr_key)
@@ -89,7 +121,18 @@ NO_DOMAIN_HATCH = "//"
 
 
 def _lighten(hex_color: str, amount: float = 0.55) -> tuple[float, float, float]:
-    """Blend a color toward white by `amount` (0 = unchanged, 1 = white)."""
+    """Blend a color toward white by `amount` (0 = unchanged, 1 = white).
+
+    Args:
+        hex_color (str): Color in any matplotlib-recognized format (e.g. a
+            hex string like ``"#1f78c5"``).
+        amount (float): Blend factor in [0, 1]; 0 leaves the color
+            unchanged, 1 turns it fully white. Defaults to 0.55.
+
+    Returns:
+        tuple[float, float, float]: The lightened color as an (r, g, b)
+            tuple with components in [0, 1].
+    """
     r, g, b = mcolors.to_rgb(hex_color)
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     l = l + (1 - l) * amount
@@ -112,7 +155,17 @@ MODE_LEGEND_COLOR = "#888888"
 
 
 def mode_color(base: str | tuple, has_prior: bool) -> tuple[float, float, float]:
-    """Fill color for a mode: the base color for prior, lightened for no prior."""
+    """Fill color for a mode: the base color for prior, lightened for no prior.
+
+    Args:
+        base (str | tuple): Base color (hex string or RGB tuple) for the
+            decision rule.
+        has_prior (bool): Whether the mode uses the class prior; True keeps
+            the base color, False lightens it via `_lighten`.
+
+    Returns:
+        tuple[float, float, float]: The resolved (r, g, b) fill color.
+    """
     return mcolors.to_rgb(base) if has_prior else _lighten(base)
 
 # --- Context-comparison plots (image vs. location context) -------------------
@@ -142,7 +195,17 @@ RULE_COLORS = {
 
 def parse_group_name(name: str) -> tuple[str, str] | None:
     """Split a group name like "Decision Fusion DenseNet121 Trained Sum" into
-    ``(family, decision_rule)``, or ``None`` if it doesn't end in a known rule."""
+    ``(family, decision_rule)``, or ``None`` if it doesn't end in a known rule.
+
+    Args:
+        name (str): Eval-YAML group name, expected to end in one of
+            `DECISION_RULES`.
+
+    Returns:
+        tuple[str, str] | None: ``(family, decision_rule)`` where `family` is
+            `name` with the trailing ``" <rule>"`` removed, or None if `name`
+            doesn't end in a recognized decision rule.
+    """
     for rule in DECISION_RULES:
         if name.endswith(f" {rule}"):
             return name[: -len(rule) - 1], rule
@@ -153,7 +216,19 @@ def context_and_trained(family: str) -> tuple[str, bool] | None:
     """Map a fusion family to its ``(context, trained)`` pair: context is
     "Image" (LR mirrors HR) or "Location" (SatCLIP suffix); ``trained`` marks
     the jointly-trained decision-head variant. ``None`` excludes families
-    matching neither pattern."""
+    matching neither pattern.
+
+    Args:
+        family (str): Family name of the form "Decision Fusion <HR model>
+            [<suffix>]", where suffix is one of "", "Trained", "SatCLIP", or
+            "SatCLIP Trained".
+
+    Returns:
+        tuple[str, bool] | None: ``(context, trained)`` -- `context` is
+            "Image" or "Location", `trained` marks the jointly-trained
+            decision-head variant -- or None if the suffix matches none of
+            the four recognized patterns.
+    """
     body = family.removeprefix("Decision Fusion ").strip()
     _, _, suffix = body.partition(" ")
     if suffix == "":
@@ -168,14 +243,35 @@ def context_and_trained(family: str) -> tuple[str, bool] | None:
 
 
 def backbone_of(family: str) -> str:
-    """Display name of the HR backbone for a fusion family."""
+    """Display name of the HR backbone for a fusion family.
+
+    Args:
+        family (str): Family name of the form "Decision Fusion <HR model>
+            [<suffix>]".
+
+    Returns:
+        str: Display name of the HR backbone, resolved via
+            `HR_MODEL_DISPLAY` (falls back to the raw key if unmapped).
+    """
     body = family.removeprefix("Decision Fusion ").strip()
     hr_key, _, _ = body.partition(" ")
     return HR_MODEL_DISPLAY.get(hr_key, hr_key)
 
 
 def _mean_std(ref: str, run_name: str, metric: str) -> tuple[float, float] | None:
-    """Mean and std (in %) of `metric` across seeds for a run ref, or None."""
+    """Mean and std (in %) of `metric` across seeds for a run ref, or None.
+
+    Args:
+        ref (str): Run reference, e.g. ``"config@exp_key"`` or ``"exp_key"``.
+        run_name (str): Default eval-config name to resolve `ref` against.
+        metric (str): Metric key to load (e.g.
+            ``"test/test-od-worst-group-task-acc"``).
+
+    Returns:
+        tuple[float, float] | None: ``(mean, std)`` of the metric across
+            seeds, scaled to percent, or None if the run directory can't be
+            found or has no values for `metric`.
+    """
     _, exp_key = parse_run_ref(ref, run_name)
     run_dir = find_run_dir(exp_key)
     vals = load_test_metrics(run_dir, [metric])[metric] if run_dir else []
@@ -188,7 +284,20 @@ def collect_backbones(families: dict[str, dict[str, dict]]) -> dict[str, dict]:
     """Group fusion families by backbone, context, and trained flag for the
     summary plots.
 
-    Returns ``{backbone: {"baseline": ref, "contexts": {context: {trained: {rule: group}}}}}``.
+    Args:
+        families (dict[str, dict[str, dict]]): Mapping of family name to
+            ``{decision_rule: group}``, where `group` is an eval-YAML group
+            dict with a ``"runs"`` list ``[baseline, full, no_prior,
+            no_domain, no_prior_no_domain]``. Families whose suffix doesn't
+            match a recognized context/trained pattern (see
+            `context_and_trained`) are skipped.
+
+    Returns:
+        dict[str, dict]: ``{backbone: {"baseline": ref, "contexts":
+            {context: {trained: {rule: group}}}}}`` -- per backbone, the HR
+            baseline run ref (the first family's first rule's baseline run)
+            and the rule groups organized by context ("Image"/"Location")
+            and trained flag.
     """
     backbones: dict[str, dict] = {}
     for family, rule_groups in families.items():
@@ -212,7 +321,25 @@ def plot_context_bars(backbone, info, run_name, translations, figures_dir,
     -- keeping color+hatch meaning unambiguous relative to the per-family
     mode-ablation bars, which already use hatch for a different axis (domain
     on/off). The thesis places the two figures in a grid alongside the DINOv3
-    pair, all four sharing the one legend from ``plot_context_legend``."""
+    pair, all four sharing the one legend from ``plot_context_legend``.
+
+    Args:
+        backbone (str): Display name of the HR backbone, used in output file
+            names.
+        info (dict): One backbone's entry from `collect_backbones`'s return
+            value: ``{"baseline": ref, "contexts": {context: {trained:
+            {rule: group}}}}``.
+        run_name (str): Eval-config name, used to resolve run refs and as
+            the thesis-side subfolder.
+        translations (dict): Metric-name translation table from
+            `results.utils.load_translations`.
+        figures_dir (Path): Directory to write the output SVGs to.
+        label_size (int): Font size for the y-axis label.
+        tick_size (int): Font size for the axis tick labels.
+
+    Returns:
+        None
+    """
     contexts = info["contexts"]
     for trained in (False, True):
         _plot_context_bars_variant(
@@ -223,6 +350,35 @@ def plot_context_bars(backbone, info, run_name, translations, figures_dir,
 
 def _plot_context_bars_variant(backbone, contexts, trained, baseline_ref, run_name,
                                translations, figures_dir, label_size, tick_size) -> None:
+    """Render one WRA context-bar figure for a single trained/frozen variant.
+
+    Draws one bar group per decision rule present in `contexts`, with one
+    bar per context ("Image"/"Location") within the group, the Prior +
+    Domain (``runs[1]``) variant of `WRA_METRIC`, plus the HR-only baseline
+    as a dashed horizontal line/band. Does nothing (writes no file) if there
+    are no rules or contexts to plot. See `plot_context_bars` for the
+    two-variant (frozen/trained) split this implements.
+
+    Args:
+        backbone (str): Display name of the HR backbone, used in the output
+            file name.
+        contexts (dict): ``{context: {trained: {rule: group}}}`` for this
+            backbone (the ``"contexts"`` entry of a `collect_backbones`
+            result).
+        trained (bool): Which decision-head variant to plot: True for
+            jointly-trained heads, False for frozen.
+        baseline_ref (str | None): Run reference for the HR-only baseline,
+            or None to skip the baseline line/band.
+        run_name (str): Eval-config name, used to resolve run refs and as
+            the thesis-side subfolder.
+        translations (dict): Metric-name translation table.
+        figures_dir (Path): Directory to write the output SVG to.
+        label_size (int): Font size for the y-axis label.
+        tick_size (int): Font size for the axis tick labels.
+
+    Returns:
+        None
+    """
     contexts_present = [c for c in CONTEXT_ORDER if c in contexts and trained in contexts[c]]
     rules_present = [r for r in DECISION_RULES if any(r in contexts[c][trained] for c in contexts_present)]
     if not rules_present or not contexts_present:
@@ -291,7 +447,16 @@ def plot_context_legend(run_name, figures_dir, legend_size) -> None:
     context / HR only, laid out in a single horizontal row (``ncol`` equal to
     the handle count forces one row). Shared across all four context-bar
     panels (2 backbones x frozen/trained) since they all use this exact
-    encoding -- see ``_plot_context_bars_variant``."""
+    encoding -- see ``_plot_context_bars_variant``.
+
+    Args:
+        run_name (str): Eval-config name, used as the thesis-side subfolder.
+        figures_dir (Path): Directory to write the output SVG to.
+        legend_size (int): Font size for the legend labels.
+
+    Returns:
+        None
+    """
     handles = [
         Patch(facecolor=CONTEXT_COLORS["Image"], edgecolor="black", linewidth=0.6, label="Image context"),
         Patch(facecolor=CONTEXT_COLORS["Location"], edgecolor="black", linewidth=0.6, label="Location context"),
@@ -312,7 +477,24 @@ def plot_tradeoff_scatter(backbone, info, run_name, translations, figures_dir,
     stays a plain rule-color x context-marker comparison. No per-panel
     legend: the encoding is identical across both backbones and both
     frozen/trained variants, so one legend (``plot_tradeoff_legend``) covers
-    all of them."""
+    all of them.
+
+    Args:
+        backbone (str): Display name of the HR backbone, used in output file
+            names.
+        info (dict): One backbone's entry from `collect_backbones`'s return
+            value: ``{"baseline": ref, "contexts": {context: {trained:
+            {rule: group}}}}``.
+        run_name (str): Eval-config name, used to resolve run refs and as
+            the thesis-side subfolder.
+        translations (dict): Metric-name translation table.
+        figures_dir (Path): Directory to write the output SVGs to.
+        label_size (int): Font size for the axis labels.
+        tick_size (int): Font size for the axis tick labels.
+
+    Returns:
+        None
+    """
     for trained in (False, True):
         _plot_tradeoff_scatter_variant(backbone, info, trained, run_name, translations,
                                        figures_dir, label_size, tick_size)
@@ -320,6 +502,34 @@ def plot_tradeoff_scatter(backbone, info, run_name, translations, figures_dir,
 
 def _plot_tradeoff_scatter_variant(backbone, info, trained, run_name, translations,
                                    figures_dir, label_size, tick_size) -> None:
+    """Render one OOD-accuracy-vs-WRA trade-off scatter for a single
+    trained/frozen variant.
+
+    Plots one errorbar-marker point per (context, decision rule) combination
+    present in `info`, using the Prior + Domain (``runs[1]``) variant of
+    both `OOD_METRIC` (x) and `WRA_METRIC` (y), plus the HR-only baseline as
+    a star marker. Does nothing (writes no file) if no context has data for
+    `trained`. See `plot_tradeoff_scatter` for the two-variant split this
+    implements.
+
+    Args:
+        backbone (str): Display name of the HR backbone, used in the output
+            file name.
+        info (dict): One backbone's entry from `collect_backbones`'s return
+            value: ``{"baseline": ref, "contexts": {context: {trained:
+            {rule: group}}}}``.
+        trained (bool): Which decision-head variant to plot: True for
+            jointly-trained heads, False for frozen.
+        run_name (str): Eval-config name, used to resolve run refs and as
+            the thesis-side subfolder.
+        translations (dict): Metric-name translation table.
+        figures_dir (Path): Directory to write the output SVG to.
+        label_size (int): Font size for the axis labels.
+        tick_size (int): Font size for the axis tick labels.
+
+    Returns:
+        None
+    """
     contexts = info["contexts"]
     contexts_present = [c for c in CONTEXT_ORDER if c in contexts and trained in contexts[c]]
     if not contexts_present:
@@ -370,7 +580,16 @@ def plot_tradeoff_legend(run_name, figures_dir, legend_size) -> None:
     context marker shapes, and the HR-only baseline star -- identical across
     both backbones, so one legend covers every panel. Rule colors and context
     markers are two different encodings, so they're laid out as two rows
-    rather than forced into one."""
+    rather than forced into one.
+
+    Args:
+        run_name (str): Eval-config name, used as the thesis-side subfolder.
+        figures_dir (Path): Directory to write the output SVG to.
+        legend_size (int): Font size for the legend labels.
+
+    Returns:
+        None
+    """
     rule_handles = [
         Line2D([0], [0], marker="s", linestyle="none", markerfacecolor=RULE_COLORS[r],
                markeredgecolor="black", markeredgewidth=0.7, markersize=8, label=RULE_DISPLAY.get(r, r))
@@ -397,7 +616,24 @@ def plot_mode_bars(family, rule_groups, run_name, primary_metrics, translations,
     ablation modes (prior/domain on/off) as bars within it, one figure per metric.
     No per-panel legend: the mode encoding (shade + hatch) and the baseline are
     identical across every family and metric, so one legend (``plot_mode_legend``)
-    covers all of them."""
+    covers all of them.
+
+    Args:
+        family (str): Fusion family name, used in output file names.
+        rule_groups (dict[str, dict]): Mapping of decision rule to its
+            eval-YAML group dict (with a ``"runs"`` list ``[baseline, full,
+            no_prior, no_domain, no_prior_no_domain]``).
+        run_name (str): Eval-config name, used to resolve run refs and as
+            the thesis-side subfolder.
+        primary_metrics (list[str]): Metric keys to render one figure per.
+        translations (dict): Metric-name translation table.
+        figures_dir (Path): Directory to write the output SVGs to.
+        label_size (int): Font size for the y-axis label.
+        tick_size (int): Font size for the axis tick labels.
+
+    Returns:
+        None
+    """
     rules_present = [r for r in DECISION_RULES if r in rule_groups]
     if not rules_present:
         return
@@ -468,7 +704,16 @@ def plot_mode_legend(run_name, figures_dir, legend_size) -> None:
     """Standalone legend for the per-family mode-ablation bars: the four
     prior/domain modes (shade + hatch, neutral swatch color since hue is the
     rule in the actual chart) plus the HR-only baseline -- identical across
-    every family and metric, so one legend covers all of them."""
+    every family and metric, so one legend covers all of them.
+
+    Args:
+        run_name (str): Eval-config name, used as the thesis-side subfolder.
+        figures_dir (Path): Directory to write the output SVG to.
+        legend_size (int): Font size for the legend labels.
+
+    Returns:
+        None
+    """
     handles = [
         Patch(facecolor=mode_color(MODE_LEGEND_COLOR, has_prior),
               edgecolor="black", linewidth=0.6, hatch=hatch, label=lbl)
@@ -483,6 +728,19 @@ def plot_mode_legend(run_name, figures_dir, legend_size) -> None:
 
 
 def main() -> None:
+    """CLI entry point: parse args and generate every decision-fusion plot.
+
+    Loads the eval YAML given as the positional argument (default
+    ``decision_fusion.yaml``), parses each group's name into (family,
+    decision_rule) via `parse_group_name`, then writes the per-family
+    mode-ablation bar plots (`plot_mode_bars`, WRA metric only unless
+    ``--all``) and their shared legend, plus the per-backbone context bar
+    (`plot_context_bars`) and trade-off scatter (`plot_tradeoff_scatter`)
+    summary plots and their shared legends, to ``figures/<eval_name>/``.
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description="Decision-fusion mode comparison plots")
     parser.add_argument(
         "eval_yaml",

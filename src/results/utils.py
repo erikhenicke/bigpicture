@@ -1,5 +1,22 @@
 """Shared helpers for loading trained runs (checkpoints + hydra config) and for
-resolving eval-YAML run references to their log directories and display names."""
+resolving eval-YAML run references to their log directories and display names.
+
+Checkpoint/config loading: ``find_best_checkpoints`` and ``load_hydra_config``
+load a run's per-seed checkpoints and its Hydra config from a log directory;
+``find_run_dir`` resolves an experiment key to its most recent log directory.
+
+Metrics loading: ``load_seed_test_metrics`` reads one seed's flat test-metric
+map (preferring the rerun output over the training CSV); ``load_run_metrics``
+averages that across every seed of a run.
+
+Eval-YAML run references: ``parse_run_ref`` splits a ``"config@exp_key"`` (or
+bare ``"exp_key"``) reference; ``load_run_configs`` loads the referenced run
+config YAMLs; ``resolve_experiments`` maps each run reference to its resolved
+experiment definition (including only the overrides that differ from the eval
+YAML's own config); ``load_translations`` loads the metric/model/param
+display-name translations; ``format_experiment_name`` turns a resolved
+experiment definition into a human-readable (optionally LaTeX) display name.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +40,13 @@ def find_best_checkpoints(run_dir: Path) -> list[Path]:
     Prefers ``late-fusion-*.ckpt`` (run_experiment.py's ModelCheckpoint filename),
     falling back to ``last.ckpt``. Seed dirs with neither are skipped. Returned in
     sorted ``run*`` order.
+
+    Args:
+        run_dir (Path): Run's top-level log directory, containing
+            ``checkpoints/run*``.
+
+    Returns:
+        list[Path]: Best checkpoint path per seed, in sorted ``run*`` order.
     """
     checkpoints = []
     ckpt_root = run_dir / "checkpoints"
@@ -39,7 +63,19 @@ def find_best_checkpoints(run_dir: Path) -> list[Path]:
 
 def load_hydra_config(run_dir: Path):
     """Load ``.hydra/config.yaml`` from a run directory, backfilling trainer fields
-    that ``make_model`` reads but older runs didn't persist."""
+    that ``make_model`` reads but older runs didn't persist.
+
+    Args:
+        run_dir (Path): Run's top-level log directory.
+
+    Returns:
+        omegaconf.DictConfig: The loaded Hydra config, with any missing
+            ``trainer.alternating_freeze``, ``trainer.alternating_freeze_period``,
+            and ``trainer.branch_ablation`` fields backfilled with their defaults.
+
+    Raises:
+        FileNotFoundError: If ``run_dir/.hydra/config.yaml`` does not exist.
+    """
     config_path = Path(run_dir) / ".hydra" / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"No .hydra/config.yaml found in {run_dir}")
@@ -56,7 +92,20 @@ def load_hydra_config(run_dir: Path):
 
 
 def find_run_dir(exp_key: str) -> Path | None:
-    """Return the most recent log directory for the given experiment key."""
+    """Return the most recent log directory for the given experiment key.
+
+    Searches every ``LOG_RUNS/<date>/`` directory for entries named
+    ``train_<exp_key>-*`` and returns the one with the lexicographically latest
+    (date dir, run dir) pair.
+
+    Args:
+        exp_key (str): Experiment key, matched against directories named
+            ``train_<exp_key>-*``.
+
+    Returns:
+        Path | None: Path to the most recent matching run directory, or None if
+            no run directory matches.
+    """
     job_name = f"train_{exp_key}"
     prefix = job_name + "-"
 
@@ -76,6 +125,16 @@ def find_run_dir(exp_key: str) -> Path | None:
 
 
 def parse_run_ref(ref: str, default_config: str) -> tuple[str, str]:
+    """Split a run reference into its run-config name and experiment key.
+
+    Args:
+        ref (str): Run reference, either ``"config_name@exp_key"`` or a bare
+            ``"exp_key"``.
+        default_config (str): Config name to use when ``ref`` has no ``@`` prefix.
+
+    Returns:
+        tuple[str, str]: ``(config_name, exp_key)``.
+    """
     if "@" in ref:
         config_name, exp_key = ref.split("@", 1)
         return config_name, exp_key
@@ -83,6 +142,16 @@ def parse_run_ref(ref: str, default_config: str) -> tuple[str, str]:
 
 
 def load_run_configs(config_names: set[str]) -> dict[str, dict]:
+    """Load and parse the run config YAML for each given config name.
+
+    Args:
+        config_names (set[str]): Run-config names (YAML stems under
+            ``RUN_CONFIG_DIR``) to load.
+
+    Returns:
+        dict[str, dict]: Config name -> parsed YAML dict, for names whose file
+            exists; missing files are skipped with a warning printed to stderr.
+    """
     configs: dict[str, dict] = {}
     for name in config_names:
         path = RUN_CONFIG_DIR / f"{name}.yaml"
@@ -99,6 +168,28 @@ def resolve_experiments(
     run_configs: dict[str, dict],
     default_config: str,
 ) -> dict[str, dict]:
+    """Resolve every run reference used across a set of eval-YAML groups to its
+    experiment definition.
+
+    For each reference, merges its run config's ``global_overrides`` (restricted
+    to the keys that differ from ``default_config``'s own ``global_overrides``)
+    with the experiment's own ``overrides``, so the resulting display overrides
+    show only what's non-default relative to the eval YAML's own config.
+
+    Args:
+        groups (list[dict]): Eval-YAML groups, each with a ``"runs"`` list of run
+            references.
+        run_configs (dict[str, dict]): Config name -> parsed run config YAML (see
+            ``load_run_configs``).
+        default_config (str): Run-config name used to determine which
+            ``global_overrides`` count as "different from default".
+
+    Returns:
+        dict[str, dict]: Run reference -> resolved experiment definition (the
+            experiment's own fields plus a merged ``"overrides"`` dict, or None
+            if there are none). References whose config or experiment key can't
+            be found are omitted (with a warning printed to stderr).
+    """
     default_global = run_configs.get(default_config, {}).get("global_overrides", {})
     resolved: dict[str, dict] = {}
     for group in groups:
@@ -129,6 +220,15 @@ def load_seed_test_metrics(seed_dir: Path) -> dict[str, float] | None:
     the only source of the per-class / top-5 keys. Falls back to the wide training
     ``metrics.csv`` (its final non-empty ``test/`` row). Returns ``None`` if neither
     file yields test metrics.
+
+    Args:
+        seed_dir (Path): Seed's run directory (``run{i}``), containing
+            ``version_0/``.
+
+    Returns:
+        dict[str, float] | None: Metric name -> value map, or None if neither
+            ``version_0/metrics_rerun.csv`` nor ``version_0/metrics.csv`` yields
+            test metrics.
     """
     rerun = seed_dir / "version_0" / "metrics_rerun.csv"
     if rerun.exists():
@@ -155,6 +255,13 @@ def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
 
     Each seed is loaded via :func:`load_seed_test_metrics`, so per-seed values come
     from ``metrics_rerun.csv`` when present, otherwise ``metrics.csv``.
+
+    Args:
+        run_dir (Path | None): Run's top-level log directory, or None.
+
+    Returns:
+        dict[str, float]: Metric name -> mean value across seeds that have it;
+            empty dict if ``run_dir`` is None or no seed has any test metrics.
     """
     if run_dir is None:
         return {}
@@ -169,6 +276,13 @@ def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
 
 
 def load_translations() -> dict:
+    """Load the metric/model/param display-name translations YAML.
+
+    Returns:
+        dict: Parsed ``translations.yaml`` with (at least) ``"models"`` and
+            ``"params"`` keys, or ``{"models": {}, "params": {}}`` if the file
+            doesn't exist.
+    """
     translations: dict = {"models": {}, "params": {}}
     if TRANSLATIONS_FILE.exists():
         with TRANSLATIONS_FILE.open() as f:
@@ -187,12 +301,23 @@ def format_experiment_name(
     """Format experiment name using translations + optional group-level overrides.
 
     Args:
-        run_ref: Run reference (e.g., "config@exp_key" or just "exp_key")
-        run_experiments: Dict mapping run_ref to experiment definitions
-        translations: Dict with "models" and "params" sections for global translations
-        latex: Use LaTeX versions if available
-        model_overrides: Group-level model display name overrides {model_key: display_name}
-        param_overrides: Group-level param display name overrides {param_key: display_name}
+        run_ref (str): Run reference (e.g., ``"config@exp_key"`` or just ``"exp_key"``).
+        run_experiments (dict): Run reference -> resolved experiment definition
+            (see ``resolve_experiments``).
+        translations (dict): Dict with ``"models"`` and ``"params"`` sections for
+            global display-name translations (see ``load_translations``).
+        latex (bool): Use LaTeX display strings where available, instead of plain text.
+        model_overrides (dict | None): Group-level model display name overrides
+            (``{model_key: display_name}``), checked before the global translations.
+        param_overrides (dict | None): Group-level param display name overrides
+            (``{param_key: display_name_or_dict}``); a non-dict value
+            unconditionally replaces (or, if falsy, hides) the param's display, a
+            dict value is merged into the global translation for that param.
+
+    Returns:
+        str: Comma-joined display name, e.g. ``"FiLM, λ=0.2"``. Falls back to a
+            title-cased version of the experiment key if ``run_ref`` is not in
+            ``run_experiments``.
     """
     exp_def = run_experiments.get(run_ref)
     exp_key = run_ref.split("@", 1)[1] if "@" in run_ref else run_ref

@@ -23,6 +23,13 @@ in the run's canonical per-seed metrics file rather than rewriting it: it writes
 to ``metrics_rerun.csv`` when that file exists (the long-format rerun output that
 ``results/utils.load_seed_test_metrics`` prefers), otherwise to the training
 ``metrics.csv``.
+
+Key functions: ``build_eval_loaders`` builds the (unaugmented) train/test
+loaders; ``cache_lr_features`` captures the LR domain head's input features via a
+forward hook; ``train_head`` retrains the (reinitialized) head on those cached
+features; ``evaluate_loader`` computes LR-domain metrics with the retrained head;
+``update_metrics_file`` writes the updated metrics back into the run's metrics
+file; ``main`` drives the per-seed loop end to end.
 """
 
 import argparse
@@ -56,6 +63,17 @@ def build_eval_loaders(cfg, run_idx: int) -> Tuple[torch.utils.data.DataLoader, 
     (augment off) for the train split too: the probe caches LR features once, so
     they must be deterministic. A single dataset is built and ``get_subset`` is
     called per split, matching the original eval construction.
+
+    Args:
+        cfg (omegaconf.DictConfig): Hydra run config (see
+            ``results.utils.load_hydra_config``).
+        run_idx (int): Seed/run index, forwarded as ``feature_run_idx`` when the
+            data source is ``"features"``.
+
+    Returns:
+        tuple[torch.utils.data.DataLoader, list[torch.utils.data.DataLoader]]:
+            ``(train_loader, test_loaders)``, both unshuffled, built from
+            ``cfg.data.train_split`` and ``cfg.data.test_splits`` respectively.
     """
     sc = _parse_spatial_cfg(cfg)
     spatial_kwargs = dict(
@@ -95,6 +113,16 @@ def build_eval_loaders(cfg, run_idx: int) -> Tuple[torch.utils.data.DataLoader, 
 
 
 def move_batch(x: Dict[str, torch.Tensor], device: torch.device) -> Dict[str, torch.Tensor]:
+    """Move every tensor value of a batch input dict to ``device``, leaving non-tensors as is.
+
+    Args:
+        x (dict[str, torch.Tensor]): Model input dict (e.g. keys like ``"rgb"``,
+            ``"landsat"``, ``"coords"``).
+        device (torch.device): Target device.
+
+    Returns:
+        dict[str, torch.Tensor]: Same keys, tensor values moved to ``device``.
+    """
     return {k: v.to(device) if torch.is_tensor(v) else v for k, v in x.items()}
 
 
@@ -105,6 +133,19 @@ def cache_lr_features(module, loader, device) -> Tuple[torch.Tensor, torch.Tenso
     feature vector -- for every model type without needing to know how each model
     routes its branches. Only samples whose domain target is in-label-space
     (``>= 0``; Asia maps to -1 under Leave-Asia-Out) are kept.
+
+    Args:
+        module (MultiScaleClassificationModule): Trained module in eval mode;
+            must expose ``model.lr_domain_classifier``.
+        loader (torch.utils.data.DataLoader): Data loader yielding
+            ``(x, y, metadata)`` batches.
+        device (torch.device): Device to run the forward pass on.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: ``(features, targets)`` — the cached
+            LR domain-head input features, shape
+            ``(num_valid_samples, feature_dim)``, and the corresponding
+            domain-label targets, shape ``(num_valid_samples,)``, both on CPU.
     """
     captured: Dict[str, torch.Tensor] = {}
 
@@ -140,7 +181,20 @@ def train_head(
     epochs: int,
     batch_size: int,
 ) -> None:
-    """Retrain ``head`` (a reinitialized LR domain classifier) on cached features."""
+    """Retrain ``head`` (a reinitialized LR domain classifier) on cached features.
+
+    Args:
+        head (torch.nn.Module): LR domain classifier head to retrain in place;
+            its parameters are reset before training.
+        features (torch.Tensor): Cached LR domain-head input features, shape
+            ``(num_samples, feature_dim)`` (see ``cache_lr_features``).
+        targets (torch.Tensor): Domain-label targets, shape ``(num_samples,)``.
+        device (torch.device): Device to run training on.
+        lr (float): Adam learning rate.
+        coeff (float): Multiplier applied to the cross-entropy loss.
+        epochs (int): Number of training epochs over the cached features.
+        batch_size (int): Mini-batch size.
+    """
     head.reset_parameters()
     optimizer = torch.optim.Adam(head.parameters(), lr=lr)
     criterion = torch.nn.CrossEntropyLoss()
@@ -168,6 +222,19 @@ def evaluate_loader(module, loader, loader_name: str, device) -> Dict[str, float
     (``compute_final_lr_domain_metrics``), so the metric keys match exactly. The
     held-out region (Asia under Leave-Asia-Out) has no in-label-space targets, so
     that loader yields an empty dict and is skipped.
+
+    Args:
+        module (MultiScaleClassificationModule): Trained module (with the
+            retrained LR domain head) in eval mode.
+        loader (torch.utils.data.DataLoader): Data loader yielding
+            ``(x, y, metadata)`` batches.
+        loader_name (str): Split/loader name, used as the
+            ``test/<loader_name>-*`` key prefix in the returned metrics.
+        device (torch.device): Device to run the forward pass on.
+
+    Returns:
+        dict[str, float]: ``test/<loader_name>-lr-domain-acc[-<region>]`` metric
+            values, or an empty dict if the loader has no in-label-space samples.
     """
     state = make_eval_state()
     module.eval()
@@ -194,6 +261,18 @@ def update_metrics_file(seed_dir: Path, metrics: Dict[str, float]) -> Path:
     otherwise the training ``metrics.csv`` (wide format -- the final test row is
     updated in place). Only the keys in ``metrics`` are touched; everything else
     is preserved.
+
+    Args:
+        seed_dir (Path): Seed's run directory (``run{run_idx}``), containing
+            ``version_0/``.
+        metrics (dict[str, float]): LR-domain metric name -> value map to write
+            (see ``evaluate_loader``).
+
+    Returns:
+        Path: Path to the updated (or newly created) metrics file --
+            ``version_0/metrics_rerun.csv`` if it existed, else
+            ``version_0/metrics.csv`` if it existed, else a freshly created
+            ``version_0/metrics_rerun.csv``.
     """
     version_dir = seed_dir / "version_0"
     rerun_path = version_dir / "metrics_rerun.csv"
@@ -237,6 +316,15 @@ def update_metrics_file(seed_dir: Path, metrics: Dict[str, float]) -> Path:
 
 
 def main() -> None:
+    """CLI entry point: retrain the LR domain head of every seed and update its metrics.
+
+    Parses ``--config``/``--run-name`` plus head-training hyperparameters, loads
+    the run config and checkpoints, then for each seed checkpoint: freezes the
+    whole model except the LR domain head, caches frozen LR features on the train
+    split (``cache_lr_features``), retrains the head (``train_head``), evaluates
+    the LR-domain metrics on the test splits (``evaluate_loader``), and writes
+    them back (``update_metrics_file``). Prints a final mean-over-seeds summary.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=str, required=True, help="Path to run config YAML (e.g. src/train/configs/run/feature_fusion.yaml)")
     parser.add_argument("--run-name", type=str, required=True, help="Experiment key to probe (e.g. film_no_domain)")

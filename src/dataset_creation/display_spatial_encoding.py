@@ -1,8 +1,32 @@
-"""Display preprocessed FMoW RGB + Landsat images alongside spatial encoding tensors.
+"""
+display_spatial_encoding.py
+
+Display preprocessed FMoW RGB + Landsat images alongside spatial encoding tensors.
 
 Loads .pt files directly from the preprocessed cache (no WILDS dependency) and
 computes spatial tensors from the metadata CSV. Shows a multi-panel figure per
 sample: RGB, Landsat, coordinate grids (HR/LR), and overlap mask.
+
+Standalone reimplementation (for visualization only) of the spatial-encoding
+logic in `src/dataset/fmow_multiscale_dataset.py`
+(`FMoWMultiscaleDataset._build_spatial_tensors`, coordinate grids and overlap
+mask) and `src/models/components/spatial_encoding.py`
+(`SpatialEncoding.forward`, Fourier features).
+
+Functions:
+    build_coord_grids: Build the normalized HR/LR pixel-coordinate grids for
+        one sample.
+    build_fourier_channels: Compute raw sin/cos Fourier features from a
+        coordinate grid (before the learned projection `SpatialEncoding`
+        would apply).
+    build_overlap_mask: Build the binary/Gaussian mask marking where the HR
+        crop overlaps the LR image.
+    display: Main plotting loop; for each sample builds the requested panels
+        (RGB, Landsat, coord grids, overlap mask, Fourier channel grid) and
+        shows them interactively.
+    _load_pt / _unnorm / _rgb_to_display / _landsat_to_display / _get_index:
+        Helpers for loading `.pt` tensors, reversing normalization for
+        display, and parsing sample indices from filenames.
 
 Usage:
     uv run python src/dataset_creation/display_spatial_encoding.py \
@@ -44,6 +68,14 @@ LANDSAT_STD = torch.tensor([0.039894334971904755, 0.049978554248809814, 0.068796
 
 
 def _load_pt(path: Path) -> torch.Tensor:
+    """Load a `.pt` tensor from disk onto CPU.
+
+    Args:
+        path (Path): Path to the `.pt` file.
+
+    Returns:
+        torch.Tensor: The loaded tensor.
+    """
     try:
         return torch.load(path, map_location="cpu", weights_only=False)
     except TypeError:
@@ -51,21 +83,64 @@ def _load_pt(path: Path) -> torch.Tensor:
 
 
 def _unnorm(tensor, mean, std):
+    """Reverse channel-wise normalization: `tensor * std + mean`.
+
+    Args:
+        tensor (torch.Tensor): Normalized image tensor, shape (C, H, W).
+        mean (torch.Tensor): Per-channel mean used for normalization, shape
+            (>=C,); only the first C entries are used.
+        std (torch.Tensor): Per-channel standard deviation used for
+            normalization, shape (>=C,); only the first C entries are used.
+
+    Returns:
+        torch.Tensor: Unnormalized tensor, same shape as `tensor`.
+    """
     c = tensor.shape[0]
     return tensor * std[:c].view(c, 1, 1) + mean[:c].view(c, 1, 1)
 
 
 def _rgb_to_display(tensor):
+    """Convert a normalized RGB tensor to a displayable image.
+
+    Args:
+        tensor (torch.Tensor): Normalized RGB tensor, shape (3, H, W), dtype float.
+
+    Returns:
+        torch.Tensor: Displayable RGB image, shape (H, W, 3), values in [0, 1].
+    """
     return _unnorm(tensor, RGB_MEAN, RGB_STD).clamp(0, 1).permute(1, 2, 0)
 
 
 def _landsat_to_display(tensor):
+    """Convert a normalized Landsat tensor to a true-color image for display.
+
+    Reverses LANDSAT_MEAN/LANDSAT_STD normalization, takes the first 3 bands
+    (stored in BGR order), reorders them to RGB, and divides by 0.3 (clamped
+    to [0, 1]) to bring typical reflectance values into displayable range.
+
+    Args:
+        tensor (torch.Tensor): Normalized Landsat tensor, shape (6, H, W), dtype float.
+
+    Returns:
+        torch.Tensor: Displayable RGB image, shape (H, W, 3), values in [0, 1].
+    """
     raw = _unnorm(tensor, LANDSAT_MEAN, LANDSAT_STD)
     rgb = raw[:3][[2, 1, 0]]
     return (rgb / 0.3).clamp(0, 1).permute(1, 2, 0)
 
 
 def _get_index(path: Path) -> int | None:
+    """Parse the sample index out of a `.pt` filename.
+
+    Recognizes `image_<idx>.pt` (Landsat) and `rgb_img_<idx>.pt` (RGB) filenames.
+
+    Args:
+        path (Path): Path whose stem is checked against the known prefixes.
+
+    Returns:
+        int | None: The parsed sample index, or None if the filename doesn't
+            match either known prefix or the suffix isn't an integer.
+    """
     stem = path.stem
     for prefix in ("image_", "rgb_img_"):
         if stem.startswith(prefix):
@@ -77,6 +152,28 @@ def _get_index(path: Path) -> int | None:
 
 
 def build_coord_grids(img_span_km: float, lr_span_km: float):
+    """Build normalized HR/LR pixel-coordinate grids for one sample.
+
+    Reimplements the coordinate-grid construction in
+    `FMoWMultiscaleDataset._build_spatial_tensors` / `__init__` for
+    standalone visualization: each grid holds (x, y) pixel-center
+    coordinates (pixel index times ground resolution, in meters), shifted to
+    center on the LR image and scaled by half the LR image's physical extent
+    so LR coordinates land in [-1, 1]. The HR grid uses the same
+    scale/center but its own (finer) ground resolution plus an offset that
+    aligns it with the region of the LR image it was cropped from.
+
+    Args:
+        img_span_km (float): Physical width/height of the HR (high-resolution)
+            image, in kilometers.
+        lr_span_km (float): Physical width/height of the LR (low-resolution)
+            image, in kilometers.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: `(coord_grid_hr, coord_grid_lr)`,
+            each of shape (2, IMG_SIZE, IMG_SIZE) with channel 0 = x,
+            channel 1 = y, dtype float32.
+    """
     S = IMG_SIZE
     lr_res = lr_span_km * 1000.0 / S
     hr_res = img_span_km * 1000.0 / S
@@ -99,10 +196,24 @@ FOURIER_COMPONENT_LABELS = ["sin(f·x)", "cos(f·x)", "sin(f·y)", "cos(f·y)"]
 
 
 def build_fourier_channels(coord_grid: torch.Tensor, num_bands: int) -> torch.Tensor:
-    """Compute raw Fourier channels (before learned projection) from a coordinate grid.
+    """Compute raw Fourier positional-encoding channels from a coordinate grid.
 
-    Returns (4, num_bands, H, W): dim 0 = component [sin_x, cos_x, sin_y, cos_y],
-    dim 1 = frequency band.
+    Standalone (unbatched, unprojected) version of the sin/cos feature
+    computation in `SpatialEncoding.forward`: for each of `num_bands`
+    frequencies `pi * 2**b`, computes sin/cos of `freq * x` and `freq * y`.
+    Unlike `SpatialEncoding`, this does not apply the learned 1x1-conv
+    projection to `fourier_proj_dim` channels.
+
+    Args:
+        coord_grid (torch.Tensor): Coordinate grid, shape (2, H, W) with
+            channel 0 = x, channel 1 = y (as produced by `build_coord_grids`).
+        num_bands (int): Number of frequency bands `L`.
+
+    Returns:
+        torch.Tensor: Shape (4, num_bands, H, W), dtype float32. Dim 0
+            indexes the component in order [sin(f·x), cos(f·x), sin(f·y),
+            cos(f·y)] (see `FOURIER_COMPONENT_LABELS`), dim 1 indexes the
+            frequency band.
     """
     freqs = math.pi * (2.0 ** torch.arange(num_bands, dtype=torch.float32))
     x, y = coord_grid[0:1], coord_grid[1:2]  # (1, H, W)
@@ -116,6 +227,28 @@ def build_fourier_channels(coord_grid: torch.Tensor, num_bands: int) -> torch.Te
 
 
 def build_overlap_mask(img_span_km: float, lr_span_km: float, mask_type: str):
+    """Build the mask marking where the HR crop overlaps the LR image, for one sample.
+
+    Reimplements the overlap-mask construction in
+    `FMoWMultiscaleDataset._build_spatial_tensors` for standalone
+    visualization. `ratio = img_span_km / lr_span_km` is the fraction of the
+    LR image's extent covered by the HR crop; the mask is 1 within that
+    square region and 0 outside it (`mask_type="binary"`), or a Gaussian
+    bump with `sigma = ratio / 2` centered on the image
+    (`mask_type="gaussian"`).
+
+    Args:
+        img_span_km (float): Physical width/height of the HR (high-resolution)
+            image, in kilometers.
+        lr_span_km (float): Physical width/height of the LR (low-resolution)
+            image, in kilometers.
+        mask_type (str): "gaussian" for a smooth Gaussian mask, anything else
+            for a hard-edged binary mask.
+
+    Returns:
+        torch.Tensor: Mask of shape (IMG_SIZE, IMG_SIZE), dtype float32,
+            values in [0, 1].
+    """
     S = IMG_SIZE
     ratio = img_span_km / lr_span_km
     lin = torch.linspace(-1, 1, S)
@@ -132,6 +265,35 @@ def build_overlap_mask(img_span_km: float, lr_span_km: float, mask_type: str):
 
 def display(pairs, span_lookup, lr_span_km, show_coord, show_mask, mask_type,
             show_fourier, fourier_bands):
+    """Interactively display RGB/Landsat images with optional spatial-encoding panels.
+
+    For each `(idx, rgb_path, ls_path)` in `pairs`, always shows the RGB and
+    Landsat true-color images. If `show_coord` is set, adds HR/LR coordinate
+    grid panels (see `build_coord_grids`); if `show_mask` is set, adds the
+    overlap mask panel (see `build_overlap_mask`); if `show_fourier` is set
+    (and the sample's span is known), replaces the simple panel row with a
+    grid showing the sin/cos Fourier channels (see `build_fourier_channels`)
+    for both the HR and LR coordinate grids, one row per component/branch
+    and one column per frequency band. Pauses for Enter between samples;
+    entering "q" stops early. Samples whose index isn't in `span_lookup`
+    skip the coord-grid, overlap-mask, and Fourier panels (span unknown).
+
+    Args:
+        pairs (list[tuple[int, Path, Path]]): `(sample_idx, rgb_path,
+            landsat_path)` triples to display, in order.
+        span_lookup (dict[int, float]): Sample index -> HR image span in
+            kilometers (`img_span_km`), used to size the coordinate grids,
+            overlap mask, and Fourier channels.
+        lr_span_km (float): Physical width/height of the LR image, in
+            kilometers, shared across all samples.
+        show_coord (bool): Whether to show HR/LR coordinate grid panels.
+        show_mask (bool): Whether to show the overlap mask panel.
+        mask_type (str): "gaussian" or "binary", passed to `build_overlap_mask`.
+        show_fourier (bool): Whether to show the Fourier positional-encoding
+            channel grid instead of the simple panel row.
+        fourier_bands (int): Number of Fourier frequency bands to compute
+            and display, passed to `build_fourier_channels`.
+    """
     plt.ion()
 
     for pos, (idx, rgb_path, ls_path) in enumerate(pairs, start=1):

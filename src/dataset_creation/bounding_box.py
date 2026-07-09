@@ -1,7 +1,24 @@
 """
 bounding_box.py
 
-This module provides a bounding box class that holds four coordinates forming a rectangle.
+Defines `BoundingBox`, an immutable, axis-aligned geographic bounding box
+described by its four corner (longitude, latitude) coordinates, along with
+the helper functions used to parse and validate it from FMoW's raw location
+strings.
+
+Classes:
+    BoundingBox: Frozen dataclass holding the four corners; its `from_raw`
+        classmethod parses a raw FMoW location string into canonical form.
+
+Functions:
+    lies_any_lon_within: Check whether any corner's longitude falls in a
+        given range. Used by `contains_pole`.
+    contains_pole: Detect boxes that contain or intersect a pole, used by
+        `BoundingBox.from_raw` to reject invalid boxes.
+    crosses_180th_meridian: Detect boxes that cross the antimeridian, used by
+        `BoundingBox.from_raw` to decide whether to shift the box.
+    shift_bounding_box_lon: Shift a box's longitudes by a fixed amount, used
+        by `BoundingBox.from_raw` to normalize antimeridian-crossing boxes.
 """
 
 from typing import Self
@@ -12,7 +29,14 @@ import warnings
 
 @dataclass(frozen=True)
 class BoundingBox:
-    """Bounding box describes a geographical regions with four coordinates forming a rectangle."""
+    """Axis-aligned geographic bounding box described by its four corners.
+
+    Attributes:
+        north_west (tuple[float, float]): (longitude, latitude) of the north-west corner.
+        north_east (tuple[float, float]): (longitude, latitude) of the north-east corner.
+        south_east (tuple[float, float]): (longitude, latitude) of the south-east corner.
+        south_west (tuple[float, float]): (longitude, latitude) of the south-west corner.
+    """
     north_west: tuple[float, float]
     north_east: tuple[float, float]
     south_east: tuple[float, float]
@@ -29,6 +53,24 @@ class BoundingBox:
             4. South west
 
         and any additional points after the first four are duplicates.
+
+        Args:
+            raw_location (str): Raw location string containing whitespace-separated
+                "lon lat" coordinate pairs, expected to list at least four points in
+                north_west, north_east, south_east, south_west order, optionally
+                followed by duplicates of those same four points.
+
+        Returns:
+            Self: Canonical bounding box built from the first four points (shifted
+                to be centered on the 0th meridian if the box crosses the 180th
+                meridian).
+
+        Raises:
+            ValueError: If fewer than 4 coordinate pairs are found, if a point after
+                the first four is not one of the first four (inconsistent bounding
+                box), if the box contains or intersects a pole, or if the first four
+                points do not form an axis-aligned rectangle in north_west,
+                north_east, south_east, south_west order.
         """
         points = re.findall(r"[-\d.]+ [-\d.]+", raw_location)
         coords: list[tuple[float, float]] = [
@@ -87,16 +129,37 @@ class BoundingBox:
         )
 
     def as_list(self) -> list[tuple[float, float]]:
-        """Return the four points in north_west, north_east, south_east, south_west order."""
+        """Return the four points in north_west, north_east, south_east, south_west order.
+
+        Returns:
+            list[tuple[float, float]]: The four (longitude, latitude) corner points.
+        """
         return [self.north_west, self.north_east, self.south_east, self.south_west]
 
     def __iter__(self):
+        """Iterate over the four corners in north_west, north_east, south_east, south_west order.
+
+        Returns:
+            Iterator[tuple[float, float]]: Iterator over the four corner points.
+        """
         return iter(self.as_list())
 
     def get_width_deg(self) -> float:
+        """Compute the box's width as a longitude span.
+
+        Returns:
+            float: Absolute difference in longitude (degrees) between the
+                north_east and north_west corners.
+        """
         return abs(self.north_east[0] - self.north_west[0])
 
     def get_height_deg(self) -> float:
+        """Compute the box's height as a latitude span.
+
+        Returns:
+            float: Absolute difference in latitude (degrees) between the
+                north_west and south_west corners.
+        """
         return abs(self.north_west[1] - self.south_west[1])
 
 
@@ -104,12 +167,12 @@ def lies_any_lon_within(coords: list[tuple[float, float]], lower: float, upper: 
     """Checks if any longitude of the given coordinates (lon, lat) lies between lower and upper.
 
     Args:
-        coords (list): List of coordinates (lon, lat) tuples.
+        coords (list[tuple[float, float]]): List of (longitude, latitude) coordinate tuples.
         lower (float): Lower bound of the longitude sector to check.
         upper (float): Upper bound of the longitude sector to check.
 
     Returns:
-        bool: True, if any coordinates longitude lies within the range. 
+        bool: True, if any coordinates longitude lies within the range.
     """
     return any(lower <= coord[0] <= upper for coord in coords)
 
@@ -118,10 +181,11 @@ def contains_pole(bounding_box: list[tuple[float, float]]) -> bool:
     """Checks if the given bounding box contains or intersects the north or south pole.
 
     Args:
-        bounding_box: List of four coordinate tuples (lon, lat) describing a rectangle.
+        bounding_box (list[tuple[float, float]]): List of four (lon, lat) coordinate
+            tuples describing a rectangle.
 
     Returns:
-        bool: True, if north or south pole is contained in the box, 
+        bool: True, if north or south pole is contained in the box,
               i.e. each corner lies in a different longitude sector.
     """
     return (
@@ -135,14 +199,16 @@ def contains_pole(bounding_box: list[tuple[float, float]]) -> bool:
 def crosses_180th_meridian(bounding_box: list[tuple[float, float]]) -> bool:
     """Checks if the bounding box crosses the 180th meridian, but is canonical besides that.
 
-    Assumptions taken: 
+    Assumptions taken:
         - Bounding box does not span more than 20 deg in longitude.
 
     Args:
-        bounding_box: List of four coordinate tuples (lon, lat) describing a rectangle.
+        bounding_box (list[tuple[float, float]]): List of four (lon, lat) coordinate
+            tuples describing a rectangle, in north_west, north_east, south_east,
+            south_west order.
 
     Returns:
-        bool: True, if the bounding box crosses the 180th meridian and is canonical. 
+        bool: True, if the bounding box crosses the 180th meridian and is canonical.
     """
 
     c1, c2, c3, c4 = bounding_box
@@ -164,11 +230,18 @@ def crosses_180th_meridian(bounding_box: list[tuple[float, float]]) -> bool:
 def shift_bounding_box_lon(bounding_box: list[tuple[float, float]], s: float) -> list[tuple[float, float]]:
     """Shift bounding box by s degree longitude.
 
+    Shifts the west-side corners (c1, c4) west by s degrees and the east-side
+    corners (c2, c3) east by s degrees, latitudes unchanged. Used to re-center
+    a box that crosses the 180th meridian onto the 0th meridian.
+
     Args:
-        bounding_box: List of four coordinate tuples (lon, lat) describing a rectangle.
+        bounding_box (list[tuple[float, float]]): List of four (lon, lat) coordinate
+            tuples describing a rectangle, in north_west, north_east, south_east,
+            south_west order.
+        s (float): Degrees of longitude to shift by.
 
     Returns:
-        Shifted bounding box. 
+        list[tuple[float, float]]: Shifted bounding box, same corner ordering.
     """
     c1, c2, c3, c4 = bounding_box
 

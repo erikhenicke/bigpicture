@@ -1,8 +1,25 @@
-"""Display preprocessed .pt images by reversing normalization.
+"""
+display_preprocessed_images.py
+
+Display preprocessed .pt images by reversing normalization.
 
 Uses the same directory layout and argument structure as check_image_stats.py.
 Landsat reflectance is clipped to [0, 0.3] for display (matching
 translate_geotiff_to_png.py); RGB is clamped to [0, 1].
+
+Functions:
+    display_images: Non-interactive entry point; shows Landsat/RGB/both
+        images from a preprocessed cache directory, either paired
+        side-by-side (`modality="both"`) or one modality at a time.
+    browse_by_class: Interactive entry point; lets the user pick a region and
+        FMoW class from the metadata CSV, then displays the matching
+        Landsat+RGB pairs via `_display_pairs`.
+    _display_pairs: Shared paired-image display loop used by `browse_by_class`.
+    _build_class_index / _prompt_region: Menu helpers for `browse_by_class`.
+    _load_pt / _unnormalize / _landsat_to_display / _landsat_to_false_color /
+        _rgb_to_display / _get_index: Helpers for loading `.pt` tensors,
+        reversing their normalization for display, and parsing sample
+        indices from filenames.
 
 Usage:
     uv run python src/dataset_creation/display_preprocessed_images.py --preprocessed-dir /path/to/cache --modality both
@@ -33,6 +50,14 @@ REGION_NAMES = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania"
 
 
 def _load_pt(path: Path) -> torch.Tensor:
+    """Load a `.pt` tensor from disk onto CPU.
+
+    Args:
+        path (Path): Path to the `.pt` file.
+
+    Returns:
+        torch.Tensor: The loaded tensor.
+    """
     try:
         return torch.load(path, map_location="cpu", weights_only=False)
     except TypeError:
@@ -40,11 +65,35 @@ def _load_pt(path: Path) -> torch.Tensor:
 
 
 def _unnormalize(tensor: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+    """Reverse channel-wise normalization: `tensor * std + mean`.
+
+    Args:
+        tensor (torch.Tensor): Normalized image tensor, shape (C, H, W).
+        mean (torch.Tensor): Per-channel mean used for normalization, shape
+            (>=C,); only the first C entries are used.
+        std (torch.Tensor): Per-channel standard deviation used for
+            normalization, shape (>=C,); only the first C entries are used.
+
+    Returns:
+        torch.Tensor: Unnormalized tensor, same shape as `tensor`.
+    """
     c = tensor.shape[0]
     return tensor * std[:c].view(c, 1, 1) + mean[:c].view(c, 1, 1)
 
 
 def _landsat_to_display(tensor: torch.Tensor) -> torch.Tensor:
+    """Convert a normalized Landsat tensor to a true-color image for display.
+
+    Reverses LANDSAT_MEAN/LANDSAT_STD normalization, takes the first 3 bands
+    (stored in BGR order) and reorders them to RGB, then divides by 0.3 and
+    clamps to [0, 1] to bring typical reflectance values into displayable range.
+
+    Args:
+        tensor (torch.Tensor): Normalized Landsat tensor, shape (6, H, W), dtype float.
+
+    Returns:
+        torch.Tensor: Displayable RGB image, shape (H, W, 3), values in [0, 1].
+    """
     raw = _unnormalize(tensor, LANDSAT_MEAN, LANDSAT_STD)
     bgr = raw[:3]
     rgb = bgr[[2, 1, 0]]
@@ -53,6 +102,17 @@ def _landsat_to_display(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _landsat_to_false_color(tensor: torch.Tensor) -> torch.Tensor:
+    """Convert a normalized Landsat tensor to a false-color composite for display.
+
+    Reverses normalization, then builds R = max(bands 0-2), G = band 3
+    (NIR), B = max(bands 4-5) (SWIR), and divides by 0.3, clamping to [0, 1].
+
+    Args:
+        tensor (torch.Tensor): Normalized Landsat tensor, shape (6, H, W), dtype float.
+
+    Returns:
+        torch.Tensor: Displayable false-color image, shape (H, W, 3), values in [0, 1].
+    """
     raw = _unnormalize(tensor, LANDSAT_MEAN, LANDSAT_STD)
     r = raw[:3].max(dim=0).values
     g = raw[3]
@@ -63,11 +123,30 @@ def _landsat_to_false_color(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _rgb_to_display(tensor: torch.Tensor) -> torch.Tensor:
+    """Convert a normalized RGB tensor to a displayable image.
+
+    Args:
+        tensor (torch.Tensor): Normalized RGB tensor, shape (3, H, W), dtype float.
+
+    Returns:
+        torch.Tensor: Displayable RGB image, shape (H, W, 3), values in [0, 1].
+    """
     raw = _unnormalize(tensor, RGB_MEAN, RGB_STD)
     return raw.clamp(0, 1).permute(1, 2, 0)
 
 
 def _get_index(path: Path) -> int | None:
+    """Parse the sample index out of a `.pt` filename.
+
+    Recognizes `image_<idx>.pt` (Landsat) and `rgb_img_<idx>.pt` (RGB) filenames.
+
+    Args:
+        path (Path): Path whose stem is checked against the known prefixes.
+
+    Returns:
+        int | None: The parsed sample index, or None if the filename doesn't
+            match either known prefix or the suffix isn't an integer.
+    """
     stem = path.stem
     for prefix in ("image_", "rgb_img_"):
         if stem.startswith(prefix):
@@ -79,6 +158,21 @@ def _get_index(path: Path) -> int | None:
 
 
 def _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images: int, title_prefix: str = ""):
+    """Interactively display paired Landsat/RGB/false-color images, one sample at a time.
+
+    Renders a 2x2 figure per sample (Landsat true-color, RGB, and a wide
+    false-color panel spanning the bottom row), pausing for Enter between
+    samples.
+
+    Args:
+        landsat_by_idx (dict[int, Path]): Sample index -> Landsat `.pt` path.
+        rgb_by_idx (dict[int, Path]): Sample index -> RGB `.pt` path.
+        idxs (list[int]): Sample indices to display, in order.
+        max_images (int): Maximum number of samples to display; `idxs` is
+            truncated to this length.
+        title_prefix (str): Optional label prepended to the figure's
+            suptitle (e.g. region/class). Defaults to "".
+    """
     idxs = idxs[:max_images]
     print(f"Displaying {len(idxs)} paired images (Landsat + RGB)")
     plt.ion()
@@ -119,6 +213,21 @@ def _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images: int, title_pref
 
 
 def _build_class_index(metadata_csv: str, paired_idxs: set[int], region: int | None = None) -> dict[str, list[int]]:
+    """Group paired sample indices by FMoW class, optionally filtered by region.
+
+    Args:
+        metadata_csv (str): Path to `rgb_metadata_extended.csv`; row order
+            (after dropping `split == "seq"` rows) matches the `.pt` file
+            sample indices.
+        paired_idxs (set[int]): Sample indices that have both a Landsat and
+            an RGB `.pt` file.
+        region (int | None): If given, only include samples whose metadata
+            `region` column equals this code. Defaults to None (all regions).
+
+    Returns:
+        dict[str, list[int]]: Class name -> list of sample indices in that
+            class (and region, if filtered).
+    """
     df = pd.read_csv(metadata_csv)
     df = df[df["split"] != "seq"].reset_index(drop=True)
     class_to_idxs: dict[str, list[int]] = defaultdict(list)
@@ -131,6 +240,11 @@ def _build_class_index(metadata_csv: str, paired_idxs: set[int], region: int | N
 
 
 def _prompt_region() -> int | None:
+    """Prompt the user to pick a region from `REGION_NAMES`, or all regions.
+
+    Returns:
+        int | None: The chosen region code, or None if the user chose "all regions".
+    """
     print(f"\n{'='*60}")
     print("Select region:")
     print("   -1  All regions")
@@ -153,6 +267,24 @@ def _prompt_region() -> int | None:
 
 
 def browse_by_class(preprocessed_dir: str, metadata_csv: str, max_images: int):
+    """Interactive menu: pick a region and FMoW class, then browse its paired images.
+
+    Scans `preprocessed_dir` for Landsat/RGB `.pt` pairs, then repeatedly
+    prompts the user to select a class (optionally after changing the region
+    filter) and displays that class's images via `_display_pairs`, until the
+    user quits.
+
+    Args:
+        preprocessed_dir (str): Path to the preprocessed cache directory
+            (containing `landsat/` and `fmow_rgb/` subdirectories).
+        metadata_csv (str): Path to `rgb_metadata_extended.csv`, used to look
+            up each sample's class and region.
+        max_images (int): Maximum number of images to display per selected class.
+
+    Raises:
+        FileNotFoundError: If no matching Landsat/RGB index pairs are found
+            in `preprocessed_dir`.
+    """
     base = Path(preprocessed_dir)
     landsat_dir = base / "landsat"
     rgb_dir = base / "fmow_rgb"
@@ -199,6 +331,24 @@ def browse_by_class(preprocessed_dir: str, metadata_csv: str, max_images: int):
 
 
 def display_images(preprocessed_dir: str, modality: str, max_images: int):
+    """Display preprocessed images non-interactively for a given modality.
+
+    For `modality="both"`, shows paired Landsat/RGB/false-color panels (same
+    layout as `_display_pairs`) for images present in both directories,
+    pausing for Enter between samples. For `modality="landsat"` or `"rgb"`,
+    shows a single-panel figure per image from just that directory.
+
+    Args:
+        preprocessed_dir (str): Path to the preprocessed cache directory
+            (containing `landsat/` and `fmow_rgb/` subdirectories).
+        modality (str): Which modality to display: "landsat", "rgb", or "both".
+        max_images (int): Maximum number of images (or pairs) to display.
+
+    Raises:
+        FileNotFoundError: If `modality="both"` and no matching index pairs
+            are found, or if `modality` is "landsat"/"rgb" and no matching
+            files are found in the corresponding directory.
+    """
     base = Path(preprocessed_dir)
     landsat_dir = base / "landsat"
     rgb_dir = base / "fmow_rgb"

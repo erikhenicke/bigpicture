@@ -16,6 +16,16 @@ own seed std as a gray whisker centered at zero, and that same std is filled
 in behind the model bars as a translucent gray band, so the baseline's noise
 floor is visible without overlapping the model bars themselves. No per-panel
 legend: each group's standalone legend (``plot_legend``) covers its one figure.
+
+Styling helpers ``model_color`` and ``wrap_label`` pick a bar's color and wrap
+its legend label. ``GroupLayout`` is a dataclass holding one group's resolved
+runs and computed bar/whisker/fill geometry, built by ``build_group_layout``
+(data only, no drawing). ``data_extent``/``group_extent`` derive a group's y-axis
+range from its ``GroupLayout``; ``render_group_figure`` draws and writes the
+figure (plus its legend, via ``plot_legend``), using a range possibly shared
+with other groups. ``save_figure`` writes a figure to both the repo's and the
+thesis repo's image directories. ``main`` resolves every group's layout first,
+computes the shared y-ranges from ``YLIM_GROUPS``, then renders each figure.
 """
 
 import argparse
@@ -92,7 +102,15 @@ def model_color(label: str, fallback: str) -> str:
     """Color for a model, matched by name prefix: the MODEL_COLORS entry whose key
     the label starts with, so a spatial-encoding label like "FiLM, OM_gauss" still
     picks up FiLM's color. Longest matching key wins (so "Concat w. LE" would beat
-    "Concat" if both were present); falls back to ``fallback`` when nothing matches."""
+    "Concat" if both were present); falls back to ``fallback`` when nothing matches.
+
+    Args:
+        label (str): Formatted model/experiment display label.
+        fallback (str): Color to use if no ``MODEL_COLORS`` key is a prefix of ``label``.
+
+    Returns:
+        str: Hex color string.
+    """
     for key in sorted(MODEL_COLORS, key=len, reverse=True):
         if label.startswith(key):
             return MODEL_COLORS[key]
@@ -110,7 +128,16 @@ def wrap_label(label: str, per_line: int = 2) -> str:
     A lone leftover item (an odd tail of a single item) is indented four spaces so
     it reads as a continuation of the line above rather than a new entry. The gap
     between the stacked lines is tuned via the legend text ``linespacing`` (see
-    ``LINE_SPACING`` in ``plot_legend``), not by padding with blank lines here."""
+    ``LINE_SPACING`` in ``plot_legend``), not by padding with blank lines here.
+
+    Args:
+        label (str): Comma-joined model/experiment display label, possibly
+            containing ``$...$`` mathtext spans.
+        per_line (int): Number of comma-separated items to pack per line.
+
+    Returns:
+        str: The label re-wrapped onto newline-separated lines.
+    """
     items: list[str] = []
     in_math = False
     buf: list[str] = []
@@ -176,6 +203,30 @@ HIDE_DOMAIN_OVERRIDE = {"model.lr_domain_loss_coeff": None}
 
 @dataclass
 class GroupLayout:
+    """Resolved runs and computed bar/whisker/fill geometry for one group's figure.
+
+    Built by ``build_group_layout`` (no drawing); consumed by ``data_extent``,
+    ``group_extent``, and ``render_group_figure``.
+
+    Attributes:
+        group (dict): The group definition from the eval YAML.
+        models (list[tuple[str, Path]]): ``(display_label, run_dir)`` pairs for
+            the fusion models in this group.
+        base_name (str): Display name of the baseline model.
+        region_base (dict[str, tuple[float, float]]): Per-region baseline
+            ``(mean, std)`` in percent, keyed by region name.
+        x_base (np.ndarray): X-axis center position of each region's bar
+            cluster, shape ``(len(REGIONS),)``.
+        bar_width (float): Width of a single bar/whisker slot.
+        bar_infos (list[tuple[float, float, float, float, str]]): One entry per
+            model bar: ``(xpos, delta_mean, delta_std, run_abs_mean, color)``.
+        baseline_infos (list[tuple[float, float]]): One entry per baseline
+            whisker (two per region, left/right of the cluster):
+            ``(xpos, base_std)``.
+        fill_infos (list[tuple[float, float, float]]): One entry per region's
+            variance-fill band: ``(left_edge, right_edge, base_std)``.
+    """
+
     group: dict
     models: list[tuple[str, Path]]
     base_name: str
@@ -188,6 +239,17 @@ class GroupLayout:
 
 
 def save_figure(fig, figures_dir: Path, filename: str, run_name: str, **savefig_kwargs) -> None:
+    """Write a figure to the repo's figures dir and mirror it into the thesis repo.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure to save.
+        figures_dir (Path): Destination directory under the repo (e.g.
+            ``REPO_ROOT / "figures" / run_name``).
+        filename (str): Output filename (e.g. ``"<group>_region_deltas.svg"``).
+        run_name (str): Eval YAML stem, used as the mirrored subfolder name under
+            ``THESIS_IMAGES_DIR``.
+        **savefig_kwargs: Forwarded to ``fig.savefig`` (e.g. ``bbox_inches``).
+    """
     out_path = figures_dir / filename
     fig.savefig(out_path, format="svg", **savefig_kwargs)
     print(f"  wrote {out_path}")
@@ -200,7 +262,17 @@ def save_figure(fig, figures_dir: Path, filename: str, run_name: str, **savefig_
 
 
 def mean_std(run_dir: Path | None, metric: str) -> tuple[float, float] | None:
-    """Mean and std (in %) of `metric` across seeds for a run dir, or None."""
+    """Mean and std (in %) of `metric` across seeds for a run dir, or None.
+
+    Args:
+        run_dir (Path | None): Run's top-level log directory, or None.
+        metric (str): Metric key to look up (e.g.
+            ``"test/test-od-region-europe-task-acc"``).
+
+    Returns:
+        tuple[float, float] | None: ``(mean, std)`` in percent across seeds, or
+            None if ``run_dir`` is None or the metric has no values.
+    """
     vals = load_test_metrics(run_dir, [metric])[metric] if run_dir else []
     if not vals:
         return None
@@ -210,7 +282,19 @@ def mean_std(run_dir: Path | None, metric: str) -> tuple[float, float] | None:
 def plot_legend(models: list[tuple[str, Path]], base_name: str, figures_dir: Path, run_name: str,
                 filename: str, legend_size: int = LEGEND_SIZE) -> None:
     """Standalone legend: one color swatch per fusion model plus the baseline's
-    gray diamond+whisker marker, laid out in a single horizontal row."""
+    gray diamond+whisker marker, laid out in a single horizontal row.
+
+    Args:
+        models (list[tuple[str, Path]]): ``(display_label, run_dir)`` pairs for
+            the fusion models in the group, as built by ``build_group_layout``.
+        base_name (str): Display name of the baseline model.
+        figures_dir (Path): Destination directory for the saved figure (see
+            ``save_figure``).
+        run_name (str): Eval YAML stem, forwarded to ``save_figure`` for the
+            thesis-repo mirror subfolder.
+        filename (str): Output filename for the legend figure.
+        legend_size (int): Font size for the legend entries.
+    """
     # Baseline entry first so it sits on the left of the row, ahead of the fusion
     # model swatches.
     handles = [
@@ -232,7 +316,20 @@ def plot_legend(models: list[tuple[str, Path]], base_name: str, figures_dir: Pat
 def build_group_layout(group: dict, run_name: str, translations: dict) -> GroupLayout | None:
     """Resolve a group's runs and compute all bar/whisker/fill geometry, without
     drawing anything -- kept separate from rendering so ``main`` can inspect every
-    group's data extent first and derive one shared y-axis range."""
+    group's data extent first and derive one shared y-axis range.
+
+    Args:
+        group (dict): Group definition from the eval YAML; reads ``"runs"``
+            (``[baseline_ref, *model_refs]``) and ``"name"``.
+        run_name (str): Eval YAML stem, used as the default run-config name for
+            refs without an explicit ``config@`` prefix.
+        translations (dict): Display-name translations (see
+            ``results.utils.load_translations``).
+
+    Returns:
+        GroupLayout | None: The resolved layout, or None if the baseline's run
+            directory or every fusion model's run directory is missing.
+    """
     run_refs: list[str] = group["runs"]
     baseline_ref, *model_refs = run_refs
 
@@ -329,7 +426,15 @@ def build_group_layout(group: dict, run_name: str, translations: dict) -> GroupL
 
 def data_extent(layout: GroupLayout) -> tuple[float, float]:
     """A group's raw (min, max) across every bar's error-bar span and every
-    baseline whisker, before any padding is added."""
+    baseline whisker, before any padding is added.
+
+    Args:
+        layout (GroupLayout): Resolved group geometry (see ``build_group_layout``).
+
+    Returns:
+        tuple[float, float]: ``(min, max)`` of the data, or ``(0.0, 0.0)`` if the
+            layout has no bars or baseline whiskers.
+    """
     extents = [delta - delta_std for _, delta, delta_std, _, _ in layout.bar_infos] + \
               [delta + delta_std for _, delta, delta_std, _, _ in layout.bar_infos] + \
               [-base_std for _, base_std in layout.baseline_infos] + \
@@ -339,7 +444,16 @@ def data_extent(layout: GroupLayout) -> tuple[float, float]:
 
 def group_extent(layout: GroupLayout, show_baseline_header: bool) -> tuple[float, float]:
     """A group's own (bottom, top) y-limit candidate: the data extent padded for
-    breathing room, plus headroom for the baseline header text when shown."""
+    breathing room, plus headroom for the baseline header text when shown.
+
+    Args:
+        layout (GroupLayout): Resolved group geometry (see ``build_group_layout``).
+        show_baseline_header (bool): Whether extra headroom for the baseline's
+            per-region accuracy header text is needed.
+
+    Returns:
+        tuple[float, float]: ``(bottom, top)`` y-limit candidate for this group alone.
+    """
     lo, hi = data_extent(layout)
     span = max(hi - lo, 1.0)
     pad = span * 0.1
@@ -353,7 +467,19 @@ def group_extent(layout: GroupLayout, show_baseline_header: bool) -> tuple[float
 def render_group_figure(layout: GroupLayout, run_name: str, figures_dir: Path, ylim: tuple[float, float],
                         show_baseline_header: bool, show_region_labels: bool) -> None:
     """Draw and write one group's figure (+ legend), using the shared ``ylim``
-    computed across every group in ``main`` rather than this group's own extent."""
+    computed across every group in ``main`` rather than this group's own extent.
+
+    Args:
+        layout (GroupLayout): Resolved group geometry (see ``build_group_layout``).
+        run_name (str): Eval YAML stem, forwarded to ``save_figure`` for the
+            thesis-repo mirror subfolder and used in the output filenames.
+        figures_dir (Path): Destination directory for the saved figures.
+        ylim (tuple[float, float]): Shared ``(bottom, top)`` y-axis limits to apply.
+        show_baseline_header (bool): Whether to draw the baseline's per-region
+            absolute-accuracy header text above the bars.
+        show_region_labels (bool): Whether to draw region names on the x-axis
+            (vs. leaving it unlabeled).
+    """
     fig, ax = plt.subplots(figsize=(3.0 * len(REGIONS) + 3.0, 8.5))
 
     for left_edge, right_edge, base_std in layout.fill_infos:
@@ -417,6 +543,13 @@ def render_group_figure(layout: GroupLayout, run_name: str, figures_dir: Path, y
 
 
 def main() -> None:
+    """CLI entry point: render the region-wise delta-bar figures for GROUP_NAMES.
+
+    Parses the eval YAML path (default ``feature_fusion.yaml``), resolves every
+    listed group's geometry (``build_group_layout``) in a first pass, computes
+    shared y-axis ranges per ``YLIM_GROUPS``, then renders each group's figure and
+    legend (``render_group_figure``) in a second pass.
+    """
     parser = argparse.ArgumentParser(
         description="Region-wise OOD accuracy delta bars for the hardcoded fusion-comparison groups"
     )

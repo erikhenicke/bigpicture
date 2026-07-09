@@ -1,3 +1,29 @@
+"""
+utils.py
+
+Evaluation-state bookkeeping and metric computation shared by
+`MultiScaleClassificationModule` (in `multi_scale_classification.py`) across
+its validation and test loops.
+
+The functions fall into three groups:
+    - Domain-label-space helpers (`domain_label_names`, `build_domain_remap`)
+      that translate between raw WILDS region codes and the (possibly
+      Leave-Asia-Out-reduced) label space of the domain classifiers.
+    - State management (`make_eval_state`, `extract_region_names`): a plain
+      dict accumulator built fresh per epoch/dataloader and mutated in place
+      by the `update_*` functions as batches stream through, then reduced by
+      the `compute_final_*` functions at epoch end.
+    - Per-batch `update_*` functions and their matching epoch-end
+      `compute_final_*` functions, covering task accuracy/loss/entropy/ECE,
+      per-region and per-class breakdowns, domain-classifier accuracy, and
+      branch-ablation accuracy. `update_eval_metrics` / `compute_final_eval_metrics`
+      are the top-level entry points that wrap the others and prefix metric
+      names with the dataloader's name for logging.
+
+None of these functions are `nn.Module`s; the state dict they operate on is a
+plain `Dict[str, Any]` of running sums/counters (see `make_eval_state`), not a
+tensor.
+"""
 from collections import defaultdict
 from typing import Any, Dict, List
 
@@ -21,11 +47,19 @@ def domain_label_names(leave_asia_out: bool) -> List[str]:
     """Label space of the domain classifier: every region present during training.
 
     Drives the head's output classes and the target remap. The full setting uses
-    all six WILDS regions; Leave-Asia-Out drops only Asia at index 0 
-    (absent from training). "Other" is kept in both cases as it 
+    all six WILDS regions; Leave-Asia-Out drops only Asia at index 0
+    (absent from training). "Other" is kept in both cases as it
     is a real trained class. Which regions are surfaced in logs is a separate
     decision: :data:`DOMAIN_NAMES` drops "Other" from per-region reporting in both
     settings.
+
+    Args:
+        leave_asia_out (bool): If True, drop "Asia" from the label space (the
+            Leave-Asia-Out training setting); otherwise use all six regions.
+
+    Returns:
+        List[str]: Domain-classifier class names, in class-index order (5 names
+            under Leave-Asia-Out, 6 otherwise).
     """
     regions = {k: v for k, v in REGIONS.items() if k != 0} if leave_asia_out else REGIONS
     return list(regions.values())
@@ -39,6 +73,17 @@ def build_domain_remap(domain_names: List[str]) -> torch.Tensor:
     domain loss never sees it) and is masked out of the domain metrics at eval,
     where domain prediction is meaningless. The full-region case yields the
     identity map.
+
+    Args:
+        domain_names (List[str]): Domain-classifier label space, as returned by
+            `domain_label_names`; each name's position is its class index.
+
+    Returns:
+        torch.Tensor: Shape `(len(REGIONS),)` = `(6,)`, dtype `torch.long`. Entry
+            `remap[code]` is the domain-class index for raw region `code`, or -1
+            if that region's name is not in `domain_names`. Indexing this tensor
+            with a batch of raw region codes (e.g. `remap[regions]`) yields the
+            remapped domain targets.
     """
     name_to_class = {name: idx for idx, name in enumerate(domain_names)}
     remap = torch.full((len(REGIONS),), -1, dtype=torch.long)
@@ -48,8 +93,14 @@ def build_domain_remap(domain_names: List[str]) -> torch.Tensor:
     return remap
 
 def make_eval_state() -> Dict[str, Any]:
-    """
-    Create a new evaluation state dictionary for tracking metrics.
+    """Create a fresh accumulator dict for one epoch of one dataloader.
+
+    Returns:
+        Dict[str, Any]: Mutable state dict with running counters/sums (`total`,
+            `batch_count`, per-region/per-class `defaultdict` counters,
+            domain-prediction/target lists, etc.), all zero-initialized.
+            Mutated in place by the `update_*` functions and consumed by the
+            `compute_final_*` functions at epoch end.
     """
     return {
         "total": 0,
@@ -78,8 +129,18 @@ def make_eval_state() -> Dict[str, Any]:
     }
 
 def extract_region_names(dataloaders: List[torch.utils.data.DataLoader]) -> Dict[int, List[str]]:
-    """
-    Extracts the region names present in the metadata of each dataloader.   
+    """Look up each dataloader's region-name list from its underlying dataset.
+
+    Reads `_metadata_map["region"]` off each dataloader's dataset (see WILDS
+    `fmow_dataset.py`), for turning raw region codes into human-readable names
+    in metric keys.
+
+    Args:
+        dataloaders (List[torch.utils.data.DataLoader]): One per eval split.
+
+    Returns:
+        Dict[int, List[str]]: Dataloader index -> region names indexed by raw
+            region code, or `[]` if the dataset exposes no region metadata map.
     """
     region_names_by_loader: Dict[int, List[str]] = {}
     for idx, loader in enumerate(dataloaders):
@@ -97,8 +158,18 @@ def update_task_entropy_metrics(
     probs: torch.Tensor,
     correct_mask: torch.Tensor,
 ) -> None:
-    """
-    Update the task-specific entropy metrics in the state dictionary for the current batch.
+    """Accumulate summed predictive entropy of correct vs. incorrect predictions.
+
+    Mutates `state` in place; the running sums are averaged later by
+    `compute_final_task_entropy_metrics`.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        probs (torch.Tensor): Shape `(batch_size, num_task_labels)`, float,
+            softmax class probabilities.
+        correct_mask (torch.Tensor): Shape `(batch_size,)`, bool, whether each
+            prediction matches the target.
     """
     entropy = -(probs * torch.log(probs.clamp_min(1e-12))).sum(dim=1)
     if correct_mask.any():
@@ -107,8 +178,15 @@ def update_task_entropy_metrics(
         state["task_entropy_incorrect"] += entropy[~correct_mask].sum().item()
 
 def compute_final_task_entropy_metrics(state: Dict[str, Any]) -> Dict[str, float]:
-    """
-    Compute the final task-specific entropy metrics from the state dictionary.
+    """Compute mean predictive entropy, separately for correct and incorrect predictions.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict accumulated over an epoch
+            by `update_task_entropy_metrics`.
+
+    Returns:
+        Dict[str, float]: Keys `task-entropy-correct` / `task-entropy-incorrect`
+            (`torch.nan` if the respective count is 0).
     """
     entropy_correct = state["task_entropy_correct"] / state["task_correct"] if state["task_correct"] > 0 else torch.nan
     entropy_incorrect = (
@@ -129,8 +207,22 @@ def update_task_region_metrics(
     top5_correct_mask: torch.Tensor,
     per_sample_loss: torch.Tensor,
 ) -> None:
-    """
-    Update the task-specific region metrics in the state dictionary for the current batch.
+    """Accumulate per-region sample counts, correct counts, and loss for one batch.
+
+    Mutates `state`'s per-region counters in place.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        metadata (torch.Tensor): Shape `(batch_size, 6)`, float32, columns
+            `[region, year, y, lat, lon, img_span_km]`.
+        region_index (int): Column index of the region field in `metadata`.
+        correct_mask (torch.Tensor): Shape `(batch_size,)`, bool, whether each
+            top-1 prediction matches the target.
+        top5_correct_mask (torch.Tensor): Shape `(batch_size,)`, bool, whether
+            the target is among each sample's top-5 predictions.
+        per_sample_loss (torch.Tensor): Shape `(batch_size,)`, float, per-sample
+            (unreduced) task loss.
     """
     region_ids = metadata[:, region_index]
     for rid in torch.unique(region_ids):
@@ -149,10 +241,20 @@ def update_task_class_metrics(
     region_index: int,
     correct_mask: torch.Tensor,
 ) -> None:
-    """
-    Update the per-class task accuracy counters (overall and per region) for the
-    current batch. Counters are accumulated every batch but only consumed at test
-    time (see ``compute_final_task_class_metrics``).
+    """Update the per-class task accuracy counters (overall and per region).
+
+    Counters are accumulated every batch but only consumed at test time (see
+    `compute_final_task_class_metrics`).
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        y (torch.Tensor): Shape `(batch_size,)`, long, ground-truth class labels.
+        metadata (torch.Tensor): Shape `(batch_size, 6)`, float32, columns
+            `[region, year, y, lat, lon, img_span_km]`.
+        region_index (int): Column index of the region field in `metadata`.
+        correct_mask (torch.Tensor): Shape `(batch_size,)`, bool, whether each
+            top-1 prediction matches the target.
     """
     region_ids = metadata[:, region_index]
     for c in torch.unique(y):
@@ -169,16 +271,69 @@ def update_task_class_metrics(
             )
 
 def update_lr_domain_metrics(state: Dict[str, Any], lr_domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    """Buffer this batch's LR-branch domain predictions/targets for later reduction.
+
+    Appends CPU copies of the predictions and (already-remapped) targets to
+    `state`, so a single accuracy computation can run over the whole split at
+    epoch end (see `compute_final_lr_domain_metrics`).
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        lr_domain_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax
+            LR-branch domain-class predictions.
+        regions (torch.Tensor): Shape `(batch_size,)`, long. Despite the name,
+            this is the already-remapped domain-class target (see
+            `build_domain_remap`), not a raw region code -- matches the call
+            sites in `multi_scale_classification.py`, which pass
+            `domain_targets`.
+    """
     state["lr_domain_preds"].append(lr_domain_preds.cpu())
     state["lr_domain_targets"].append(regions.cpu())
 
 
 def update_hr_domain_metrics(state: Dict[str, Any], hr_domain_preds: torch.Tensor, regions: torch.Tensor) -> None:
+    """Buffer this batch's HR-branch domain predictions/targets for later reduction.
+
+    Appends CPU copies of the predictions and (already-remapped) targets to
+    `state`, so a single accuracy computation can run over the whole split at
+    epoch end (see `compute_final_hr_domain_metrics`).
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        hr_domain_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax
+            HR-branch domain-class predictions.
+        regions (torch.Tensor): Shape `(batch_size,)`, long. Despite the name,
+            this is the already-remapped domain-class target (see
+            `build_domain_remap`), not a raw region code -- matches the call
+            sites in `multi_scale_classification.py`, which pass
+            `domain_targets`.
+    """
     state["hr_domain_preds"].append(hr_domain_preds.cpu())
     state["hr_domain_targets"].append(regions.cpu())
 
 
 def compute_final_lr_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    """Compute overall and per-region LR-branch domain-classification accuracy.
+
+    Reduces the predictions/targets accumulated in `state` by
+    `update_lr_domain_metrics`. Only regions whose name is in `DOMAIN_NAMES`
+    get an individual metric.
+
+    Args:
+        region_names (List[str]): Despite the parameter name, this is actually
+            the *domain*-classifier label space (i.e. `domain_names`, as
+            returned by `domain_label_names`), indexed by domain-class id --
+            not the raw WILDS region-name list indexed by raw region code.
+            See the call site in `compute_final_eval_metrics`, which passes
+            `domain_names` here. The naming is inherited from the existing
+            code and kept as-is rather than silently renamed.
+
+    Returns:
+        Dict[str, float]: `lr-domain-acc-<region>` per reported region plus
+            overall `lr-domain-acc`.
+    """
     preds = torch.cat(state["lr_domain_preds"])
     targets = torch.cat(state["lr_domain_targets"])
     metrics: Dict[str, float] = {}
@@ -194,6 +349,25 @@ def compute_final_lr_domain_metrics(state: Dict[str, Any], region_names: List[st
 
 
 def compute_final_hr_domain_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    """Compute overall and per-region HR-branch domain-classification accuracy.
+
+    Reduces the predictions/targets accumulated in `state` by
+    `update_hr_domain_metrics`. Only regions whose name is in `DOMAIN_NAMES`
+    get an individual metric.
+
+    Args:
+        region_names (List[str]): Despite the parameter name, this is actually
+            the *domain*-classifier label space (i.e. `domain_names`, as
+            returned by `domain_label_names`), indexed by domain-class id --
+            not the raw WILDS region-name list indexed by raw region code.
+            See the call site in `compute_final_eval_metrics`, which passes
+            `domain_names` here. The naming is inherited from the existing
+            code and kept as-is rather than silently renamed.
+
+    Returns:
+        Dict[str, float]: `hr-domain-acc-<region>` per reported region plus
+            overall `hr-domain-acc`.
+    """
     preds = torch.cat(state["hr_domain_preds"])
     targets = torch.cat(state["hr_domain_targets"])
     metrics: Dict[str, float] = {}
@@ -209,8 +383,22 @@ def compute_final_hr_domain_metrics(state: Dict[str, Any], region_names: List[st
 
 
 def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
-    """
-    Compute the final task-specific region metrics from the state dictionary.
+    """Compute per-region task accuracy/top5-accuracy/loss and worst-group accuracy.
+
+    Only regions in `DOMAIN_NAMES` with a nonzero sample count are reported.
+    Worst-group accuracy is the minimum per-region accuracy (resp. top5
+    accuracy) over the reported regions.
+
+    Args:
+        region_names (List[str]): Raw WILDS region names indexed by raw region
+            code (0-5), e.g. as returned by `extract_region_names`. Contrast
+            with `compute_final_lr_domain_metrics` / `compute_final_hr_domain_metrics`,
+            where the same parameter name actually holds the domain-label list.
+
+    Returns:
+        Dict[str, float]: `region-<name>-task-acc`, `region-<name>-top5-task-acc`,
+            and `region-<name>-task-loss` per reported region, plus
+            `worst-group-task-acc` and `worst-group-top5-task-acc`.
     """
     worst_group_task_acc = 1.0
     worst_group_top5_task_acc = 1.0
@@ -238,10 +426,20 @@ def compute_final_task_region_metrics(state: Dict[str, Any], region_names: List[
     }
 
 def compute_final_task_class_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
-    """
-    Compute per-class top-1 task accuracy, overall and per region. Classes (or
-    region/class combinations) with no samples are skipped. Class names come from
-    the FMoW ``categories`` list, whose index equals the integer label ``y``.
+    """Compute per-class top-1 task accuracy, overall and per region.
+
+    Classes (or region/class combinations) with no samples are skipped. Class
+    names come from the FMoW `categories` list (`TASK_CLASSES`), whose index
+    equals the integer label `y`.
+
+    Args:
+        region_names (List[str]): Raw WILDS region names indexed by raw region
+            code (0-5), e.g. as returned by `extract_region_names`.
+
+    Returns:
+        Dict[str, float]: `class-<name>-task-acc` per class with samples, plus
+            `region-<region>-class-<name>-task-acc` per (region, class)
+            combination with samples, for regions in `DOMAIN_NAMES`.
     """
     metrics: Dict[str, float] = {}
     for c_int, total in state["task_class_total"].items():
@@ -263,6 +461,26 @@ def compute_final_task_class_metrics(state: Dict[str, Any], region_names: List[s
 
 
 def compute_final_branch_ablation_metrics(state: Dict[str, Any], region_names: List[str]) -> Dict[str, float]:
+    """Compute overall and per-region ablated-branch task accuracy.
+
+    Covers both the LR-ablated and HR-ablated forward passes (see
+    `MultiScaleClassificationModule._branch_ablation_step` and
+    `FeatureFusionModel.forward_branch_ablation`), plus worst-group accuracy
+    (minimum per-region accuracy over reported regions) for each ablation.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict accumulated over an
+            epoch by `MultiScaleClassificationModule._branch_ablation_step`.
+        region_names (List[str]): Raw WILDS region names indexed by raw region
+            code (0-5), e.g. as returned by `extract_region_names`.
+
+    Returns:
+        Dict[str, float]: `lr-ablated-task-acc` / `hr-ablated-task-acc`
+            overall, `region-<name>-lr-ablated-task-acc` /
+            `region-<name>-hr-ablated-task-acc` per reported region, and
+            `lr-ablated-worst-group-task-acc` / `hr-ablated-worst-group-task-acc`.
+            Returns `{}` if `state["total"] == 0`.
+    """
     total = state["total"]
     if total == 0:
         return {}
@@ -294,8 +512,27 @@ def update_task_metrics(
     metadata: torch.Tensor,
     region_index: int,
 ) -> None:
-    """
-    Update the task-specific metrics in the state dictionary.
+    """Accumulate task loss/accuracy/entropy/region/class metrics for one batch.
+
+    Computes per-sample loss and top-1/top-5 correctness, then delegates to
+    `update_task_entropy_metrics`, `update_task_region_metrics`, and
+    `update_task_class_metrics` to update the corresponding counters in
+    `state`, and updates `task_ece_metric` in place.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        task_criterion_per_sample (torch.nn.Module): Per-sample (unreduced)
+            cross-entropy loss module.
+        task_ece_metric (MulticlassCalibrationError): torchmetrics ECE
+            accumulator, updated in place via `.update(probs, y)`.
+        task_logits (torch.Tensor): Shape `(batch_size, num_task_labels)`, float.
+        task_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax of
+            `task_logits`.
+        y (torch.Tensor): Shape `(batch_size,)`, long, ground-truth class labels.
+        metadata (torch.Tensor): Shape `(batch_size, 6)`, float32, columns
+            `[region, year, y, lat, lon, img_span_km]`.
+        region_index (int): Column index of the region field in `metadata`.
     """
     probs = torch.softmax(task_logits, dim=1)
     per_sample_loss = task_criterion_per_sample(task_logits, y)
@@ -316,8 +553,24 @@ def update_task_metrics(
     task_ece_metric.update(probs, y)
 
 def compute_final_task_metrics(state: Dict[str, Any], region_names: List[str], ece_metric: MulticlassCalibrationError) -> Dict[str, float]:
-    """
-    Compute the final task-specific metrics from the state dictionary.
+    """Merge task loss/accuracy, calibration, entropy, and region metrics into one dict.
+
+    Task loss/accuracy/top5-accuracy are sample-weighted (not a batch-mean of
+    means), since `update_task_metrics` accumulates the per-sample loss as a
+    sum in `state["task_loss_sum"]` rather than averaging per batch.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict accumulated over an
+            epoch by `update_task_metrics`.
+        region_names (List[str]): Raw WILDS region names indexed by raw region
+            code (0-5), passed through to `compute_final_task_region_metrics`.
+        ece_metric (MulticlassCalibrationError): torchmetrics ECE accumulator
+            updated over the epoch; reduced here via `.compute()`.
+
+    Returns:
+        Dict[str, float]: `task-loss`, `task-acc`, `top5-task-acc`, `task-ece`,
+            plus everything from `compute_final_task_entropy_metrics` and
+            `compute_final_task_region_metrics`.
     """
     total = state["total"]
     task_loss = state["task_loss_sum"] / total if total > 0 else torch.nan
@@ -347,7 +600,25 @@ def update_eval_metrics(
     metadata: torch.Tensor,
     region_index: int,
 ) -> None:
-    """Updates the state dictionary with the metrics values of the current batch.
+    """Top-level per-batch entry point: update batch/sample counts, then task metrics.
+
+    Increments `state["batch_count"]` and `state["total"]`, then delegates to
+    `update_task_metrics` for the rest of the accumulation.
+
+    Args:
+        state (Dict[str, Any]): Evaluation state dict, as created by
+            `make_eval_state`.
+        task_criterion_per_sample (torch.nn.Module): Per-sample (unreduced)
+            cross-entropy loss module.
+        task_ece_metric (MulticlassCalibrationError): torchmetrics ECE
+            accumulator, updated in place.
+        task_logits (torch.Tensor): Shape `(batch_size, num_task_labels)`, float.
+        task_preds (torch.Tensor): Shape `(batch_size,)`, long, argmax of
+            `task_logits`.
+        y (torch.Tensor): Shape `(batch_size,)`, long, ground-truth class labels.
+        metadata (torch.Tensor): Shape `(batch_size, 6)`, float32, columns
+            `[region, year, y, lat, lon, img_span_km]`.
+        region_index (int): Column index of the region field in `metadata`.
     """
 
     state["batch_count"] += 1
@@ -364,19 +635,36 @@ def compute_final_eval_metrics(
     domain_names: List[str],
     include_class_breakdown: bool = False,
 ) -> Dict[str, float]:
-    """Compute final metrics for the evaluation phase.
+    """Compute final metrics for one dataloader and prefix keys with its name.
 
-    Wraps the task-specific final metrics computation and prefixes metric names with the loader name for logging.
+    Top-level per-dataloader reduction: wraps `compute_final_task_metrics`
+    (and, conditionally, `compute_final_task_class_metrics`,
+    `compute_final_lr_domain_metrics`, `compute_final_hr_domain_metrics`), and
+    prefixes every metric key with `f"{loader_name}-"` for logging.
 
-    :param region_names: Full WILDS region set, used to name the task/region
-        metrics. Kept distinct from ``domain_names`` so e.g. Asia is still reported
-        at test time under Leave-Asia-Out.
-    :param domain_names: Label space of the domain classifier, used to name the
-        domain-accuracy metrics. The full region set in the default setting; the
-        smaller trained-region space under Leave-Asia-Out, matching the remapped
-        domain targets stored in ``state``.
-    :param include_class_breakdown: If True, also emit the high-cardinality
-        per-class (overall and per-region) task accuracies. Used at test time only.
+    Args:
+        state (Dict[str, Any]): Evaluation state dict accumulated over an
+            epoch by `update_eval_metrics` (and, if applicable,
+            `update_lr_domain_metrics` / `update_hr_domain_metrics`).
+        loader_name (str): Name of the dataloader this state belongs to; used
+            as the metric key prefix.
+        region_names (List[str]): Full WILDS region set, used to name the
+            task/region metrics. Kept distinct from `domain_names` so e.g.
+            Asia is still reported at test time under Leave-Asia-Out.
+        ece_metric (MulticlassCalibrationError): torchmetrics ECE accumulator
+            for this dataloader, reduced via `.compute()`.
+        domain_names (List[str]): Label space of the domain classifier, used
+            to name the domain-accuracy metrics. The full region set in the
+            default setting; the smaller trained-region space under
+            Leave-Asia-Out, matching the remapped domain targets stored in
+            `state`.
+        include_class_breakdown (bool): If True, also emit the
+            high-cardinality per-class (overall and per-region) task
+            accuracies. Used at test time only. Defaults to False.
+
+    Returns:
+        Dict[str, float]: All task/region/class/domain metrics for this
+            dataloader, each key prefixed with `f"{loader_name}-"`.
     """
     metrics = {}
     metrics.update({

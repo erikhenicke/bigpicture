@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""
-Print per-seed metric values for each group in an eval YAML.
+"""Print per-seed metric values for each group in an eval YAML.
+
+For every run listed under a group's ``runs`` key, prints one row per seed
+(``load_run_seed_metrics``) plus a mean±std summary row, formatted as accuracy
+percentages or raw values depending on the metric name (``fmt_val``,
+``fmt_mean_std``). ``print_group`` renders one group's table; ``main`` parses the
+CLI args, loads the eval YAML and the referenced run configs (via
+``results.utils``), and calls ``print_group`` for each (optionally filtered)
+group.
 
 PYTHONPATH=src uv run src/results/per_seed_compare.py src/train/configs/eval/feature_fusion.yaml
 """
@@ -31,7 +38,18 @@ COL_W = 14         # fits "32.92±0.34" with room
 def load_run_seed_metrics(
     run_dir: Path | None, metrics: list[str]
 ) -> list[dict[str, float | None]]:
-    """Return one metric dict per seed dir under run_dir, or [] if run_dir is None."""
+    """Return one metric dict per seed dir under run_dir, or [] if run_dir is None.
+
+    Args:
+        run_dir (Path | None): Run's top-level log directory, or None if the run
+            wasn't found.
+        metrics (list[str]): Metric keys to look up for each seed.
+
+    Returns:
+        list[dict[str, float | None]]: One dict per ``run*`` seed subdirectory
+            (in sorted order), mapping each requested metric name to its value
+            (or None if missing for that seed).
+    """
     if run_dir is None:
         return []
     result = []
@@ -42,12 +60,34 @@ def load_run_seed_metrics(
 
 
 def fmt_val(v: float | None, is_acc: bool) -> str:
+    """Format a single metric value for table display.
+
+    Args:
+        v (float | None): Metric value, or None if missing.
+        is_acc (bool): Whether to format as a percentage (accuracy metric) vs. a
+            raw 4-decimal value.
+
+    Returns:
+        str: ``"—"`` if ``v`` is None, else ``"{v*100:.2f}"`` (accuracy) or
+            ``"{v:.4f}"`` (other metrics).
+    """
     if v is None:
         return "—"
     return f"{v * 100:.2f}" if is_acc else f"{v:.4f}"
 
 
 def fmt_mean_std(vals: list[float], is_acc: bool) -> str:
+    """Format the mean±std of a list of metric values for table display.
+
+    Args:
+        vals (list[float]): Per-seed metric values.
+        is_acc (bool): Whether to format as percentages (accuracy metric) vs.
+            raw 4-decimal values.
+
+    Returns:
+        str: ``"—"`` if ``vals`` is empty, else ``"{mean}±{std}"`` formatted as
+            percentages (accuracy) or raw 4-decimal values.
+    """
     if not vals:
         return "—"
     mean, std = float(np.mean(vals)), float(np.std(vals))
@@ -63,6 +103,23 @@ def print_group(
     translations: dict,
     default_config: str,
 ) -> None:
+    """Print one group's per-seed metric table, with a mean±std row per run.
+
+    Args:
+        group (dict): Group definition from the eval YAML; reads ``"runs"``
+            (list of run refs), ``"name"``, ``"additional_metrics"``,
+            ``"metric_display_names"``, ``"model_display_names"``, and
+            ``"param_display_names"``.
+        primary_metrics (list[str]): Metric keys always shown, before any
+            group-specific ``additional_metrics``.
+        run_experiments (dict): Run-ref -> experiment-definition map (see
+            ``results.utils.resolve_experiments``), used to format experiment names.
+        translations (dict): Display-name translations (see
+            ``results.utils.load_translations``), used for metric and experiment
+            name formatting.
+        default_config (str): Run-config name to use for refs without an
+            explicit ``config@`` prefix.
+    """
     metrics = primary_metrics + group.get("additional_metrics", [])
     is_acc = [m.endswith("acc") for m in metrics]
     metric_display = group.get("metric_display_names", {})
@@ -116,6 +173,13 @@ def print_group(
 
 
 def main() -> None:
+    """CLI entry point: load an eval YAML and print per-seed metric tables for its groups.
+
+    Parses the eval YAML path (prompting interactively to pick one from
+    ``EVAL_CONFIG_DIR`` if omitted) and an optional ``--group`` substring filter,
+    resolves every referenced run's experiment definition, then calls
+    ``print_group`` for each matching group.
+    """
     parser = argparse.ArgumentParser(description="Per-seed metric comparison for eval YAML groups")
     parser.add_argument(
         "eval_yaml",

@@ -13,6 +13,9 @@ unaffected by the extent experiment. Files are written as fp16 tensors named
 ``image_{file_idx}.pt`` — keyed by the original FMoW index (the tif filename
 number), matching how source="preprocessed" loads them.
 
+Main function:
+    - save_fullres_landsat: Runs the full pipeline described above.
+
 Run (PYTHONPATH=src is required, see project memory):
     PYTHONPATH=src uv run --env-file .env \
         src/dataset_creation/save_fullres_landsat.py
@@ -37,13 +40,14 @@ def save_fullres_landsat(
     """Save every Landsat GeoTIFF as a normalized, full-resolution fp16 tensor.
 
     Args:
-        fmow_dir: Directory containing the FMoW dataset (needed to build the
+        fmow_dir (str): Directory containing the FMoW dataset (needed to build the
             dataset's metadata; only the LR branch is read from disk).
-        landsat_dir: Directory containing the Landsat GeoTIFFs.
-        output_dir: Base dir; tensors are written under ``<output_dir>/landsat``.
-        image_norm: Normalization scheme; must match the runs that will consume
+        landsat_dir (str): Directory containing the Landsat GeoTIFFs.
+        output_dir (str): Base dir; tensors are written under ``<output_dir>/landsat``.
+        image_norm (str): Normalization scheme; must match the runs that will consume
             this set (default "fmow-statistics").
-        limit: If set, only process the first ``limit`` images (for quick tests).
+        limit (int | None): If set, only process the first ``limit`` images (for quick
+            tests).
     """
     output_landsat_dir = Path(output_dir) / "landsat"
     output_landsat_dir.mkdir(parents=True, exist_ok=True)

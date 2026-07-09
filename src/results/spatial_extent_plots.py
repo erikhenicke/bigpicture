@@ -7,6 +7,15 @@ Reads an eval YAML (e.g. ``spatial_extent.yaml``) whose runs vary only in their
 FiLM/D3G lines rather than interleaved — plotted against the crop extent (km) on
 the x-axis, with a shaded band for the across-seed std. One figure is written
 per primary metric; the OOD WRA figure is the headline one.
+
+``style_for`` assigns a consistent color/marker/linestyle per model series;
+``baseline_mean_std`` reads the HR-only baseline's stats. ``plot_stacked_accuracy``
+and ``plot_single_metric`` draw the actual figures (one stacked-subplot figure
+for the three ``COMBINED_METRICS``, one figure per remaining metric);
+``plot_legend`` draws the single legend shared by all of them. ``crop_km_for_ref``
+and ``model_for_ref`` pull the sweep x-value and model key out of a resolved
+experiment definition. ``main`` loads the eval YAML, builds one series per
+(group, model) pair, and calls the plotting functions.
 """
 
 import argparse
@@ -60,7 +69,14 @@ _fallback_assigned: dict[str, dict] = {}
 
 def style_for(name: str) -> dict:
     """Consistent color/marker/linestyle for a series name, assigning unknown
-    names a fallback style (cycled, cached) so new series don't collide."""
+    names a fallback style (cycled, cached) so new series don't collide.
+
+    Args:
+        name (str): Series display name (e.g. "FiLM", "D3G").
+
+    Returns:
+        dict: Style kwargs with keys ``"color"``, ``"marker"``, ``"linestyle"``.
+    """
     if name in SERIES_STYLES:
         return SERIES_STYLES[name]
     if name not in _fallback_assigned:
@@ -70,7 +86,18 @@ def style_for(name: str) -> dict:
 
 
 def baseline_mean_std(ref: str, run_name: str, metric: str) -> tuple[float, float] | None:
-    """Mean and std (in %) of `metric` across seeds for the baseline run, or None."""
+    """Mean and std (in %) of `metric` across seeds for the baseline run, or None.
+
+    Args:
+        ref (str): Baseline run reference (``"config@exp_key"`` or ``"exp_key"``).
+        run_name (str): Default run-config name for refs without an explicit
+            ``config@`` prefix.
+        metric (str): Metric key to look up.
+
+    Returns:
+        tuple[float, float] | None: ``(mean, std)`` in percent across seeds, or
+            None if the run directory or metric values are missing.
+    """
     _, exp_key = parse_run_ref(ref, run_name)
     run_dir = find_run_dir(exp_key)
     vals = load_test_metrics(run_dir, [metric])[metric] if run_dir else []
@@ -84,7 +111,22 @@ def plot_stacked_accuracy(combined_metrics, group_series, baseline_ref, run_name
     """Accuracy metrics as distinct subplots stacked vertically, sharing one x-axis.
     No per-subplot legend: the series/baseline encoding is identical across this
     figure and every single-metric figure, so one legend (``plot_legend``) covers
-    all of them."""
+    all of them.
+
+    Args:
+        combined_metrics (list[str]): Metric keys to draw, one subplot each, in order.
+        group_series (list[tuple[str, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]]]):
+            ``(series_name, {metric: (x, mean, std)})`` entries, as built in ``main``.
+        baseline_ref (str | None): Baseline run reference, or None to skip the
+            baseline line.
+        run_name (str): Default run-config name for the baseline ref.
+        translations (dict): Display-name translations (see
+            ``results.utils.load_translations``), used for the y-axis labels.
+        write_figure (Callable[..., None]): Callback that saves and closes the
+            figure (see ``main``'s local ``write_figure``).
+        label_size (int): Font size for axis labels.
+        tick_size (int): Font size for tick labels.
+    """
     fig, axes = plt.subplots(
         len(combined_metrics), 1, figsize=(6.0, 1.8 * len(combined_metrics)),
         sharex=True, squeeze=False,
@@ -119,7 +161,20 @@ def plot_single_metric(metric, group_series, baseline_ref, run_name, translation
                        write_figure, label_size, tick_size) -> None:
     """Single line figure for one metric (e.g. ECE) across the spatial-extent sweep.
     No legend: the series/baseline encoding is identical across this figure and
-    the stacked-accuracy figure, so one legend (``plot_legend``) covers both."""
+    the stacked-accuracy figure, so one legend (``plot_legend``) covers both.
+
+    Args:
+        metric (str): Metric key to plot.
+        group_series (list[tuple[str, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]]]):
+            ``(series_name, {metric: (x, mean, std)})`` entries, as built in ``main``.
+        baseline_ref (str | None): Baseline run reference, or None to skip the
+            baseline line.
+        run_name (str): Default run-config name for the baseline ref.
+        translations (dict): Display-name translations, used for axis labels/title.
+        write_figure (Callable[..., None]): Callback that saves and closes the figure.
+        label_size (int): Font size for axis labels.
+        tick_size (int): Font size for tick labels.
+    """
     contributors = [(name, s[metric]) for name, s in group_series if metric in s]
     if not contributors:
         print(f"Warning: no data for {metric}, skipping figure", file=sys.stderr)
@@ -156,7 +211,16 @@ def plot_legend(group_series, baseline_ref, write_figure, legend_size) -> None:
     """Standalone legend for the spatial-extent line plots: one entry per model
     series (FiLM, D3G, ...) plus the HR-only baseline, laid out in a single
     horizontal row -- identical across the stacked-accuracy figure and every
-    single-metric figure, so one legend covers all of them."""
+    single-metric figure, so one legend covers all of them.
+
+    Args:
+        group_series (list[tuple[str, dict]]): ``(series_name, ...)`` entries;
+            only the names are used, in first-seen order.
+        baseline_ref (str | None): Baseline run reference; if set, adds a dashed
+            gray "HR only" legend entry.
+        write_figure (Callable[..., None]): Callback that saves and closes the figure.
+        legend_size (int): Font size for the legend entries.
+    """
     seen_labels = list(dict.fromkeys(name for name, _ in group_series))
     handles = [
         Line2D([0], [0], marker=style_for(name)["marker"], markersize=5, linewidth=1.6,
@@ -174,7 +238,17 @@ def plot_legend(group_series, baseline_ref, write_figure, legend_size) -> None:
 
 
 def crop_km_for_ref(ref: str, run_experiments: dict) -> float | None:
-    """Pull the ``data.lr_crop_km`` override for a run ref, or ``None`` if absent."""
+    """Pull the ``data.lr_crop_km`` override for a run ref, or ``None`` if absent.
+
+    Args:
+        ref (str): Run reference.
+        run_experiments (dict): Run-ref -> experiment-definition map (see
+            ``results.utils.resolve_experiments``).
+
+    Returns:
+        float | None: The ``data.lr_crop_km`` override value, or None if the ref
+            is unresolved or has no such override.
+    """
     exp_def = run_experiments.get(ref)
     if exp_def is None:
         return None
@@ -184,12 +258,30 @@ def crop_km_for_ref(ref: str, run_experiments: dict) -> float | None:
 
 
 def model_for_ref(ref: str, run_experiments: dict) -> str | None:
-    """Pull the ``model`` key for a run ref, or ``None`` if absent."""
+    """Pull the ``model`` key for a run ref, or ``None`` if absent.
+
+    Args:
+        ref (str): Run reference.
+        run_experiments (dict): Run-ref -> experiment-definition map (see
+            ``results.utils.resolve_experiments``).
+
+    Returns:
+        str | None: The experiment's ``model`` key, or None if the ref is unresolved.
+    """
     exp_def = run_experiments.get(ref)
     return exp_def.get("model") if exp_def else None
 
 
 def main() -> None:
+    """CLI entry point: build per-(group, model) line series and render every figure.
+
+    Parses the eval YAML path (default ``spatial_extent.yaml``), resolves every
+    referenced run's experiment definition, groups runs into one series per
+    (eval-group, model) pair keyed by their ``data.lr_crop_km`` value (dropping
+    sub-series with fewer than two distinct crop-km values, since those aren't a
+    sweep), then draws the stacked-accuracy figure, one figure per remaining
+    primary metric, and the shared legend.
+    """
     parser = argparse.ArgumentParser(description="Spatial-extent line plots")
     parser.add_argument(
         "eval_yaml",
