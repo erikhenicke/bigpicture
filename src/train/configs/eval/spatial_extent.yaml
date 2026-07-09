@@ -21,7 +21,8 @@ primary_metrics:
   - test/test-id-task-entropy-correct
   - test/test-id-task-entropy-incorrect
   - test/test-od-task-acc
-  - test/test-od-top5-task-acc 
+  - test/test-od-worst-group-task-acc
+  - test/test-od-top5-task-acc
   - test/test-od-region-europe-task-acc
   - test/test-od-region-asia-task-acc
   - test/test-od-region-americas-task-acc

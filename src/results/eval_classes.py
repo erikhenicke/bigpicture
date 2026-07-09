@@ -59,7 +59,19 @@ CLASS_IDS = {name: i for i, name in enumerate(TASK_CLASSES)}
 
 OOD_PREFIX = "test/test-od"
 TOP_N = 5
-COVERAGE = 0.8  # fraction of gains / losses the filtered weighted plot retains
+COVERAGE = 0.7  # fraction of gains / losses the filtered weighted plot retains
+# The filtered thesis plots are all rendered at the height of this many rows (the
+# max element count across them), so every filtered figure is the same physical
+# size; plots with fewer classes stretch their bars to fill it, and the thesis
+# style parameters (row/bar height, etc.) describe this reference 13-row plot.
+FILTERED_ROWS = 13
+# Extra vertical breathing room above the first and below the last bar (in row
+# units) for the fixed-height plots.
+Y_MARGIN_ROWS = 0.5
+# Cap how much a sparse fixed-height plot's bars may thicken relative to the
+# reference FILTERED_ROWS plot; past this the surplus becomes wider gaps, not
+# fatter bars.
+MAX_BAR_STRETCH = 1.2
 GAIN_COLOR = "#2ca02c"
 LOSS_COLOR = "#d62728"
 ACC_COLOR = "#1f77b4"
@@ -67,6 +79,9 @@ ACC_COLOR = "#1f77b4"
 OCC_CMAP = "viridis_r"
 OCC_ZERO_COLOR = (0.85, 0.85, 0.85, 1.0)  # light grey for zero-count classes
 DEFAULT_METADATA = REPO_ROOT / "data" / "rgb_metadata_extended.csv"
+# Mirror every figure into the thesis repo's images dir, under a per-run subfolder
+# matching the repo's ``figures/<run_name>/`` layout (see decision_plots.py).
+THESIS_IMAGES_DIR = Path.home() / "git" / "thesis" / "images"
 
 # test/test-od-class-<ClassName>-task-acc
 _OOD_CLASS_RE = re.compile(r"^test/test-od-class-(.+)-task-acc$")
@@ -233,6 +248,20 @@ def weighted_accs(
     return sorted(items, key=lambda kv: kv[1], reverse=True)
 
 
+def occurrence_norm(counts: dict[str, int]) -> mcolors.LogNorm | None:
+    """LogNorm spanning the *full* positive class-fraction range of ``counts``
+    (``n_c / N`` over every class, not just a plotted subset), or ``None`` if no
+    class has a positive count. Shared by the bar colors and the standalone
+    colorbar so a class keeps the same color across every plot of one scope."""
+    total = sum(counts.values())
+    if total <= 0:
+        return None
+    all_fracs = [v / total for v in counts.values() if v > 0]
+    if not all_fracs:
+        return None
+    return mcolors.LogNorm(vmin=min(all_fracs), vmax=max(all_fracs))
+
+
 def occurrence_colors(
     items: list[tuple[str, float]], counts: dict[str, int]
 ) -> tuple[list, mcolors.LogNorm | None]:
@@ -245,13 +274,10 @@ def occurrence_colors(
     the shown ``items``), so a class keeps the same color across full, filtered,
     and top-5 plots.
     """
+    norm = occurrence_norm(counts)
+    if norm is None:
+        return [OCC_ZERO_COLOR] * len(items), None
     total = sum(counts.values())
-    if total <= 0:
-        return [OCC_ZERO_COLOR] * len(items), None
-    all_fracs = [v / total for v in counts.values() if v > 0]
-    if not all_fracs:
-        return [OCC_ZERO_COLOR] * len(items), None
-    norm = mcolors.LogNorm(vmin=min(all_fracs), vmax=max(all_fracs))
     cmap = plt.get_cmap(OCC_CMAP)
     colors = []
     for c, _ in items:
@@ -260,15 +286,63 @@ def occurrence_colors(
     return colors, norm
 
 
-def prettify_class(name: str) -> str:
+def plot_colorbar(counts: dict[str, int], out_path: Path, label: str,
+                  label_size: int = 8, tick_size: int = 7) -> bool:
+    """Standalone horizontal colorbar for one scope's occurrence color scale.
+
+    Uses the same :func:`occurrence_norm` as the bars, so it is the shared key for
+    every weighted plot of that scope (which no longer carry their own colorbar).
+    Returns False (and writes nothing) if the scope has no positive counts."""
+    norm = occurrence_norm(counts)
+    if norm is None:
+        return False
+    fig = plt.figure(figsize=(6.0, 0.4))
+    # Explicit cax so the bar's height (its thickness) is controlled directly --
+    # a thin strip near the top, leaving room below for the ticks and label.
+    cax = fig.add_axes([0.06, 0.4, 0.88, 0.12])
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(OCC_CMAP))
+    sm.set_array([])
+    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
+    cb.set_label(label, fontsize=label_size, labelpad=7)
+    cb.ax.xaxis.set_label_position("top")  # label above the bar; ticks stay below
+    cb.ax.tick_params(labelsize=tick_size)
+    # Crop to content so the label/ticks below the short bar aren't clipped
+    # (the axes fills the tiny figure), mirroring the standalone legends.
+    save_figure(fig, out_path, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
+# Wrap a class label onto two lines at its first space past this character index,
+# so long multi-word labels (e.g. "Recreational Facility (46)") don't run wide.
+# A short first token (e.g. "Airport (0)", space at index 7) stays on one line.
+LABEL_WRAP_AFTER = 7
+
+
+def prettify_class(name: str, include_id: bool = True) -> str:
     pretty = name.replace("_", " ").title()
     cid = CLASS_IDS.get(name)
-    return f"{pretty} ({cid})" if cid is not None else pretty
+    label = f"{pretty} ({cid})" if (include_id and cid is not None) else pretty
+    sp = label.find(" ", LABEL_WRAP_AFTER + 1)
+    if sp != -1:
+        label = f"{label[:sp]}\n{label[sp + 1:]}"
+    return label
 
 
 # --------------------------------------------------------------------------- #
 # Plotting
 # --------------------------------------------------------------------------- #
+def save_figure(fig, out_path: Path, **savefig_kwargs) -> None:
+    """Write `fig` to `out_path` in the repo figures dir and mirror it into the
+    thesis images dir under the same ``<run_name>/`` subfolder (``out_path``'s
+    parent dir name) when the thesis repo is present -- matching decision_plots.py."""
+    fig.savefig(out_path, format="svg", **savefig_kwargs)
+    if THESIS_IMAGES_DIR.parent.exists():
+        thesis_dir = THESIS_IMAGES_DIR / out_path.parent.name
+        thesis_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(thesis_dir / out_path.name, format="svg", **savefig_kwargs)
+
+
 def plot_bars(
     items: list[tuple[str, float]],
     title: str,
@@ -279,6 +353,16 @@ def plot_bars(
     bar_colors: list | None = None,
     cbar: tuple[mcolors.LogNorm, str] | None = None,
     errors: list[float] | None = None,
+    show_title: bool = True,
+    ylabel_size: int | None = None,
+    xlabel_size: int | None = None,
+    xtick_size: int | None = None,
+    label_bold: bool = False,
+    show_class_id: bool = True,
+    row_height: float | None = None,
+    bar_height: float | None = None,
+    fig_width: float = 8.0,
+    fixed_rows: int | None = None,
 ) -> bool:
     """Diverging horizontal bar chart of per-class values (already in fractions).
 
@@ -288,29 +372,72 @@ def plot_bars(
     and ``cbar=(norm, label)`` to add a matching colorbar. ``errors`` (aligned
     with ``items``, same fraction units) draws symmetric horizontal error bars.
     Returns False (and writes nothing) if empty.
+
+    The thesis-facing knobs override the defaults for a cleaner figure: pass
+    ``show_title=False`` to drop the title/subtitle block, ``ylabel_size`` to
+    enlarge the class labels, ``xlabel_size`` / ``xtick_size`` for the x-axis label
+    and its tick numbers, ``row_height`` to space the classes further apart,
+    ``bar_height`` to thicken the bars within each row, and a smaller ``fig_width``
+    to narrow the bar column (giving the labels relatively more room).
+    ``fixed_rows`` fixes the figure height to that many rows while the y-axis
+    still fits exactly the bars present, so plots with fewer bars come out the
+    same physical size but stretch their bars to fill it (rather than padding with
+    blank slots). Plots with more bars than ``fixed_rows`` grow taller at the
+    reference bar thickness.
     """
     if not items:
         return False
-    labels = [prettify_class(c) for c, _ in items]
+    labels = [prettify_class(c, include_id=show_class_id) for c, _ in items]
     values = [v * 100.0 for _, v in items]  # percentage points
     colors = bar_colors if bar_colors is not None else [
         GAIN_COLOR if v >= 0 else LOSS_COLOR for v in values
     ]
     xerr = [e * 100.0 for e in errors] if errors is not None else None
 
-    per_row = 0.32 if annotate else 0.20
-    fig, ax = plt.subplots(figsize=(8.0, max(2.0, per_row * len(items) + 1.6)))
+    per_row = row_height if row_height is not None else (0.32 if annotate else 0.20)
+    # The figure height is sized for a fixed row count when requested (never fewer
+    # than the actual bars), so every plot with <= fixed_rows bars comes out the
+    # same height regardless of how many classes it shows.
+    n_rows = max(fixed_rows, len(items)) if fixed_rows is not None else len(items)
+    fig, ax = plt.subplots(figsize=(fig_width, max(2.0, per_row * n_rows + 1.6)))
     y = list(range(len(items)))
+    # Bar thickness (fraction of a row). With a fixed figure height (fixed_rows) a
+    # sparse plot's rows stretch; cap that so bars grow to at most MAX_BAR_STRETCH x
+    # their thickness in the reference fixed_rows plot, the surplus becoming wider
+    # gaps rather than fatter bars.
+    bh = bar_height
+    if bar_height is not None and fixed_rows is not None and items:
+        stretch = (fixed_rows + 2 * Y_MARGIN_ROWS) / (len(items) + 2 * Y_MARGIN_ROWS)
+        if stretch > MAX_BAR_STRETCH:
+            bh = bar_height * MAX_BAR_STRETCH / stretch
+    barh_kw = {} if bh is None else {"height": bh}
     ax.barh(
-        y, values, color=colors, xerr=xerr,
-        error_kw={"elinewidth": 0.6, "capsize": 2, "ecolor": "#333333"},
+        y, values, color=colors, xerr=xerr, **barh_kw,
+        error_kw={"elinewidth": 1.2, "capsize": 4, "ecolor": "#333333"},
     )
     ax.set_yticks(y)
-    ax.set_yticklabels(labels, fontsize=8 if annotate else 6)
+    ax.set_yticklabels(
+        labels,
+        fontsize=ylabel_size if ylabel_size is not None else (8 if annotate else 6),
+        fontweight="bold" if label_bold else "normal",
+    )
+    if xtick_size is not None:
+        ax.tick_params(axis="x", labelsize=xtick_size)
     ax.invert_yaxis()  # largest value on top
+    if fixed_rows is not None:
+        # Figure height is fixed (n_rows) but the y-axis fits the bars present plus
+        # Y_MARGIN_ROWS of breathing room top and bottom, so a plot with fewer than
+        # fixed_rows bars stretches them to fill the height (up to the bar-thickness
+        # cap above) instead of leaving blank slots at the bottom.
+        ax.set_ylim(bottom=len(items) - 0.5 + Y_MARGIN_ROWS, top=-0.5 - Y_MARGIN_ROWS)
     ax.axvline(0.0, color="black", linewidth=0.8)
-    ax.set_xlabel(xlabel)
-    ax.set_title(f"{title}\n{subtitle}", fontsize=10)
+    ax.set_xlabel(
+        xlabel,
+        fontsize=xlabel_size if xlabel_size is not None else (8 if annotate else 6),
+        fontweight="bold" if label_bold else "normal",
+    )
+    if show_title:
+        ax.set_title(f"{title}\n{subtitle}", fontsize=10)
 
     if annotate:
         pad = max((abs(v) for v in values), default=1.0) * 0.02 + 0.05
@@ -326,7 +453,7 @@ def plot_bars(
         sm.set_array([])
         fig.colorbar(sm, ax=ax, pad=0.02, label=label)
     fig.tight_layout()
-    fig.savefig(out_path, format="svg")
+    save_figure(fig, out_path)
     plt.close(fig)
     return True
 
@@ -368,7 +495,7 @@ def plot_abs_bars(
         ax.margins(x=0.05)
     ax.set_title(f"{title}\n{subtitle}", fontsize=10)
     fig.tight_layout()
-    fig.savefig(out_path, format="svg")
+    save_figure(fig, out_path)
     plt.close(fig)
     return True
 
@@ -408,7 +535,7 @@ def plot_acc_vs_count(
     ax.grid(True, which="both", linewidth=0.3, alpha=0.5)
     ax.set_title(f"{title}\n{subtitle}", fontsize=10)
     fig.tight_layout()
-    fig.savefig(out_path, format="svg")
+    save_figure(fig, out_path)
     plt.close(fig)
     return True
 
@@ -458,54 +585,81 @@ def emit_setting(
     base_accs: dict[str, float],
     run_accs: dict[str, float],
     counts: dict[str, int],
+    all_figures: bool = False,
 ) -> None:
-    """Write the top-5, all-class, and occurrence-weighted plots for one setting."""
+    """Write per-class delta plots for one setting.
+
+    By default only the thesis-facing occurrence-weighted *filtered* plot is
+    written. With ``all_figures`` the top-5, all-class, and unfiltered weighted
+    plots are written too.
+    """
     head = f"{run_label} vs. {base_name}"
     delta_xlabel = "Top-1 accuracy delta vs. baseline (pp)"
     stem = f"classdiff_{exp_key}_{scope_key}"
 
-    gains, losses = top_deltas(base_accs, run_accs)
-    if plot_bars(
-        sorted(gains + losses, key=lambda kv: kv[1], reverse=True),
-        head, f"{scope_label}: largest per-class accuracy gains and losses",
-        delta_xlabel, figures_dir / f"{stem}_top5.svg", annotate=True,
-    ):
-        print(f"  wrote {stem}_top5.svg")
+    if all_figures:
+        gains, losses = top_deltas(base_accs, run_accs)
+        if plot_bars(
+            sorted(gains + losses, key=lambda kv: kv[1], reverse=True),
+            head, f"{scope_label}: largest per-class accuracy gains and losses",
+            delta_xlabel, figures_dir / f"{stem}_top5.svg", annotate=True,
+        ):
+            print(f"  wrote {stem}_top5.svg")
 
-    if plot_bars(
-        all_deltas(base_accs, run_accs),
-        head, f"{scope_label}: per-class accuracy gains and losses (all classes)",
-        delta_xlabel, figures_dir / f"{stem}_all.svg", annotate=False,
-    ):
-        print(f"  wrote {stem}_all.svg")
+        if plot_bars(
+            all_deltas(base_accs, run_accs),
+            head, f"{scope_label}: per-class accuracy gains and losses (all classes)",
+            delta_xlabel, figures_dir / f"{stem}_all.svg", annotate=False,
+        ):
+            print(f"  wrote {stem}_all.svg")
 
     if counts:
         triples = weighted_deltas(base_accs, run_accs, counts)
         weighted_xlabel = "Contribution to accuracy delta vs. baseline (pp)"
         cbar_label = "Class occurrence fraction (log)"
 
-        def _weighted_plot(rows, subtitle, out_name):
+        # Thesis-facing axis label: the worst-region plots read "OOD WRA" (worst-
+        # region accuracy), the overall Test-OOD plot "OOD Acc.".
+        metric_label = "OOD Acc." if scope_key == "test-od" else "OOD WRA"
+        thesis_xlabel = rf"{metric_label} (%) vs. Baseline"
+        # Drop the titles and enlarge/space the class labels, thicken the bars,
+        # and narrow the bar column so the labels breathe (see plot_bars knobs).
+        thesis_style = dict(
+            show_title=False, ylabel_size=14, xlabel_size=16, xtick_size=14,
+            label_bold=False, show_class_id=False,
+            row_height=0.45, bar_height=0.85, fig_width=6.0, fixed_rows=FILTERED_ROWS,
+        )
+
+        def _weighted_plot(rows, subtitle, out_name, thesis=False):
             items = [(c, w) for c, w, _ in rows]
             errs = [se for _, _, se in rows]
             colors, norm = occurrence_colors(items, counts)
+            style = thesis_style if thesis else {}
+            # Thesis filtered plots drop their inline colorbar in favor of the
+            # standalone per-scope colorbar (see plot_colorbar); the --all
+            # weighted plot keeps its own.
+            cbar = None if thesis else ((norm, cbar_label) if norm is not None else None)
             if plot_bars(
-                items, head, subtitle, weighted_xlabel,
+                items, head, subtitle,
+                thesis_xlabel if thesis else weighted_xlabel,
                 figures_dir / out_name, annotate=False, bar_colors=colors,
-                cbar=(norm, cbar_label) if norm is not None else None, errors=errs,
+                cbar=cbar, errors=errs,
+                **style,
             ):
                 print(f"  wrote {out_name}")
 
-        # All classes.
-        _weighted_plot(
-            triples, f"{scope_label}: occurrence-weighted contribution to accuracy delta",
-            f"{stem}_weighted.svg",
-        )
+        # All classes (only with --all).
+        if all_figures:
+            _weighted_plot(
+                triples, f"{scope_label}: occurrence-weighted contribution to accuracy delta",
+                f"{stem}_weighted.svg",
+            )
         # Filtered: classes covering the top 80% of gains and bottom 80% of losses.
         _weighted_plot(
             pareto_weighted(triples),
             f"{scope_label}: top-{COVERAGE:.0%} gains & bottom-{COVERAGE:.0%} losses "
             "(occurrence-weighted)",
-            f"{stem}_weighted_filtered.svg",
+            f"{stem}_weighted_filtered.svg", thesis=True,
         )
 
 
@@ -522,6 +676,13 @@ def main() -> None:
         default=str(DEFAULT_METADATA),
         help="FMoW metadata CSV for class occurrence counts "
              "(default: data/rgb_metadata_extended.csv)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Generate every per-class figure (absolute accuracy, scatter, top-5, "
+             "all-class, unfiltered weighted). By default, only the thesis-facing "
+             "occurrence-weighted filtered delta plots are written.",
     )
     args = parser.parse_args()
 
@@ -578,13 +739,23 @@ def main() -> None:
     print(f"Baseline: {base_name}  (worst OOD region: {wr})")
     print(f"Writing figures to {figures_dir}")
 
-    # Baseline's own absolute per-class accuracies, plotted once.
-    emit_abs(figures_dir, base_key, base_name, "test-od", "Test-OOD", base_ood, counts_overall)
-    if wr is not None and base_region:
-        emit_abs(
-            figures_dir, base_key, base_name, wr.lower(), f"Worst region ({wr})",
-            base_region, counts_region.get(wr, {}),
-        )
+    # One standalone horizontal colorbar per scope, shared by that scope's
+    # weighted_filtered plots (which no longer carry their own colorbar).
+    if plot_colorbar(counts_overall, figures_dir / "classdiff_test-od_colorbar.svg", "Log Class Fraction"):
+        print("  wrote classdiff_test-od_colorbar.svg")
+    if wr is not None and plot_colorbar(
+        counts_region.get(wr, {}), figures_dir / f"classdiff_{wr.lower()}_colorbar.svg", "Log Class Fraction"
+    ):
+        print(f"  wrote classdiff_{wr.lower()}_colorbar.svg")
+
+    # Baseline's own absolute per-class accuracies (only with --all).
+    if args.all:
+        emit_abs(figures_dir, base_key, base_name, "test-od", "Test-OOD", base_ood, counts_overall)
+        if wr is not None and base_region:
+            emit_abs(
+                figures_dir, base_key, base_name, wr.lower(), f"Worst region ({wr})",
+                base_region, counts_region.get(wr, {}),
+            )
 
     for ref in run_refs:
         _, exp_key = parse_run_ref(ref, run_name)
@@ -598,10 +769,12 @@ def main() -> None:
             continue
 
         # Overall Test-OOD setting.
-        emit_abs(figures_dir, exp_key, run_label, "test-od", "Test-OOD", run_ood, counts_overall)
+        if args.all:
+            emit_abs(figures_dir, exp_key, run_label, "test-od", "Test-OOD", run_ood, counts_overall)
         emit_setting(
             figures_dir, exp_key, run_label, base_name,
             "test-od", "Test-OOD", base_ood, run_ood, counts_overall,
+            all_figures=args.all,
         )
 
         # Worst-region setting (baseline's worst region).
@@ -611,14 +784,16 @@ def main() -> None:
         if not run_region:
             print(f"  skip {ref} worst-region plots: no per-class metrics for region {wr}.")
             continue
-        emit_abs(
-            figures_dir, exp_key, run_label, wr.lower(), f"Worst region ({wr})",
-            run_region, counts_region.get(wr, {}),
-        )
+        if args.all:
+            emit_abs(
+                figures_dir, exp_key, run_label, wr.lower(), f"Worst region ({wr})",
+                run_region, counts_region.get(wr, {}),
+            )
         emit_setting(
             figures_dir, exp_key, run_label, base_name,
             wr.lower(), f"Worst region ({wr})", base_region, run_region,
             counts_region.get(wr, {}),
+            all_figures=args.all,
         )
 
 

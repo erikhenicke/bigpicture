@@ -59,9 +59,9 @@ groups:
   - name: SatCLIP Fusion
     runs:
       - densenet_baseline
-      - densenet_le_concat
-      - densenet_le_film
-      - densenet_le_d3g
+      - densenet_le_concat_l_40
+      - densenet_le_film_l_40
+      - densenet_le_d3g_l_40
     additional_metrics:
       - test/test-id-top5-task-acc
       - test/test-id-region-europe-task-acc

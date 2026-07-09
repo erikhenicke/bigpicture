@@ -38,12 +38,10 @@ primary_metrics:
 class-eval:
   baseline: baselines@densenet_baseline
   runs:
-    - spatial_extent@film_om_gauss_pe_freq_lr_crop_14_9km
+    - baselines@densenet_baseline_pe_freq_hr
+    - baselines@densenet_le_film_l_40
     - film_om_gauss_pe_freq
-    - d3g_detach_both_no_domain 
-    - film_om_bin_pe_freq
-    - film_pe_freq
-    - film
+    - d3g_detach_hr_om_gauss_pe_freq_hr
 
 groups:
   - name: Fusion Comparison
@@ -52,6 +50,8 @@ groups:
       - concat_no_domain
       - film_no_domain
       - d3g_no_domain
+    additional_metrics:
+      - test/test-od-lr-domain-acc
 
   - name: Fusion Comparison with Domain
     runs:
@@ -118,6 +118,13 @@ groups:
   
   - name: DINOv3 Spatial Encodings 
     runs:
+      - baselines@densenet_baseline
+      - film
+      - film_no_domain
+      - film_om_gauss_pe_freq
+      - d3g
+      - d3g_detach_hr
+      - d3g_detach_hr_om_gauss_pe_freq_hr
       - baselines@dinov3_baseline
       - dinov3_film
       - dinov3_film_no_domain
@@ -126,3 +133,11 @@ groups:
       - dinov3_d3g_detach_hr
       - dinov3_detach_hr_om_gauss_pe_freq_hr
 
+
+  - name: Best Spatial Encodings
+    runs:
+      - baselines@densenet_baseline
+      - baselines@densenet_baseline_pe_freq_hr
+      - film_om_gauss_pe_freq
+      - d3g_detach_hr_om_gauss_pe_freq_hr
+      - baselines@densenet_le_film_l_40

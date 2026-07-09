@@ -9,10 +9,10 @@ models:
   deit_baseline: "DeiT-Tiny"
   efficientformer_baseline: "EfficientFormerV2-S1"
   efficientnet_baseline: "EffNetV2-B1"
-  densenet_le_concat: "Concat w. LE"
-  densenet_le_film: "FiLM w. LE"
-  densenet_le_d3g: "D3G w. LE"
-  densenet_le_geoprior: "GeoPrior w. LE"
+  densenet_le_concat: "SatCLIP, Concat"
+  densenet_le_film: "SatCLIP, FiLM"
+  densenet_le_d3g: "SatCLIP, D3G"
+  densenet_le_geoprior: "SatCLIP, GeoPrior"
   dinov3_film: "DINOv3 FiLM"
   dinov3_baseline: "DINOv3"
   satclip_le_enc_baseline: "SatCLIP"
@@ -174,6 +174,9 @@ params:
     plain: "Trained"
     latex: "Trained"
   model.encoder.legendre_polys:
+    plain: "L"
+    latex: "L"
+  model.lr_encoder.legendre_polys:
     plain: "L"
     latex: "L"
   model.encoder.landsat_channel_init:

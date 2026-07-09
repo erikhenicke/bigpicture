@@ -52,7 +52,7 @@ COMBINED_METRICS = {
 # series this sweep doesn't already know about.
 SERIES_STYLES = {
     "FiLM": dict(color="#115fb0", marker="o", linestyle="-"),
-    "D3G": dict(color="#e8701a", marker="s", linestyle="-."),
+    "D3G": dict(color="#cf440a", marker="s", linestyle="-."),
 }
 FALLBACK_STYLES = [dict(color="#5a3d99", marker="^", linestyle=":")]
 _fallback_assigned: dict[str, dict] = {}
@@ -86,7 +86,7 @@ def plot_stacked_accuracy(combined_metrics, group_series, baseline_ref, run_name
     figure and every single-metric figure, so one legend (``plot_legend``) covers
     all of them."""
     fig, axes = plt.subplots(
-        len(combined_metrics), 1, figsize=(6.0, 2.5 * len(combined_metrics)),
+        len(combined_metrics), 1, figsize=(6.0, 1.8 * len(combined_metrics)),
         sharex=True, squeeze=False,
     )
     axes = axes[:, 0]

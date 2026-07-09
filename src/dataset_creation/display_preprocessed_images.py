@@ -29,6 +29,8 @@ LANDSAT_STD = torch.tensor([0.039894334971904755, 0.049978554248809814, 0.068796
 RGB_MEAN = torch.tensor([0.4155880808830261, 0.41815927624702454, 0.3903605341911316])
 RGB_STD = torch.tensor([0.24812281131744385, 0.24405813217163086, 0.2482403963804245])
 
+REGION_NAMES = {0: "Asia", 1: "Europe", 2: "Africa", 3: "Americas", 4: "Oceania", 5: "Other"}
+
 
 def _load_pt(path: Path) -> torch.Tensor:
     try:
@@ -116,14 +118,38 @@ def _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images: int, title_pref
     plt.close(fig)
 
 
-def _build_class_index(metadata_csv: str, paired_idxs: set[int]) -> dict[str, list[int]]:
+def _build_class_index(metadata_csv: str, paired_idxs: set[int], region: int | None = None) -> dict[str, list[int]]:
     df = pd.read_csv(metadata_csv)
     df = df[df["split"] != "seq"].reset_index(drop=True)
     class_to_idxs: dict[str, list[int]] = defaultdict(list)
     for idx in sorted(paired_idxs):
         if idx < len(df):
+            if region is not None and df.iloc[idx]["region"] != region:
+                continue
             class_to_idxs[df.iloc[idx]["category"]].append(idx)
     return dict(class_to_idxs)
+
+
+def _prompt_region() -> int | None:
+    print(f"\n{'='*60}")
+    print("Select region:")
+    print("   -1  All regions")
+    for idx, name in REGION_NAMES.items():
+        print(f"  {idx:3d}  {name}")
+    print(f"{'='*60}")
+    while True:
+        choice = input("Enter region number (blank or -1 for all): ").strip()
+        if choice in ("", "-1"):
+            return None
+        try:
+            r = int(choice)
+        except ValueError:
+            print("Please enter a number.")
+            continue
+        if r not in REGION_NAMES:
+            print(f"Invalid number. Enter one of {sorted(REGION_NAMES)} or -1.")
+            continue
+        return r
 
 
 def browse_by_class(preprocessed_dir: str, metadata_csv: str, max_images: int):
@@ -137,31 +163,39 @@ def browse_by_class(preprocessed_dir: str, metadata_csv: str, max_images: int):
     if not paired_idxs:
         raise FileNotFoundError(f"No matching index pairs found in {landsat_dir} and {rgb_dir}")
 
-    class_to_idxs = _build_class_index(metadata_csv, paired_idxs)
+    region = _prompt_region()
+    class_to_idxs = _build_class_index(metadata_csv, paired_idxs, region)
     classes = sorted(class_to_idxs.keys())
 
     while True:
+        region_label = REGION_NAMES.get(region, "All regions") if region is not None else "All regions"
+        total = sum(len(v) for v in class_to_idxs.values())
         print(f"\n{'='*60}")
-        print(f"Found {len(paired_idxs)} paired images across {len(classes)} classes")
+        print(f"Region: {region_label} — {total} paired images across {len(classes)} classes")
         print(f"{'='*60}")
         for i, cls in enumerate(classes):
             print(f"  {i:3d}  {cls} ({len(class_to_idxs[cls])} images)")
         print(f"{'='*60}")
-        choice = input("Enter class number (or 'q' to quit): ").strip()
+        choice = input("Enter class number, 'r' to change region, or 'q' to quit: ").strip()
         if choice.lower() == "q":
             break
+        if choice.lower() == "r":
+            region = _prompt_region()
+            class_to_idxs = _build_class_index(metadata_csv, paired_idxs, region)
+            classes = sorted(class_to_idxs.keys())
+            continue
         try:
             cls_idx = int(choice)
             if not (0 <= cls_idx < len(classes)):
                 print(f"Invalid number. Enter 0–{len(classes) - 1}.")
                 continue
         except ValueError:
-            print("Please enter a number or 'q'.")
+            print("Please enter a number, 'r', or 'q'.")
             continue
 
         cls_name = classes[cls_idx]
         idxs = sorted(class_to_idxs[cls_name])
-        _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images, title_prefix=cls_name)
+        _display_pairs(landsat_by_idx, rgb_by_idx, idxs, max_images, title_prefix=f"{region_label} / {cls_name}")
 
 
 def display_images(preprocessed_dir: str, modality: str, max_images: int):
