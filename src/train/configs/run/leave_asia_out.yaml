@@ -16,6 +16,11 @@ experiments:
   densenet_lao:
     model: densenet_baseline
 
+  densenet_pe_freq_hr_lao:
+    model: densenet_baseline
+    overrides:
+      spatial: pe_freq_hr
+
   film_lao:
     model: densenet_film
 
