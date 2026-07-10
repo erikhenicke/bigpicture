@@ -24,14 +24,28 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import yaml
 from omegaconf import OmegaConf
+import re
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_RUNS = REPO_ROOT / "log" / "runs"
 EVAL_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "eval"
 RUN_CONFIG_DIR = REPO_ROOT / "src" / "train" / "configs" / "run"
 TRANSLATIONS_FILE = EVAL_CONFIG_DIR / "translations.yaml"
+
+# test/test-id-class-<ClassName>-task-acc
+ID_CLASS_RE = re.compile(r"^test/test-id-class-(.+)-task-acc$")
+# test/test-od-class-<ClassName>-task-acc
+OOD_CLASS_RE = re.compile(r"^test/test-od-class-(.+)-task-acc$")
+
+# test/test-id-region-africa-class-<ClassName>-task-acc
+ID_AFRICA_CLASS_RE = re.compile(r"^test/test-id-region-africa-class-(.+)-task-acc$")
+# test/test-od-region-africa-class-<ClassName>-task-acc
+OOD_AFRICA_CLASS_RE = re.compile(r"^test/test-od-region-africa-class-(.+)-task-acc$")
+
+
 
 
 def find_best_checkpoints(run_dir: Path) -> list[Path]:
@@ -250,7 +264,7 @@ def load_seed_test_metrics(seed_dir: Path) -> dict[str, float] | None:
     return None
 
 
-def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
+def load_run_metrics(run_dir: Path | None, compute_std: bool = False) -> dict[str, float]:
     """Mean of each test metric across all seeds of a run (empty if none found).
 
     Each seed is loaded via :func:`load_seed_test_metrics`, so per-seed values come
@@ -258,10 +272,12 @@ def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
 
     Args:
         run_dir (Path | None): Run's top-level log directory, or None.
+        compute_std (bool | None): Return mean and std.
 
     Returns:
-        dict[str, float]: Metric name -> mean value across seeds that have it;
-            empty dict if ``run_dir`` is None or no seed has any test metrics.
+        dict[str, any]: Metric name -> mean value across seeds that have it or
+            tuple of mean and std if std is computed; empty dict if ``run_dir`` 
+            is None or no seed has any test metrics.
     """
     if run_dir is None:
         return {}
@@ -272,6 +288,8 @@ def load_run_metrics(run_dir: Path | None) -> dict[str, float]:
             continue
         for k, v in seed_metrics.items():
             pooled.setdefault(k, []).append(v)
+    if compute_std:
+        return {k: (float(np.mean(vs)), float(np.std(vs))) for k, vs in pooled.items()}
     return {k: sum(vs) / len(vs) for k, vs in pooled.items()}
 
 
@@ -381,3 +399,46 @@ def format_experiment_name(
             parts.append(f"{label}$={val_str}$" if latex else f"{label}={val_str}")
 
     return ", ".join(parts)
+
+
+def class_accs(metrics: dict[str, float], split_class_re: re.Pattern) -> dict[str, float]:
+    """Per-class overall OOD top-1 accuracy keyed by FMoW class name.
+
+    Args:
+        metrics (dict[str, float]): Flat run metrics dict, keyed by metric
+            name.
+        split_class_re (re.Pattern): Pattern matching class metrics for a specific dataset split
+
+    Returns:
+        dict[str, float]: Mapping of FMoW class name to top-1 accuracy
+            (fraction in [0, 1]), extracted from every
+            ``test/test-od-class-<ClassName>-task-acc`` key in `metrics`.
+    """
+    out: dict[str, float] = {}
+    for k, v in metrics.items():
+        m = split_class_re.match(k)
+        if m:
+            out[m.group(1)] = v
+    return out
+
+
+def get_africa_class_acc(exp_key: str, class_key: str):
+    """Retrieve class OOD and ID test accuracy of africa.
+
+    Args:
+        exp_key (str): Experiment key, matched against directories named
+            ``train_<exp_key>-*``.
+
+        class_key (str): FMoW class key 
+
+    Returns:
+        dict[str, float]: Mapping of test split to class top-1 accuracy
+            (fraction in [0, 1]).
+    """
+
+    run_dir = find_run_dir(exp_key)
+    metrics = load_run_metrics(run_dir, compute_std=True)
+    return {
+        "test-id": class_accs(metrics, ID_AFRICA_CLASS_RE)[class_key],
+        "test-od": class_accs(metrics, OOD_AFRICA_CLASS_RE)[class_key],
+    }

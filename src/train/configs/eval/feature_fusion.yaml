@@ -106,6 +106,9 @@ groups:
       - film_om_bin_pe
       - film_om_gauss_pe
       - film_om_gauss_pe_freq_hr
+    additional_metrics: 
+      - test/test-od-lr-domain-acc
+
           
   - name: Spatial Encodings D3G 
     runs:
@@ -115,6 +118,8 @@ groups:
       - d3g_detach_hr_pe_freq_hr
       - d3g_detach_both_no_domain
       - d3g_detach_both_no_domain_pe_freq_hr
+    additional_metrics: 
+      - test/test-od-lr-domain-acc
   
   - name: DINOv3 Spatial Encodings 
     runs:

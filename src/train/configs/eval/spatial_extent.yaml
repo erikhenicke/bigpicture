@@ -31,6 +31,7 @@ primary_metrics:
   - test/test-od-task-ece
   - test/test-od-task-entropy-correct
   - test/test-od-task-entropy-incorrect
+  - test/test-od-lr-domain-acc
 
 # HR-only DenseNet baseline (no LR context), drawn as a horizontal reference
 # line with a shaded across-seed std band, just like in decision_plots.py.

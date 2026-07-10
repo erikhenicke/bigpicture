@@ -32,7 +32,7 @@ import torch
 import yaml
 from lightning import Trainer, seed_everything
 
-from train.run_experiment import make_data_loaders, make_model, has_device_tensor_cores
+from train.run_experiment import make_data_loaders, make_model
 from results.utils import find_best_checkpoints, load_hydra_config 
 
 

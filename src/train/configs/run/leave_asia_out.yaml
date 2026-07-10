@@ -2,7 +2,7 @@ slurm:
   partition: robolab
   cpus_per_task: 4
   mem_per_cpu: 8GB
-  nodelist: gaia4,gaia7
+  nodelist: gaia4,gaia5,gaia7
 
 global_overrides:
   data.frac: 1.0
@@ -44,3 +44,8 @@ experiments:
     overrides:
       model.detach_hr_for_consistency: true
       spatial: om_gauss_pe_freq_hr
+    
+  densenet_le_film_l_40_lao:
+    model: densenet_le_film
+    overrides:
+      model.lr_encoder.legendre_polys: 40

@@ -39,7 +39,6 @@ run/scope, driven by ``main``, the CLI entry point.
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -54,6 +53,7 @@ import yaml
 from results.utils import (
     EVAL_CONFIG_DIR,
     REPO_ROOT,
+    OOD_CLASS_RE,
     find_run_dir,
     format_experiment_name,
     load_run_configs,
@@ -61,9 +61,21 @@ from results.utils import (
     load_translations,
     parse_run_ref,
     resolve_experiments,
+    class_accs,
+    get_africa_class_acc
 )
 
 from models.utils import DOMAIN_NAMES, TASK_CLASSES
+
+CLASS_COMPARISON_RUNS = [
+    "densenet_baseline",
+    "densenet_baseline_pe_freq_hr",
+    "film_om_gauss_pe_freq",
+    "d3g_detach_hr_om_gauss_pe_freq_hr",
+    "densenet_le_film_l_40"
+]
+
+SINGLE_UNIT_RESIDENTIAL = "single-unit_residential"
 
 # FMoW class name -> integer class id (index in the canonical class list).
 CLASS_IDS = {name: i for i, name in enumerate(TASK_CLASSES)}
@@ -94,8 +106,19 @@ DEFAULT_METADATA = REPO_ROOT / "data" / "rgb_metadata_extended.csv"
 # matching the repo's ``figures/<run_name>/`` layout (see decision_plots.py).
 THESIS_IMAGES_DIR = Path.home() / "git" / "thesis" / "images"
 
-# test/test-od-class-<ClassName>-task-acc
-_OOD_CLASS_RE = re.compile(r"^test/test-od-class-(.+)-task-acc$")
+
+# --------------------------------------------------------------------------- #
+# Print class accuracies for thesis 
+# --------------------------------------------------------------------------- #
+def print_class_accs_thesis():
+    """Print class single-unit residentials in africa of best model settings
+    """
+    for run in CLASS_COMPARISON_RUNS:
+        accs = get_africa_class_acc(run, SINGLE_UNIT_RESIDENTIAL)
+        splits = accs.keys()
+        print(f"{run}: ")
+        for split in splits:
+            print(f"\t{split}: {accs[split][0]:.3} ({accs[split][1]:.3f})")
 
 
 # --------------------------------------------------------------------------- #
@@ -121,26 +144,6 @@ def worst_region(metrics: dict[str, float]) -> str | None:
     if not region_accs:
         return None
     return min(region_accs, key=region_accs.get)
-
-
-def ood_class_accs(metrics: dict[str, float]) -> dict[str, float]:
-    """Per-class overall OOD top-1 accuracy keyed by FMoW class name.
-
-    Args:
-        metrics (dict[str, float]): Flat run metrics dict, keyed by metric
-            name.
-
-    Returns:
-        dict[str, float]: Mapping of FMoW class name to top-1 accuracy
-            (fraction in [0, 1]), extracted from every
-            ``test/test-od-class-<ClassName>-task-acc`` key in `metrics`.
-    """
-    out: dict[str, float] = {}
-    for k, v in metrics.items():
-        m = _OOD_CLASS_RE.match(k)
-        if m:
-            out[m.group(1)] = v
-    return out
 
 
 def region_class_accs(metrics: dict[str, float], region: str) -> dict[str, float]:
@@ -1075,7 +1078,7 @@ def main() -> None:
     _, base_key = parse_run_ref(baseline_ref, run_name)
     base_dir = find_run_dir(base_key)
     base_metrics = load_run_metrics(base_dir)
-    base_ood = ood_class_accs(base_metrics)
+    base_ood = class_accs(base_metrics, OOD_CLASS_RE)
     base_name = format_experiment_name(baseline_ref, run_experiments, translations)
 
     if not base_ood:
@@ -1119,7 +1122,7 @@ def main() -> None:
         run_dir = find_run_dir(exp_key)
         run_metrics = load_run_metrics(run_dir)
         run_label = format_experiment_name(ref, run_experiments, translations)
-        run_ood = ood_class_accs(run_metrics)
+        run_ood = class_accs(run_metrics, OOD_CLASS_RE)
 
         if not run_ood:
             print(f"  skip {ref}: no per-class OOD metrics (need metrics_rerun.csv).")
