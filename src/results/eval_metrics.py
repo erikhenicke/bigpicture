@@ -283,7 +283,7 @@ def format_metric_name(
     return cleaned
 
 
-METRIC_CHUNK_SIZE = 5 
+METRIC_CHUNK_SIZE = 3 
 
 
 def _chunk_metrics(metric_cols: list[str], chunk_size: int) -> list[list[str]]:

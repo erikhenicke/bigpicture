@@ -12,24 +12,24 @@ summary_metrics:
 primary_metrics:
   - test/test-id-task-acc
   - test/test-id-top5-task-acc
-  - test/test-id-region-europe-task-acc
-  - test/test-id-region-asia-task-acc
-  - test/test-id-region-americas-task-acc
-  - test/test-id-region-africa-task-acc
-  - test/test-id-region-oceania-task-acc
-  - test/test-id-task-ece
-  - test/test-id-task-entropy-correct
-  - test/test-id-task-entropy-incorrect
+  # - test/test-id-region-europe-task-acc
+  # - test/test-id-region-asia-task-acc
+  # - test/test-id-region-americas-task-acc
+  # - test/test-id-region-africa-task-acc
+  # - test/test-id-region-oceania-task-acc
+  # - test/test-id-task-ece
+  # - test/test-id-task-entropy-correct
+  # - test/test-id-task-entropy-incorrect
   - test/test-od-task-acc
   - test/test-od-top5-task-acc 
-  - test/test-od-region-europe-task-acc
-  - test/test-od-region-asia-task-acc
-  - test/test-od-region-americas-task-acc
+  # - test/test-od-region-europe-task-acc
+  # - test/test-od-region-asia-task-acc
+  # - test/test-od-region-americas-task-acc
   - test/test-od-region-africa-task-acc
-  - test/test-od-region-oceania-task-acc
-  - test/test-od-task-ece
-  - test/test-od-task-entropy-correct
-  - test/test-od-task-entropy-incorrect
+  # - test/test-od-region-oceania-task-acc
+  # - test/test-od-task-ece
+  # - test/test-od-task-entropy-correct
+  # - test/test-od-task-entropy-incorrect
 
 
 # Per-class accuracy gain/loss plots (src/results/class_eval.py). Each comparison
@@ -146,3 +146,23 @@ groups:
       - film_om_gauss_pe_freq
       - d3g_detach_hr_om_gauss_pe_freq_hr
       - baselines@densenet_le_film_l_40
+    additional_metrics:
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+      # - test/test-id-region-africa-class-airport-task-acc
+      # - test/test-id-region-africa-class-runway-task-acc
+      # - test/test-id-region-africa-class-place_of_worship-task-acc
+      # - test/test-id-region-africa-class-single-unit_residential-task-acc
+      # - test/test-id-region-africa-class-crop_field-task-acc
+      # - test/test-id-region-africa-class-swimming_pool-task-acc
+      # - test/test-id-region-africa-class-multi-unit_residential-task-acc
+      # - test/test-od-region-africa-class-airport-task-acc
+      # - test/test-od-region-africa-class-runway-task-acc
+      # - test/test-od-region-africa-class-place_of_worship-task-acc
+      # - test/test-od-region-africa-class-single-unit_residential-task-acc
+      # - test/test-od-region-africa-class-crop_field-task-acc
+      # - test/test-od-region-africa-class-swimming_pool-task-acc
+      # - test/test-od-region-africa-class-multi-unit_residential-task-acc

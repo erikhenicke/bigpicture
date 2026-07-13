@@ -21,6 +21,13 @@ groups:
     runs:
       - densenet_baseline
       - densenet_baseline_no_pretrained
+    additional_metrics:
+      - test/test-od-region-europe-task-acc
+      - test/test-od-region-asia-task-acc
+      - test/test-od-region-americas-task-acc
+      - test/test-od-region-africa-task-acc
+      - test/test-od-region-oceania-task-acc
+ 
 
   - name: LR Domain
     runs:

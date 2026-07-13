@@ -442,3 +442,135 @@ def get_africa_class_acc(exp_key: str, class_key: str):
         "test-id": class_accs(metrics, ID_AFRICA_CLASS_RE)[class_key],
         "test-od": class_accs(metrics, OOD_AFRICA_CLASS_RE)[class_key],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Per-class fraction weighting (region / split from the extended metadata)
+# --------------------------------------------------------------------------- #
+# Region index -> name and the ID / OOD-Test timestamp windows, mirroring the
+# WILDS split reconstruction of statistics/average_class_extent.py, so a class's
+# fraction is taken from the exact region and split the models are evaluated on.
+METADATA_PATH = REPO_ROOT / "data" / "fmow_landsat" / "rgb_metadata_extended.csv"
+REGION_TO_IDX = {"asia": 0, "europe": 1, "africa": 2, "americas": 3, "oceania": 4}
+# ID period is [2002, 2013); OOD-Test is [2016, 2018).
+SPLIT_WINDOWS = {
+    "id_test": ("2002-01-01", "2013-01-01"),
+    "ood_test": ("2016-01-01", "2018-01-01"),
+}
+
+
+def region_split_class_fractions(
+    region: str, split: str, metadata_path: Path | None = None
+) -> tuple[dict[str, float], int]:
+    """Per-class sample fraction within one region and test split.
+
+    A WILDS test split is the raw ``test`` rows whose timestamp falls in the
+    split's window; only samples with a matched Landsat pair (a non-null
+    ``img_span_km``) are kept, i.e. exactly the samples the fusion models are
+    evaluated on, so the fractions match the evaluation denominators. Each
+    fraction is a class's count over the region's total for that split.
+
+    Args:
+        region (str): Region name, one of ``REGION_TO_IDX`` (case-insensitive).
+        split (str): ``"id_test"`` or ``"ood_test"`` (see ``SPLIT_WINDOWS``).
+        metadata_path (Path | None): Extended metadata CSV; defaults to
+            ``METADATA_PATH``.
+
+    Returns:
+        tuple[dict[str, float], int]: ``(fractions, n_total)`` -- class name ->
+            fraction of the region's ``split`` samples, and that sample count.
+    """
+    if split not in SPLIT_WINDOWS:
+        raise ValueError(f"split must be one of {list(SPLIT_WINDOWS)}, got {split!r}")
+    start, end = (pd.Timestamp(t, tz="UTC") for t in SPLIT_WINDOWS[split])
+    df = pd.read_csv(
+        metadata_path or METADATA_PATH,
+        usecols=["split", "category", "img_span_km", "timestamp", "region"],
+    )
+    ts = pd.to_datetime(df["timestamp"], utc=True, format="%Y-%m-%dT%H:%M:%SZ")
+    df = df[
+        (df["split"] == "test")
+        & (ts >= start)
+        & (ts < end)
+        & (df["region"] == REGION_TO_IDX[region.lower()])
+    ]
+    df = df.dropna(subset=["img_span_km"])
+    counts = df.groupby("category").size()
+    n_total = int(counts.sum())
+    return {str(c): int(n) / n_total for c, n in counts.items()}, n_total
+
+
+def region_class_accs(metrics: dict, region: str, ood: bool = True) -> dict:
+    """Per-class test accuracy within ``region`` for the ID or OOD split.
+
+    Args:
+        metrics (dict): Flat run metrics dict (see ``load_run_metrics``); values
+            may be plain floats or ``(mean, std)`` tuples.
+        region (str): Region name, matched case-insensitively against the
+            ``test/test-{id,od}-region-<region>-class-...`` keys.
+        ood (bool): Select the OOD (``od``) split when True, else the ID split.
+
+    Returns:
+        dict: FMoW class name -> accuracy value (same type as ``metrics`` holds).
+    """
+    prefix = f"test/test-{'od' if ood else 'id'}-region-{region.lower()}-class-"
+    suffix = "-task-acc"
+    return {
+        k[len(prefix):-len(suffix)]: v
+        for k, v in metrics.items()
+        if k.startswith(prefix) and k.endswith(suffix)
+    }
+
+
+def print_region_class_acc_weighted(
+    exp_key: str,
+    region: str = "Africa",
+    classes: list[str] | None = None,
+    metadata_path: Path | None = None,
+) -> dict[str, dict]:
+    """Print per-class ID and OOD test accuracy within ``region`` weighted by class fraction.
+
+    A class's weighted accuracy is ``acc_c * n_c / N`` (in percentage points) --
+    its contribution to the region's overall test accuracy, so the printed
+    values sum to that overall accuracy. Seed stds are scaled by the same
+    fraction. ID and OOD accuracies are weighted by the region's ID-test and
+    OOD-test class fractions respectively (see ``region_split_class_fractions``).
+
+    Args:
+        exp_key (str): Experiment key, resolved to its latest run via
+            ``find_run_dir``.
+        region (str): Region name (default ``"Africa"``, the WRA region).
+        classes (list[str] | None): Classes to print, in order (default: all
+            the run reports, sorted by name).
+        metadata_path (Path | None): Optional metadata CSV override.
+
+    Returns:
+        dict[str, dict]: Class name -> ``{"id": (mean_pp, std_pp), "od":
+            (mean_pp, std_pp)}`` weighted accuracies in percentage points.
+    """
+    metrics = load_run_metrics(find_run_dir(exp_key), compute_std=True)
+    id_frac, _ = region_split_class_fractions(region, "id_test", metadata_path)
+    od_frac, _ = region_split_class_fractions(region, "ood_test", metadata_path)
+    id_acc = region_class_accs(metrics, region, ood=False)
+    od_acc = region_class_accs(metrics, region, ood=True)
+
+    names = classes if classes is not None else sorted(set(od_acc) & set(od_frac))
+    print(f"{exp_key}  --  {region} weighted per-class test accuracy (pp)")
+    print(f"{'class':30s} {'ID w.acc':>15s} {'OOD w.acc':>15s}")
+    out: dict[str, dict] = {}
+    id_sum = od_sum = 0.0
+    for c in names:
+        entry: dict = {}
+        for tag, acc, frac in (("id", id_acc, id_frac), ("od", od_acc, od_frac)):
+            mean, std = acc[c] if isinstance(acc.get(c), tuple) else (acc.get(c, 0.0), 0.0)
+            f = frac.get(c, 0.0)
+            entry[tag] = (mean * f * 100.0, std * f * 100.0)
+        out[c] = entry
+        id_sum += entry["id"][0]
+        od_sum += entry["od"][0]
+        print(
+            f"{c:30s} {entry['id'][0]:8.2f} ({entry['id'][1]:5.2f}) "
+            f"{entry['od'][0]:8.2f} ({entry['od'][1]:5.2f})"
+        )
+    print(f"{'sum':30s} {id_sum:8.2f}          {od_sum:8.2f}")
+    return out

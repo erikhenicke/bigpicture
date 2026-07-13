@@ -5,10 +5,13 @@ Reads the hardcoded ``GROUP_NAMES`` groups from an eval YAML (default
 ``feature_fusion.yaml``), each shaped as ``[baseline, *fusion_runs]`` (the
 DenseNet-121 baseline followed by Concat/FiLM/D3G, with or without the domain
 loss -- see ``Fusion Comparison`` vs. ``Fusion Comparison with Domain``), and
-writes one figure per group, all sharing one y-axis range (computed across
-every group first, in ``main``, before any figure is drawn) so the two figures
-stay visually comparable side by side. For each of the five OOD test regions,
-draws one bar per fusion model showing its ``test-od-region-<r>-task-acc``
+writes one standalone figure per group, each scaled to its own y-axis range.
+(``YLIM_GROUPS`` lets sublists of groups share one range instead, computed
+across every group first in ``main`` before any figure is drawn, for cases
+where two figures are meant to sit side by side in the thesis -- unused by the
+current ``GROUP_NAMES``, which renders three independent figures.) For each of
+the five OOD test regions, draws one bar per fusion model showing its
+``test-od-region-<r>-task-acc``
 delta vs. the baseline (mean across seeds, in percentage points), with an
 error bar (seed std, propagated through the difference). Two extra, uncolored
 slots per region -- one on each side of the model bars -- show the baseline's
@@ -61,24 +64,15 @@ THESIS_IMAGES_DIR = Path.home() / "git" / "thesis" / "images"
 # Groups in the eval YAML to render, each shaped [baseline, *fusion_runs].
 GROUP_NAMES = ["Fusion Comparison", "Fusion Comparison with Domain", "Best Spatial Encodings"]
 
-# Per-group toggles for the two elements that would otherwise be redundant
-# once both figures sit side by side in the thesis: the no-domain plot keeps
-# the baseline-accuracy header but drops the region names (assumed shared with
-# its neighbor), and the with-domain plot does the reverse.
-GROUP_OPTIONS = {
-    "Fusion Comparison": {"show_baseline_header": True, "show_region_labels": True},
-    "Fusion Comparison with Domain": {"show_baseline_header": False, "show_region_labels": True},
-    "Best Spatial Encodings": {"show_baseline_header": True, "show_region_labels": True},
-}
-
 # A second layer of grouping on top of GROUP_NAMES: every group in the same
 # sublist shares one y-axis range (computed across just those members), so they
 # stay visually comparable side by side, while groups in different sublists are
-# each scaled to their own data. The two Fusion Comparison figures share a range;
-# Best Spatial Encodings stands alone. Any group missing here falls back to its
-# own extent.
+# each scaled to their own data. Every group currently stands alone as its own
+# figure in the thesis, so each gets its own extent; any group missing here
+# falls back to its own extent too.
 YLIM_GROUPS = [
-    ["Fusion Comparison", "Fusion Comparison with Domain"],
+    ["Fusion Comparison"],
+    ["Fusion Comparison with Domain"],
     ["Best Spatial Encodings"],
 ]
 
@@ -594,10 +588,7 @@ def main() -> None:
         return
 
     def shared_range(names: list[str]) -> tuple[float, float]:
-        bottoms, tops = zip(*(
-            group_extent(layouts[n], GROUP_OPTIONS.get(n, {}).get("show_baseline_header", True))
-            for n in names
-        ))
+        bottoms, tops = zip(*(group_extent(layouts[n], show_baseline_header=True) for n in names))
         return min(bottoms), max(tops)
 
     # Each YLIM_GROUPS sublist shares one y-range across just its members; any
@@ -616,11 +607,8 @@ def main() -> None:
     # Pass 2: draw every group's figure against its YLIM_GROUPS-shared range.
     for group_name, layout in layouts.items():
         print(f"=== {group_name} ===")
-        options = GROUP_OPTIONS.get(group_name, {})
-        render_group_figure(layout, run_name, figures_dir, ylim_by_group[group_name], **{
-            "show_baseline_header": options.get("show_baseline_header", True),
-            "show_region_labels": options.get("show_region_labels", True),
-        })
+        render_group_figure(layout, run_name, figures_dir, ylim_by_group[group_name],
+                            show_baseline_header=True, show_region_labels=True)
 
 
 if __name__ == "__main__":

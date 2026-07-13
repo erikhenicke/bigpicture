@@ -105,7 +105,48 @@ metrics:
   test/test-od-task-entropy-incorrect:
     plain: "OOD H^-"
     latex: 'OOD $\text{H}^-$'
-
+  test/test-od-region-africa-class-airport-task-acc:
+    plain: "OOD Airport"
+    latex: 'OOD Airport'
+  test/test-od-region-africa-class-runway-task-acc:
+    plain: "OOD Runway"
+    latex: 'OOD Runway'
+  test/test-od-region-africa-class-place_of_worship-task-acc:
+    plain: "OOD Place of Worship"
+    latex: 'OOD Place of Worship'
+  test/test-od-region-africa-class-single-unit_residential-task-acc:
+    plain: "OOD Single-Unit Residential"
+    latex: 'OOD Single-Unit Residential'
+  test/test-od-region-africa-class-crop_field-task-acc:
+    plain: "OOD Crop Field"
+    latex: 'OOD Crop Field'
+  test/test-od-region-africa-class-swimming_pool-task-acc:
+    plain: "OOD Swimming Pool"
+    latex: 'OOD Swimming Pool'
+  test/test-od-region-africa-class-multi-unit_residential-task-acc:
+    plain: "OOD Multi-Unit Residential"
+    latex: 'OOD Multi-Unit Residential'
+  test/test-id-region-africa-class-airport-task-acc:
+    plain: "ID Airport"
+    latex: 'ID Airport'
+  test/test-id-region-africa-class-runway-task-acc:
+    plain: "ID Runway"
+    latex: 'ID Runway'
+  test/test-id-region-africa-class-place_of_worship-task-acc:
+    plain: "ID Place of Worship"
+    latex: 'ID Place of Worship'
+  test/test-id-region-africa-class-single-unit_residential-task-acc:
+    plain: "ID Single-Unit Residential"
+    latex: 'ID Single-Unit Residential'
+  test/test-id-region-africa-class-crop_field-task-acc:
+    plain: "ID Crop Field"
+    latex: 'ID Crop Field'
+  test/test-id-region-africa-class-swimming_pool-task-acc:
+    plain: "ID Swimming Pool"
+    latex: 'ID Swimming Pool'
+  test/test-id-region-africa-class-multi-unit_residential-task-acc:
+    plain: "ID Multi-Unit Residential"
+    latex: 'ID Multi-Unit Residential'
 
 params:
   model.lr_domain_loss_coeff:

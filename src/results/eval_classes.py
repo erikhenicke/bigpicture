@@ -953,9 +953,9 @@ def emit_setting(
         # Drop the titles and enlarge/space the class labels, thicken the bars,
         # and narrow the bar column so the labels breathe (see plot_bars knobs).
         thesis_style = dict(
-            show_title=False, ylabel_size=14, xlabel_size=16, xtick_size=14,
+            show_title=False, ylabel_size=12, xlabel_size=16, xtick_size=14,
             label_bold=False, show_class_id=False,
-            row_height=0.45, bar_height=0.85, fig_width=6.0, fixed_rows=FILTERED_ROWS,
+            row_height=0.4, bar_height=0.75, fig_width=6.0, fixed_rows=FILTERED_ROWS,
         )
 
         def _weighted_plot(rows, subtitle, out_name, thesis=False):
