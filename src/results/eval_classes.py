@@ -62,7 +62,7 @@ from results.utils import (
     parse_run_ref,
     resolve_experiments,
     class_accs,
-    get_africa_class_acc
+    get_class_acc
 )
 
 from models.utils import DOMAIN_NAMES, TASK_CLASSES
@@ -114,7 +114,7 @@ def print_class_accs_thesis():
     """Print class single-unit residentials in africa of best model settings
     """
     for run in CLASS_COMPARISON_RUNS:
-        accs = get_africa_class_acc(run, SINGLE_UNIT_RESIDENTIAL)
+        accs = get_class_acc(run, SINGLE_UNIT_RESIDENTIAL, "africa")
         splits = accs.keys()
         print(f"{run}: ")
         for split in splits:
@@ -199,8 +199,8 @@ def load_test_class_counts(
         print(f"Warning: metadata not found at {metadata_path}; skipping weighted plots.", file=sys.stderr)
         return {}, {}
 
-    df = pd.read_csv(metadata_path, usecols=["split", "region", "category"])
-    test = df[df["split"] == "test"]
+    df = pd.read_csv(metadata_path, usecols=["split", "region", "category", "year"])
+    test = df[(df["split"] == "test") & (df["year"] >= 14)]
     overall = {str(k): int(v) for k, v in test["category"].value_counts().items()}
     per_region: dict[str, dict[str, int]] = {}
     for rid, name in enumerate(DOMAIN_NAMES):
@@ -955,7 +955,7 @@ def emit_setting(
         thesis_style = dict(
             show_title=False, ylabel_size=12, xlabel_size=16, xtick_size=14,
             label_bold=False, show_class_id=False,
-            row_height=0.4, bar_height=0.75, fig_width=6.0, fixed_rows=FILTERED_ROWS,
+            row_height=0.35, bar_height=0.75, fig_width=6.0, fixed_rows=FILTERED_ROWS,
         )
 
         def _weighted_plot(rows, subtitle, out_name, thesis=False):

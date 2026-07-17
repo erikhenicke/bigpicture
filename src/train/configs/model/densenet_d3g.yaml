@@ -24,8 +24,9 @@ model:
   model:
     _target_: models.components.fusion_models.D3GModel
 
-  lr_domain_loss_coeff: 0.1176
-  consistency_loss_coeff: 0.2941
+  # Loss term coefficients sum up to 1.7 in [Latent Domain Modeling Improves Robustness to Geographic Shifts]
+  lr_domain_loss_coeff: 0.1176  # 0.2 / 1.7
+  consistency_loss_coeff: 0.2941  # 0.5 / 1.7
   learnable_relation_coeff: 0.8
   pred_domain_for_d3g: false
   domain_optimizer_lr_factor: 0.1

@@ -40,13 +40,16 @@ ID_CLASS_RE = re.compile(r"^test/test-id-class-(.+)-task-acc$")
 # test/test-od-class-<ClassName>-task-acc
 OOD_CLASS_RE = re.compile(r"^test/test-od-class-(.+)-task-acc$")
 
-# test/test-id-region-africa-class-<ClassName>-task-acc
-ID_AFRICA_CLASS_RE = re.compile(r"^test/test-id-region-africa-class-(.+)-task-acc$")
-# test/test-od-region-africa-class-<ClassName>-task-acc
-OOD_AFRICA_CLASS_RE = re.compile(r"^test/test-od-region-africa-class-(.+)-task-acc$")
 
+REGIONS = ["asia", "europe", "africa", "americas", "oceania"]
 
+def _compile_class_pattern(split: str, region: str) -> re.Pattern:
+    return re.compile(f"^test/test-{split}-region-{region}-class-(.+)-task-acc$")
 
+CLASS_RE = {
+    split: {region: _compile_class_pattern(split, region) for region in REGIONS}
+    for split in ["id", "od"]
+}
 
 def find_best_checkpoints(run_dir: Path) -> list[Path]:
     """Find the best checkpoint for each seed run under ``run_dir/checkpoints``.
@@ -422,14 +425,16 @@ def class_accs(metrics: dict[str, float], split_class_re: re.Pattern) -> dict[st
     return out
 
 
-def get_africa_class_acc(exp_key: str, class_key: str):
-    """Retrieve class OOD and ID test accuracy of africa.
+def get_class_acc(exp_key: str, class_key: str, region: str):
+    """Retrieve class OOD and ID test accuracy of a region.
 
     Args:
         exp_key (str): Experiment key, matched against directories named
             ``train_<exp_key>-*``.
 
         class_key (str): FMoW class key 
+
+        region (str): FMoW region
 
     Returns:
         dict[str, float]: Mapping of test split to class top-1 accuracy
@@ -439,8 +444,8 @@ def get_africa_class_acc(exp_key: str, class_key: str):
     run_dir = find_run_dir(exp_key)
     metrics = load_run_metrics(run_dir, compute_std=True)
     return {
-        "test-id": class_accs(metrics, ID_AFRICA_CLASS_RE)[class_key],
-        "test-od": class_accs(metrics, OOD_AFRICA_CLASS_RE)[class_key],
+        "test-id": class_accs(metrics, CLASS_RE["id"][region])[class_key],
+        "test-od": class_accs(metrics, CLASS_RE["od"][region])[class_key],
     }
 
 
