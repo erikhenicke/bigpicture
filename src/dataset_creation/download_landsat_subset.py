@@ -1,5 +1,5 @@
 """
-download_landsat8_subset.py
+download_landsat_subset.py
 
 Downloads a random subset (1,000 samples) of Landsat8 satellite imagery from Google
 Earth Engine for FMoW WILDS samples (train/val/test splits), using coordinates and

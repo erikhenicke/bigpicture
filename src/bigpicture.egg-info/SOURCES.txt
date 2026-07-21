@@ -9,8 +9,8 @@ src/bigpicture.egg-info/top_level.txt
 src/dataset/__init__.py
 src/dataset/fmow_multiscale_dataset.py
 src/dataset_creation/bounding_box.py
-src/dataset_creation/download_landsat8.py
-src/dataset_creation/download_landsat8_subset.py
+src/dataset_creation/download_landsat.py
+src/dataset_creation/download_landsat_subset.py
 src/dataset_creation/download_quality_check.py
 src/dataset_creation/metadata_extension.py
 src/dataset_creation/save_transformed_images.py

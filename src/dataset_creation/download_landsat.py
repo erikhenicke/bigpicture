@@ -1,5 +1,5 @@
 """
-download_landsat8.py
+download_landsat.py
 
 Downloads Landsat imagery (Landsat 8, falling back to Landsat 5/7) from
 Google Earth Engine for each FMoW sample in the WILDS [train, val, test]
