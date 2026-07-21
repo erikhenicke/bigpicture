@@ -5,7 +5,7 @@ defaults:
   - optim: adamw_plateau
   - trainer: default
   - wandb: fmow
-  - model: deit_both
+  - model: densenet_baseline 
 
 num_task_labels: 62
 domain_index: 0

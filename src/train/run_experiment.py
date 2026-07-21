@@ -4,7 +4,7 @@ Builds datasets/dataloaders and a model from a Hydra config (composed from
 `configs/setup.yaml` and its defaults), trains it with a Lightning
 `Trainer` (or evaluates only, for parameter-free frozen decision-fusion
 models), logs to Weights & Biases and a CSV logger, and repeats the process
-for two fixed reruns (`run_idx` 1 and 2), reporting each run's key test
+for three fixed reruns (`run_idx` 0, 1, and 2), reporting each run's key test
 metric.
 
 Functions:

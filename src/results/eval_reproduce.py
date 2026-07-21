@@ -536,9 +536,6 @@ def main() -> None:
     for cp in checkpoints:
         print(f"  {cp.name}")
 
-    # if has_device_tensor_cores():
-    #     torch.set_float32_matmul_precision("medium")
-
     # Absolute deviations pooled across all seeds, grouped by metric category.
     category_diffs: dict[str, list[float]] = {c: [] for c in CATEGORIES}
 
