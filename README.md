@@ -11,8 +11,6 @@ Supervisors: Prof. Denzler, M.Sc. Moien Rangzan and M.Sc. Ihab Asaad
 
 In this thesis we study whether wide-extent, low-resolution satellite context improves land-use classification under geographic distribution shift through the FMoW-WILDS dataset. We therefore pair each high-resolution (HR) image with a low-resolution (LR) Landsat image that covers $15 \times 15$ km around the sample's location. Our models fuse both inputs, and we evaluate them on in-distribution (ID) and out-of-distribution (OOD) test data.
 
-todo: Regions follow the WILDS index: 0 Asia, 1 Europe, 2 Africa, 3 Americas, 4 Oceania, 5 Other.
-
 ## 2. Repository map
 
 
